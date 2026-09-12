@@ -1065,11 +1065,14 @@ internal class NativeBridge(
 
           const previousScrollSync = window.__DSH_MOBILE_SCROLL_SYNC__;
           if (previousScrollSync && typeof previousScrollSync.dispose === 'function') previousScrollSync.dispose();
-          let lastScrollY = Math.max(0, (document.scrollingElement || document.documentElement).scrollTop || 0);
+          const rootScroller = document.scrollingElement || document.documentElement;
+          const scrollPositions = new WeakMap();
+          scrollPositions.set(rootScroller, Math.max(0, rootScroller.scrollTop || 0));
           let lastScrollAt = 0;
-          const onPageScroll = () => {
+          const onPageScroll = event => {
             const now = Date.now(); if (now - lastScrollAt < 120) return; lastScrollAt = now;
-            const scroller = document.scrollingElement || document.documentElement; const y = Math.max(0, scroller.scrollTop || 0); const delta = y - lastScrollY; lastScrollY = y;
+            const scroller = event.target instanceof Element ? event.target : rootScroller;
+            const y = Math.max(0, scroller.scrollTop || 0); const previous = scrollPositions.get(scroller) || 0; const delta = y - previous; scrollPositions.set(scroller, y);
             if (delta > 4) postEvent({ event: 'page.scroll', direction: 'down' }); else if (delta < -4) postEvent({ event: 'page.scroll', direction: 'up' });
           };
           document.addEventListener('scroll', onPageScroll, { passive: true, capture: true });

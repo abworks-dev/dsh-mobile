@@ -174,6 +174,9 @@ async function checkAndroid() {
   for (const marker of ['notification.notify', 'NotificationChannel', 'notification_channel_tasks', 'ic_task_notification', 'VISIBILITY_PRIVATE']) {
     if (!nativeBridge.includes(marker)) fail(`Android task reminders are missing ${marker}`)
   }
+  for (const marker of ['event.target instanceof Element', 'scrollPositions.get(scroller)', "event: 'page.scroll'"]) {
+    if (!nativeBridge.includes(marker)) fail(`Android floating toolbar scroll tracking is missing ${marker}`)
+  }
   for (const marker of ['POST_NOTIFICATIONS', 'TASK_NOTIFICATION_PERMISSION_REQUEST', 'ACTION_APP_NOTIFICATION_SETTINGS']) {
     if (!mainActivity.includes(marker)) fail(`Android task-reminder permission UI is missing ${marker}`)
   }

@@ -4,12 +4,9 @@ Notable changes to DSH Mobile are recorded here. GitHub Releases remain the sour
 
 ## Unreleased
 
+- Follow the DSH conversation's actual nested scroll container when showing or hiding the Android toolbar, keeping task-notification settings reachable on current DSH Web layouts.
 - Add Android task-completion and pending-input reminders through authenticated Host events and the exact-origin native bridge; notification permission is enabled explicitly from the foreground app menu, lock-screen text stays generic, and each completed turn keeps a separate reminder (thanks @qzyqmzn for PR #75).
 - Show and re-copy remote pairing links without invalidating the QR code's active one-time pairing window (thanks @qzyqmzn for PR #75).
-
-
-## Unreleased
-
 - Detect plugin-market installations that have not completed LAN setup, prevent the loopback-only `127.0.0.1` fallback from being presented as phone access, and provide a localized in-panel network picker that creates private TLS material and LAN-only Windows firewall rules after explicit confirmation. The configured gateway starts after one DSH restart (thanks @cangming99 for #72).
 
 ## 0.3.16 - 2026-09-12
