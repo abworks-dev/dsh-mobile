@@ -12,6 +12,7 @@ import {
   diagnosticOverallForChecks,
   diagnosticServerCopy,
   DIAGNOSTIC_REASON_MESSAGES,
+  LOCALIZED_DIAGNOSTIC_COPY,
   extensionAssetUrl,
   extensionGenerationHeaders,
   extensionRouteUrl,
@@ -145,6 +146,10 @@ describe('mobile-control localization', () => {
     const englishReasons = Object.keys(DIAGNOSTIC_REASON_MESSAGES.en).sort()
     expect(Object.keys(DIAGNOSTIC_REASON_MESSAGES.it).sort()).toEqual(englishReasons)
     expect(Object.keys(DIAGNOSTIC_REASON_MESSAGES.zh).sort()).toEqual(englishReasons)
+    const englishReportKeys = Object.keys(LOCALIZED_DIAGNOSTIC_COPY.en).sort()
+    expect(Object.keys(LOCALIZED_DIAGNOSTIC_COPY.it).sort()).toEqual(englishReportKeys)
+    expect(Object.keys(LOCALIZED_DIAGNOSTIC_COPY.zh).sort()).toEqual(englishReportKeys)
+    expect(LOCALIZED_DIAGNOSTIC_COPY.zh.networkAction).toContain('dsh-mobile setup')
   })
 
   it('creates the restricted FRP VPS template entirely in the loopback client', () => {
@@ -179,6 +184,16 @@ describe('mobile-control localization', () => {
     expect(source).toContain('diagnosticsChecks, wsPathsSection, diagnosticsDetails')
     expect(source).toContain("if (view === 'diagnostics') {")
     expect(source).toContain('wsPathsSeenAttempts = wsBlockedTotal(wsPathsBlocked)')
+  })
+
+  it('registers the native-only computer switch in DSH General settings', () => {
+    const source = readFileSync(new URL('../src/client.ts', import.meta.url), 'utf8')
+    expect(source).toContain("settings.general.item")
+    expect(source).toContain("dsh-mobile-switch-computer")
+    expect(source).toContain("mobile.switch-computer")
+    expect(source).toContain("capabilities.includes('mobile.switch-computer')")
+    expect(source).toContain("dsh-mobile-native-ready")
+    expect(source).toContain("if (!loopback) {")
   })
 
   it('remounts plugin-owned UI only when the DSH document language changes', () => {

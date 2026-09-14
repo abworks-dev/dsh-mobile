@@ -6,10 +6,12 @@
 export { AccessController, AccessError, BoundedRateLimiter } from './access.js'
 export type {
   AccessControllerOptions,
+  DeviceProbeResult,
   DeviceSummary,
   PairingResult,
   RenewalResult,
   SessionAuthorization,
+  SessionEndReason,
 } from './access.js'
 export { Config, parseControlFile, parseGatewayConfig } from './config.js'
 export type {

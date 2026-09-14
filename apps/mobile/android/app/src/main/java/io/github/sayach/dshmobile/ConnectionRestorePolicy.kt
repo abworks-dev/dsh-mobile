@@ -11,6 +11,17 @@ internal enum class AccessMode {
     }
 }
 
+/** App launch destination; direct DSH keeps the existing single-device flow. */
+internal enum class LaunchBehavior {
+    DIRECT_DSH,
+    DEVICE_LIST,
+    ;
+
+    companion object {
+        fun parse(value: String?): LaunchBehavior? = entries.firstOrNull { it.name == value }
+    }
+}
+
 /** A persisted connection that can renew its device session without pairing again. */
 internal data class ConnectionRestoreTarget(
     val mode: AccessMode,
@@ -26,6 +37,28 @@ internal enum class RestoreFailureDisposition {
 
 /** Selects valid cold-start restore targets without depending on Android lifecycle state. */
 internal object ConnectionRestorePolicy {
+    /** Select the saved or most recently used device for direct startup. */
+    fun selectStartupDevice(
+        devices: List<PairedDeviceRecord>,
+        savedKey: String?,
+        preferredMode: AccessMode?,
+        now: Long,
+    ): PairedDeviceRecord? {
+        val usable = devices.filter {
+            it.status != PairedDeviceStatus.REVOKED
+                && it.status != PairedDeviceStatus.EXPIRED
+                && it.status != PairedDeviceStatus.ADDRESS_CHANGED
+                && it.expiresAt > now
+        }
+        return usable.firstOrNull { it.key == savedKey }
+            ?: usable.filter { it.lastConnectedAt != null }.maxWithOrNull(
+                compareBy<PairedDeviceRecord> { it.lastConnectedAt ?: Long.MIN_VALUE }
+                    .thenBy { it.key },
+            )
+            ?: preferredMode?.let { mode -> usable.firstOrNull { it.mode == mode } }
+            ?: usable.firstOrNull()
+    }
+
     /** Send a persisted bearer credential only to the exact remote origin that previously received it. */
     fun shouldRenewBeforePairing(
         mode: AccessMode,
@@ -38,7 +71,11 @@ internal object ConnectionRestorePolicy {
         && credential.instanceId == instanceId && candidateOrigin == savedOrigin
 
     fun mayPairAfterRenewFailure(failure: Throwable): Boolean =
-        (failure as? NativeAuthFailure)?.kind == NativeAuthFailureKind.PAIRING_EXPIRED
+        (failure as? NativeAuthFailure)?.kind in setOf(
+            NativeAuthFailureKind.PAIRING_EXPIRED,
+            NativeAuthFailureKind.DEVICE_REVOKED,
+            NativeAuthFailureKind.DEVICE_EXPIRED,
+        )
 
     fun targets(
         preferredMode: AccessMode?,

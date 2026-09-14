@@ -52,6 +52,8 @@ describe('device and Session state', () => {
   it('expires Sessions, logs out one Session, and revokes every Session for a device', async () => {
     let current = 5_000
     const access = controller(new MemoryDeviceStore(), () => current, { sessionTtlMs: 1_000 })
+    const ended: string[] = []
+    access.onSessionEnded((_authorization, reason) => { ended.push(reason) })
     await access.initialize()
     const opened = await access.openPairing()
     const paired = await access.pair('source', opened.token)
@@ -66,8 +68,41 @@ describe('device and Session state', () => {
     current += 1
     const again = await access.renew(paired.deviceToken)
     expect(await access.revokeDevice(paired.deviceId)).toBe(true)
+    expect(ended).toContain('revoked')
     expect(() => access.authorizeSession(again.sessionToken)).toThrowError(AccessError)
-    await expect(access.renew(paired.deviceToken)).rejects.toMatchObject({ status: 401 })
+    await expect(access.renew(paired.deviceToken)).rejects.toMatchObject({ status: 401, code: 'device_revoked' })
+  })
+
+  it('distinguishes an expired device from an explicitly revoked device', async () => {
+    let current = 20_000
+    const access = controller(new MemoryDeviceStore(), () => current, { deviceTtlMs: 1_000 })
+    await access.initialize()
+    const firstWindow = await access.openPairing()
+    const first = await access.pair('source-a', firstWindow.token)
+    current = 21_001
+    await expect(access.renew(first.deviceToken)).rejects.toMatchObject({ status: 401, code: 'device_expired' })
+
+    current = 30_000
+    const secondWindow = await access.openPairing()
+    const second = await access.pair('source-b', secondWindow.token)
+    await access.revokeDevice(second.deviceId)
+    await expect(access.renew(second.deviceToken)).rejects.toMatchObject({ status: 401, code: 'device_revoked' })
+  })
+
+  it('probes a device without creating a short-lived Session', async () => {
+    let current = 25_000
+    const access = controller(new MemoryDeviceStore(), () => current)
+    await access.initialize()
+    const opened = await access.openPairing()
+    const paired = await access.pair('source', opened.token)
+    const before = access.metrics().sessions
+
+    const result = await access.probe(paired.deviceToken)
+
+    expect(result).toMatchObject({ deviceId: paired.deviceId, deviceExpiresAt: paired.deviceExpiresAt })
+    expect(access.metrics().sessions).toBe(before)
+    await access.revokeDevice(paired.deviceId)
+    await expect(access.probe(paired.deviceToken)).rejects.toMatchObject({ status: 401, code: 'device_revoked' })
   })
 
   it('caps a renewed Session at the persistent device expiry', async () => {

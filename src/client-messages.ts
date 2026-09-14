@@ -133,8 +133,38 @@ export const LOCALIZED_DIAGNOSTIC_COPY = {
     phone: 'Il computer non può stabilire se il router isola il telefono.', phoneAction: 'Verifica che telefono e computer usino la stessa rete, poi disattiva rete ospiti o isolamento AP.',
     reportTitle: 'Report diagnostico DSH Mobile', generated: 'Generato',
   },
-  zh: { reportTitle: 'DSH Mobile 诊断报告', generated: '生成时间' },
-} as const
+  zh: {
+    versions: '已显示插件、DSH 和 Android App 最低版本。',
+    networkOk: '已配置的局域网网卡可用。', networkError: '已保存的局域网网卡不可用。', networkInfo: '当前使用固定局域网配置。', networkAction: '重新运行 dsh-mobile setup。',
+    lanOk: '局域网网关正在监听，配对入口可用。', lanInfo: '局域网访问当前未开启。', lanAction: '需要手机直连时开启局域网访问。',
+    firewallOk: '局域网 TCP 与发现防火墙规则已启用。', firewallWarning: '未找到完整的局域网防火墙规则。', firewallInfo: '系统未允许插件读取防火墙状态。', firewallAction: '以管理员身份运行 dsh-mobile setup 并检查防火墙规则。',
+    remoteOk: '远程公网地址已通过可达性检查。', remoteWarning: '远程通道需要处理或仍在连接。', remoteError: '远程连接当前不可达。', remoteInfo: '远程访问当前未开启。', remoteAction: '返回远程访问，按提供方提示操作并重新连接。',
+    phone: '电脑无法判断路由器是否隔离了手机。', phoneAction: '确认手机与电脑使用同一网络，并关闭访客网络或 AP 隔离。',
+    reportTitle: 'DSH Mobile 诊断报告', generated: '生成时间',
+  },
+} satisfies Record<MobileControlLocale, {
+  versions: string
+  networkOk: string
+  networkError: string
+  networkInfo: string
+  networkAction: string
+  lanOk: string
+  lanInfo: string
+  lanAction: string
+  firewallOk: string
+  firewallWarning: string
+  firewallInfo: string
+  firewallAction: string
+  remoteOk: string
+  remoteWarning: string
+  remoteError: string
+  remoteInfo: string
+  remoteAction: string
+  phone: string
+  phoneAction: string
+  reportTitle: string
+  generated: string
+}>
 
 export const DIAGNOSTIC_REASON_MESSAGES = {
   en: {

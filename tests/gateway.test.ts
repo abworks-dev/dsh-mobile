@@ -614,6 +614,33 @@ describe('HTTP gateway', () => {
     expect(stock.body).toContain('/plugins/layout.js')
   })
 
+  it('localizes browser pairing and reauthentication pages from Accept-Language', async () => {
+    const inner = await upstream()
+    const instance = await gateway(inner.port)
+    await instance.access.openPairing()
+    const base = browserHeaders(instance)
+
+    const chinesePair = await request(instance.address().port, '/mobile-access/pair', {
+      headers: { ...base, accept: 'text/html', 'accept-language': 'zh-CN,zh;q=0.9' },
+    })
+    expect(chinesePair.status).toBe(200)
+    expect(chinesePair.body).toContain('<html lang="zh-CN">')
+    expect(chinesePair.body).toContain('配对码')
+    expect(chinesePair.headers.vary).toBe('Accept-Language')
+
+    const italianScript = await request(instance.address().port, '/mobile-access/pair.js', {
+      headers: { ...base, accept: 'text/javascript', 'accept-language': 'it-IT' },
+    })
+    expect(italianScript.status).toBe(200)
+    expect(italianScript.body).toContain('Abbinamento non riuscito')
+
+    const englishLogin = await request(instance.address().port, '/mobile-access/login', {
+      headers: { ...base, accept: 'text/html', 'accept-language': 'fr-FR' },
+    })
+    expect(englishLogin.status).toBe(200)
+    expect(englishLogin.body).toContain('Reconnect this device')
+  })
+
   it('exposes the alpha.2 trusted HTTP carrier only on an authenticated dedicated page', async () => {
     const inner = await upstream('remote-settings')
     const instance = await gateway(inner.port)
@@ -946,10 +973,27 @@ describe('HTTP gateway', () => {
     })
     expect(paired.status).toBe(201)
     expect(paired.headers['set-cookie']).toBeUndefined()
-    const credential = JSON.parse(paired.body) as { instanceId: string; deviceToken: string; sessionToken: string }
+    const credential = JSON.parse(paired.body) as { instanceId: string; deviceId: string; deviceToken: string; sessionToken: string }
     expect(credential.instanceId).toBe(instanceId)
     expect(credential.deviceToken).toMatch(/^[\w-]{43}$/u)
     expect(credential.sessionToken).toMatch(/^[\w-]{43}$/u)
+
+    const sessionsBeforeProbe = instance.access.metrics().sessions
+    const probe = await request(instance.address().port, '/mobile-access/auth/native-probe', {
+      method: 'POST',
+      headers: { ...browserHeaders(instance), 'content-type': 'application/json' },
+      body: JSON.stringify({ deviceToken: credential.deviceToken }),
+    })
+    expect(probe.status).toBe(200)
+    expect(JSON.parse(probe.body)).toEqual({ instanceId, deviceId: expect.any(String), deviceExpiresAt: expect.any(Number) })
+    expect(instance.access.metrics().sessions).toBe(sessionsBeforeProbe)
+    const unknownProbe = await request(instance.address().port, '/mobile-access/auth/native-probe', {
+      method: 'POST',
+      headers: { ...browserHeaders(instance), 'content-type': 'application/json' },
+      body: JSON.stringify({ deviceToken: 'Z'.repeat(43) }),
+    })
+    expect(unknownProbe.status).toBe(401)
+    expect(JSON.parse(unknownProbe.body)).toEqual({ error: 'authentication_failed' })
 
     const renewed = await request(instance.address().port, '/mobile-access/auth/native-renew', {
       method: 'POST',
@@ -958,6 +1002,14 @@ describe('HTTP gateway', () => {
     })
     expect(renewed.status).toBe(200)
     expect(JSON.parse(renewed.body)).toMatchObject({ instanceId, deviceId: expect.any(String) })
+    expect(await instance.access.revokeDevice(credential.deviceId)).toBe(true)
+    const revokedProbe = await request(instance.address().port, '/mobile-access/auth/native-probe', {
+      method: 'POST',
+      headers: { ...browserHeaders(instance), 'content-type': 'application/json' },
+      body: JSON.stringify({ deviceToken: credential.deviceToken }),
+    })
+    expect(revokedProbe.status).toBe(401)
+    expect(JSON.parse(revokedProbe.body)).toEqual({ error: 'device_revoked' })
   })
 
   it('keeps discovery metadata-only and offers the CA on a separate endpoint', async () => {

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   fireTaskNotifyEvent,
   hasPendingInputQuestion,
+  isDeviceRevokedPayload,
   observeTaskActivity,
   parseTaskNotifyPayload,
   pendingInputQuestionKey,
@@ -215,6 +216,12 @@ describe('task completion tracker', () => {
     expect(parseTaskNotifyPayload('{"sessionId":42}')).toBeUndefined()
     expect(parseTaskNotifyPayload(null)).toBeUndefined()
     expect(parseTaskNotifyPayload(['s-1'])).toBeUndefined()
+  })
+
+  it('accepts only the authenticated device-revoked event marker', () => {
+    expect(isDeviceRevokedPayload('{"reason":"device_revoked"}')).toBe(true)
+    expect(isDeviceRevokedPayload({ reason: 'device_expired' })).toBe(false)
+    expect(isDeviceRevokedPayload('not-json')).toBe(false)
   })
 
   it('stays silent without a native bridge', () => {

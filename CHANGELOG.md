@@ -4,11 +4,22 @@ Notable changes to DSH Mobile are recorded here. GitHub Releases remain the sour
 
 ## Unreleased
 
+Future changes will be recorded here.
+
+## 0.4.0 - 2026-09-14
+
+- Add multi-device management to the Android app: migrate existing LAN and remote credentials, show each paired computer with its Origin and HTTPS reachability state, connect the most recently used valid device on direct startup, and provide list, rename, re-pair, delete, and launch-behavior controls.
+- Complete plugin-side localization for Chinese, English, and Italian, including diagnostic report copy, browser pairing pages, and reauthentication guidance selected from `Accept-Language`; Android resources remain key-complete across all three supported locales.
+- Use a bounded session-free native probe for list reachability checks, with a renewal fallback for older plugins so status refreshes cannot evict an active DSH session.
+- Preserve a local row after computer-side revocation, stop automatic retries for revoked credentials, and expose a short-lived undo action for local deletion without restoring a computer-side authorization.
 - Follow the DSH conversation's actual nested scroll container when showing or hiding the Android toolbar, keeping task-notification settings reachable on current DSH Web layouts.
 - Let cpolar choose its default route instead of forcing `cn`; explicit region settings remain available for advanced deployments.
 - Add Android task-completion and pending-input reminders through authenticated Host events and the exact-origin native bridge; notification permission is enabled explicitly from the foreground app menu, lock-screen text stays generic, and each completed turn keeps a separate reminder (thanks @qzyqmzn for PR #75).
 - Show and re-copy remote pairing links without invalidating the QR code's active one-time pairing window (thanks @qzyqmzn for PR #75).
 - Detect plugin-market installations that have not completed LAN setup, prevent the loopback-only `127.0.0.1` fallback from being presented as phone access, and provide a localized in-panel network picker that creates private TLS material and LAN-only Windows firewall rules after explicit confirmation. The configured gateway starts after one DSH restart (thanks @cangming99 for #72).
+- Keep native DSH file selection in the composer Add group, add only camera capture there, and reuse the native menu-row styling for the mobile action.
+- Add a native-app-only Switch computer action to the WebView's DSH General settings page, keeping the Android device-list settings and DSH content toolbar focused on their own controls.
+- Hide the Android shell toolbar above the WebView so DSH occupies the full safe viewport; the system status-bar color continues to follow the page background.
 
 ## 0.3.16 - 2026-09-12
 

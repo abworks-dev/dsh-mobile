@@ -12,6 +12,39 @@ class ConnectionRestorePolicyTest {
     private val remoteCredential = credential("b", now + 10_000)
 
     @Test
+    fun directStartupUsesTheMostRecentlyConnectedDeviceWhenNoKeyIsSaved() {
+        val devices = listOf(
+            pairedDevice("a", AccessMode.LAN, lastConnectedAt = now + 1_000),
+            pairedDevice("b", AccessMode.REMOTE, lastConnectedAt = now + 2_000),
+        )
+
+        val selected = ConnectionRestorePolicy.selectStartupDevice(
+            devices = devices,
+            savedKey = null,
+            preferredMode = AccessMode.LAN,
+            now = now,
+        )
+
+        assertEquals("remote:" + "b".repeat(64), selected?.key)
+    }
+
+    @Test
+    fun directStartupPrefersSavedDeviceAndSkipsRevokedOrChangedRows() {
+        val revoked = pairedDevice("a", AccessMode.LAN, lastConnectedAt = now + 3_000, status = PairedDeviceStatus.REVOKED)
+        val changed = pairedDevice("b", AccessMode.REMOTE, lastConnectedAt = now + 2_000, status = PairedDeviceStatus.ADDRESS_CHANGED)
+        val usable = pairedDevice("c", AccessMode.REMOTE, lastConnectedAt = now + 1_000)
+
+        val selected = ConnectionRestorePolicy.selectStartupDevice(
+            devices = listOf(revoked, changed, usable),
+            savedKey = changed.key,
+            preferredMode = AccessMode.REMOTE,
+            now = now,
+        )
+
+        assertEquals(usable.key, selected?.key)
+    }
+
+    @Test
     fun restoresTheLastSuccessfulRemoteConnectionFirst() {
         val targets = targets(AccessMode.REMOTE)
 
@@ -130,6 +163,12 @@ class ConnectionRestorePolicyTest {
         assertTrue(ConnectionRestorePolicy.mayPairAfterRenewFailure(
             NativeAuthFailure(NativeAuthFailureKind.PAIRING_EXPIRED),
         ))
+        assertTrue(ConnectionRestorePolicy.mayPairAfterRenewFailure(
+            NativeAuthFailure(NativeAuthFailureKind.DEVICE_REVOKED),
+        ))
+        assertTrue(ConnectionRestorePolicy.mayPairAfterRenewFailure(
+            NativeAuthFailure(NativeAuthFailureKind.DEVICE_EXPIRED),
+        ))
         assertEquals(
             false,
             ConnectionRestorePolicy.mayPairAfterRenewFailure(NativeAuthFailure(NativeAuthFailureKind.TIMEOUT)),
@@ -151,5 +190,24 @@ class ConnectionRestorePolicyTest {
         deviceToken = "A".repeat(43),
         expiresAt = expiresAt,
         caCertificate = null,
+    )
+
+    private fun pairedDevice(
+        instanceCharacter: String,
+        mode: AccessMode,
+        lastConnectedAt: Long,
+        status: PairedDeviceStatus = PairedDeviceStatus.UNKNOWN,
+    ) = PairedDeviceRecord(
+        instanceId = instanceCharacter.repeat(64),
+        deviceId = "c".repeat(32),
+        displayName = "Computer",
+        mode = mode,
+        origin = GatewayOrigin.parse(if (mode == AccessMode.LAN) "https://192.168.1.20:3443" else "https://remote.cpolar.cn")!!,
+        deviceToken = "A".repeat(43),
+        expiresAt = now + 10_000,
+        caCertificate = null,
+        lastConnectedAt = lastConnectedAt,
+        lastReachableAt = null,
+        status = status,
     )
 }

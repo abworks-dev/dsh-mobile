@@ -95,7 +95,7 @@ async function checkBrandAndStoreIcon() {
 }
 
 async function checkAndroid() {
-  const [gradle, manifest, networkSecurity, packageManifest, discovery, nativeAuth, nsdDiscovery, credentialStore, webViewClient, scanActivity, qrDecoder, nativeBridge, nativeBridgePolicy, mainActivity, defaultStrings, chineseStrings, italianStrings, defaultColors, nightColors, clientSource, mobileLayoutSource, nativeMobileSource] = await Promise.all([
+  const [gradle, manifest, networkSecurity, packageManifest, discovery, nativeAuth, nsdDiscovery, credentialStore, pairedDeviceStore, webViewClient, scanActivity, qrDecoder, nativeBridge, nativeBridgePolicy, mainActivity, defaultStrings, chineseStrings, italianStrings, defaultColors, nightColors, clientSource, mobileLayoutSource, nativeMobileSource] = await Promise.all([
     read('apps/mobile/android/app/build.gradle.kts', 'utf8'),
     read('apps/mobile/android/app/src/main/AndroidManifest.xml', 'utf8'),
     read('apps/mobile/android/app/src/main/res/xml/network_security_config.xml', 'utf8'),
@@ -104,6 +104,7 @@ async function checkAndroid() {
     read('apps/mobile/android/app/src/main/java/io/github/sayach/dshmobile/NativeAuthClient.kt', 'utf8'),
     read('apps/mobile/android/app/src/main/java/io/github/sayach/dshmobile/NsdDiscovery.kt', 'utf8'),
     read('apps/mobile/android/app/src/main/java/io/github/sayach/dshmobile/DeviceCredentialStore.kt', 'utf8'),
+    read('apps/mobile/android/app/src/main/java/io/github/sayach/dshmobile/PairedDeviceStore.kt', 'utf8'),
     read('apps/mobile/android/app/src/main/java/io/github/sayach/dshmobile/SecureWebViewClient.kt', 'utf8'),
     read('apps/mobile/android/app/src/main/java/io/github/sayach/dshmobile/ScanActivity.kt', 'utf8'),
     read('apps/mobile/android/app/src/main/java/io/github/sayach/dshmobile/QrDecoder.kt', 'utf8'),
@@ -143,14 +144,18 @@ async function checkAndroid() {
   ]) {
     if (!manifest.includes(permission)) fail(`Android manifest must declare ${permission}`)
   }
-  if (!nativeAuth.includes('/mobile-access/discovery') || !nativeAuth.includes('HttpsURLConnection')) {
-    fail('Android LAN discovery must probe the HTTPS discovery endpoint')
+  if (!nativeAuth.includes('/mobile-access/discovery') || !nativeAuth.includes('/mobile-access/auth/native-probe')
+    || !nativeAuth.includes('HttpsURLConnection')) {
+    fail('Android LAN discovery and reachability must probe the HTTPS gateway endpoints')
   }
   if (!discovery.includes('NsdDiscovery.scan') || !nsdDiscovery.includes('_dsh-mobile._tcp.')) {
     fail('Android LAN discovery must listen for DSH DNS-SD services')
   }
   if (!credentialStore.includes('AndroidKeyStore') || !credentialStore.includes('AES/GCM/NoPadding')) {
     fail('Android device credentials must remain encrypted by Android Keystore AES-GCM')
+  }
+  for (const marker of ['AndroidKeyStore', 'dsh_mobile_devices_v1', 'deviceToken', 'caCertificate', 'PairedDeviceStatus']) {
+    if (!pairedDeviceStore.includes(marker)) fail(`Android paired-device store is missing ${marker}`)
   }
   if (networkSecurity.includes('src="user"')) {
     fail('Android must not trust system-wide user-installed CAs')
@@ -179,6 +184,9 @@ async function checkAndroid() {
   }
   for (const marker of ['POST_NOTIFICATIONS', 'TASK_NOTIFICATION_PERMISSION_REQUEST', 'ACTION_APP_NOTIFICATION_SETTINGS']) {
     if (!mainActivity.includes(marker)) fail(`Android task-reminder permission UI is missing ${marker}`)
+  }
+  for (const marker of ['showDeviceList', 'PairedDeviceStore', 'setOnLongClickListener', 'PREFERENCE_LAUNCH_BEHAVIOR', 'device_status_revoked', 'confirmDeleteDevice']) {
+    if (!mainActivity.includes(marker)) fail(`Android paired-device management is missing ${marker}`)
   }
   if (!nativeBridgePolicy.includes('TASK_NOTIFICATION_CHANNEL_ID')
     || !nativeBridgePolicy.includes('sanitizeNotificationField')

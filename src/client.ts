@@ -1,4 +1,4 @@
-import { createElement } from 'react'
+import { createElement, useEffect, useState } from 'react'
 import {
   DIAGNOSTIC_REASON_MESSAGES,
   LOCALIZED_DIAGNOSTIC_COPY,
@@ -7,9 +7,9 @@ import {
 } from './client-messages.js'
 import { createRestrictedFrpServerTemplate } from './frp-template.js'
 import { installNativeMobileSurface, NATIVE_MOBILE_STYLES, resolveNativeMobileLanguage } from './native-mobile.js'
-import { fireTaskNotifyEvent, parseTaskNotifyPayload, taskCompletionTag } from './task-notify.js'
+import { fireDeviceRevoked, fireTaskNotifyEvent, isDeviceRevokedPayload, parseTaskNotifyPayload, taskCompletionTag } from './task-notify.js'
 
-export { DIAGNOSTIC_REASON_MESSAGES, MOBILE_CONTROL_MESSAGES } from './client-messages.js'
+export { DIAGNOSTIC_REASON_MESSAGES, LOCALIZED_DIAGNOSTIC_COPY, MOBILE_CONTROL_MESSAGES } from './client-messages.js'
 export type { MobileControlLocale } from './client-messages.js'
 
 interface ClientContext {
@@ -200,6 +200,93 @@ function element<K extends keyof HTMLElementTagNameMap>(tag: K, className?: stri
   const node = document.createElement(tag)
   if (className !== undefined) node.className = className
   return node
+}
+
+interface MobileSwitchComputerCopy {
+  readonly title: string
+  readonly description: string
+  readonly action: string
+  readonly busy: string
+  readonly retry: string
+  readonly error: string
+}
+
+function mobileSwitchComputerCopy(locale: MobileControlLocale): MobileSwitchComputerCopy {
+  if (locale === 'zh') return {
+    title: '切换电脑',
+    description: '返回已配对设备列表，选择要打开的电脑。',
+    action: '切换电脑',
+    busy: '正在切换…',
+    retry: '重试',
+    error: '切换失败，请重试。',
+  }
+  if (locale === 'it') return {
+    title: 'Cambia computer',
+    description: 'Torna all’elenco dei computer associati e scegli quale aprire.',
+    action: 'Cambia computer',
+    busy: 'Cambio in corso…',
+    retry: 'Riprova',
+    error: 'Cambio non riuscito. Riprova.',
+  }
+  return {
+    title: 'Switch computer',
+    description: 'Return to the paired-device list and choose a computer to open.',
+    action: 'Switch computer',
+    busy: 'Switching…',
+    retry: 'Retry',
+    error: 'Could not switch computers. Try again.',
+  }
+}
+
+/** Render the native-app-only action in DSH's General settings row style. */
+function MobileSwitchComputerRow(): unknown {
+  const [nativeReady, setNativeReady] = useState(false)
+  const [state, setState] = useState<'idle' | 'busy' | 'error'>('idle')
+  useEffect(() => {
+    let disposed = false
+    const checkNativeAction = (): void => {
+      const bridge = window.__DSH_MOBILE_NATIVE__
+      if (bridge === undefined) {
+        setNativeReady(false)
+        return
+      }
+      void Promise.resolve().then(() => bridge.capabilities()).then(capabilities => {
+        if (!disposed) setNativeReady(capabilities.includes('mobile.switch-computer'))
+      }, () => {
+        if (!disposed) setNativeReady(false)
+      })
+    }
+    checkNativeAction()
+    window.addEventListener('dsh-mobile-native-ready', checkNativeAction)
+    return () => {
+      disposed = true
+      window.removeEventListener('dsh-mobile-native-ready', checkNativeAction)
+    }
+  }, [])
+  if (!nativeReady) return null
+  const locale = selectedMobileControlLocale()
+  const copy = mobileSwitchComputerCopy(locale)
+  const invoke = (): void => {
+    const bridge = window.__DSH_MOBILE_NATIVE__
+    if (bridge === undefined || state === 'busy') return
+    setState('busy')
+    // The native action normally replaces this WebView immediately; only a
+    // rejected request needs to remain visible in the settings row.
+    void bridge.invoke('mobile.switch-computer', {}).catch(() => { setState('error') })
+  }
+  return createElement('div', { className: 'dsh-mobile-settings_row', lang: locale },
+    createElement('div', { className: 'dsh-mobile-settings_rowText' },
+      createElement('div', { className: 'dsh-mobile-settings_title' }, copy.title),
+      createElement('div', { className: 'dsh-mobile-settings_desc', 'aria-live': 'polite' }, state === 'error' ? copy.error : copy.description),
+    ),
+    createElement('button', {
+      type: 'button',
+      className: 'dsh-mobile-settings_selector',
+      disabled: state === 'busy',
+      'aria-busy': state === 'busy' ? 'true' : undefined,
+      onClick: invoke,
+    }, state === 'busy' ? copy.busy : state === 'error' ? copy.retry : copy.action),
+  )
 }
 
 const CONTROL_REQUEST_TIMEOUT_MS = 15_000
@@ -2199,6 +2286,7 @@ export function startExtensionChangeStream(
     create: url => new EventSource(url, { withCredentials: true }),
   },
   onTaskEvent?: (payload: unknown) => void,
+  onDeviceRevoked?: () => void,
 ): () => void {
   let source: ReturnType<ExtensionEventRuntime['create']> | undefined
   let timer: number | undefined
@@ -2220,6 +2308,12 @@ export function startExtensionChangeStream(
       next.addEventListener('task-notify', (message: Event) => {
         const data = (message as MessageEvent).data
         onTaskEvent(data)
+      })
+    }
+    if (onDeviceRevoked !== undefined) {
+      next.addEventListener('device-revoked', (message: Event) => {
+        const data = (message as MessageEvent).data
+        if (isDeviceRevokedPayload(data)) onDeviceRevoked()
       })
     }
     next.onerror = () => {
@@ -2814,6 +2908,7 @@ function installCustomAssets(): () => void {
         tag: taskCompletionTag(parsed.sessionId, parsed.turn),
       })
     },
+    () => { fireDeviceRevoked() },
   )
   return () => { disposed = true; stopEvents(); stopRefresh(); started = false; legacyDispose?.(); legacyDispose = undefined; legacyRoot?.remove(); legacyRoot = undefined; legacyStyle.remove(); activations.dispose(); for (const node of styleNodes.values()) node.remove(); styleNodes.clear(); const layer = document.querySelector('[data-dsh-mobile-extension-layer]'); layer?.remove(); for (const host of document.querySelectorAll('[data-dsh-mobile-surface-host]')) host.remove(); if (previous === undefined) delete window.dshMobile; else window.dshMobile = previous }
 }
@@ -2889,9 +2984,14 @@ export function apply(ctx: ClientContext): void {
       : NATIVE_MOBILE_STYLES
     document.head.append(style)
     if (!loopback) {
+      const removeSettingsAction = ctx.slots.inject('settings.general.item', () => ctx.slots.register({
+        name: 'settings.general.item',
+        id: 'dsh-mobile-switch-computer',
+        order: 100,
+      }, MobileSwitchComputerRow))
       const removeCustom = installCustomAssets()
       const removeSurface = installDshLanguageBoundSurface(installNativeMobileSurface)
-      return () => { removeCustom(); removeSurface(); style.remove() }
+      return () => { removeSettingsAction(); removeCustom(); removeSurface(); style.remove() }
     }
     const removeControl = installDshLanguageBoundSurface(() => {
       const control = installControl()

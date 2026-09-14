@@ -11,4 +11,5 @@
     <color name="app_accent">#2563EB</color>
     <color name="app_on_accent">#FFFFFF</color>
     <color name="app_error">#B91C1C</color>
+    <color name="app_success">#15803D</color>
 </resources>

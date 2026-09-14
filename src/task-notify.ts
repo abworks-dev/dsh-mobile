@@ -304,6 +304,31 @@ export function parseTaskNotifyPayload(value: unknown): { readonly sessionId: st
   return Object.freeze({ sessionId: record.sessionId.slice(0, 128), turn })
 }
 
+/** Parse the small authenticated event used when the Host revokes this device. */
+export function isDeviceRevokedPayload(value: unknown): boolean {
+  let record: Record<string, unknown> | undefined
+  if (typeof value === 'string') {
+    try {
+      const parsed: unknown = JSON.parse(value)
+      if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return false
+      record = parsed as Record<string, unknown>
+    } catch {
+      return false
+    }
+  } else if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
+    record = value as Record<string, unknown>
+  } else return false
+  return record.reason === 'device_revoked'
+}
+
+/** Tell the Android shell to transition the active record to the revoked state. */
+export function fireDeviceRevoked(): boolean {
+  const bridge = readNativeBridge()
+  if (bridge === undefined) return false
+  void bridge.invoke('device.revoked', {}).catch(() => undefined)
+  return true
+}
+
 /**
  * Deliver one notification through the native bridge when available.
  * Returns false when there is no bridge (desktop browsers keep their own

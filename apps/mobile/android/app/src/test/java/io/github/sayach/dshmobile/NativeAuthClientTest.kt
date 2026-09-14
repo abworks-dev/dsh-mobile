@@ -49,6 +49,35 @@ class NativeAuthClientTest {
     }
 
     @Test
+    fun parsesAProbeWithoutAcceptingSessionFields() {
+        val probe = parseNativeProbeResponse(
+            ByteArrayInputStream(validProbeResponse().toString().toByteArray()),
+            origin,
+            instanceId,
+            now,
+        )
+
+        assertEquals(origin, probe.origin)
+        assertEquals(instanceId, probe.instanceId)
+        assertEquals("d".repeat(32), probe.deviceId)
+        assertEquals(now + 60_000, probe.deviceExpiresAt)
+    }
+
+    @Test
+    fun rejectsProbeResponsesThatContainSessionMaterial() {
+        val response = validProbeResponse().put("sessionToken", "S".repeat(43))
+        val failure = assertThrows(NativeAuthFailure::class.java) {
+            parseNativeProbeResponse(
+                ByteArrayInputStream(response.toString().toByteArray()),
+                origin,
+                instanceId,
+                now,
+            )
+        }
+        assertEquals(NativeAuthFailureKind.INVALID_RESPONSE, failure.kind)
+    }
+
+    @Test
     fun rejectsMalformedNativeSessions() {
         val malformed = listOf(
             JSONObject(validPairResponse().toString()).apply { remove("csrfToken") },
@@ -111,6 +140,8 @@ class NativeAuthClientTest {
     @Test
     fun classifiesAuthenticationStatusesWithoutExposingServerBodies() {
         assertEquals(NativeAuthFailureKind.PAIRING_EXPIRED, nativeAuthFailureForStatus(401))
+        assertEquals(NativeAuthFailureKind.DEVICE_REVOKED, nativeAuthFailureForStatus(401, "device_revoked"))
+        assertEquals(NativeAuthFailureKind.DEVICE_EXPIRED, nativeAuthFailureForStatus(401, "device_expired"))
         assertEquals(NativeAuthFailureKind.DEVICE_LIMIT, nativeAuthFailureForStatus(409))
         assertEquals(NativeAuthFailureKind.RATE_LIMITED, nativeAuthFailureForStatus(429))
         assertEquals(NativeAuthFailureKind.SERVER_UNAVAILABLE, nativeAuthFailureForStatus(503))
@@ -150,5 +181,10 @@ class NativeAuthClientTest {
         .put("sessionToken", "S".repeat(43))
         .put("csrfToken", "C".repeat(43))
         .put("sessionExpiresAt", now + 30_000)
+
+    private fun validProbeResponse(): JSONObject = JSONObject()
+        .put("instanceId", instanceId)
+        .put("deviceId", "d".repeat(32))
+        .put("deviceExpiresAt", now + 60_000)
 
 }

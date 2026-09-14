@@ -65,6 +65,13 @@ import {
   type MobileRouteRequest,
   type MobileRouteResponse,
 } from './extensions.js'
+import {
+  renderLoginPage,
+  renderLoginScript,
+  renderPairPage,
+  renderPairScript,
+  resolveAuthPageLocale,
+} from './auth-pages.js'
 
 type GatewayServer = HttpServer | HttpsServer
 
@@ -343,83 +350,6 @@ function rewriteMobileIndexWithBatch(html: string): RewrittenMobileIndex {
 export function rewriteMobileIndex(html: string): string {
   return rewriteMobileIndexWithBatch(html).html
 }
-
-const PAIR_SCRIPT = `(() => {
-  const form = document.getElementById('pair-form')
-  const token = document.getElementById('pair-token')
-  const label = document.getElementById('device-label')
-  const status = document.getElementById('pair-status')
-  const fragment = new URLSearchParams(location.hash.slice(1))
-  const supplied = fragment.get('token')
-  history.replaceState(null, '', location.pathname)
-  if (supplied) token.value = supplied
-  form.addEventListener('submit', async (event) => {
-    event.preventDefault()
-    status.value = 'Pairing…'
-    const response = await fetch('/mobile-access/auth/pair', {
-      method: 'POST',
-      credentials: 'same-origin',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ token: token.value, label: label.value || undefined }),
-    })
-    if (!response.ok) {
-      status.value = 'Pairing failed'
-      return
-    }
-    location.replace('/')
-  })
-})()
-`
-
-const LOGIN_PAGE = `<!doctype html>
-<html lang="en">
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Reconnect DSH mobile access</title>
-<main>
-  <h1>Reconnect this device</h1>
-  <p id="login-progress">Restoring the secure Session…</p>
-  <section id="login-failed" hidden>
-    <p>This device is no longer paired. Open pairing on the computer, then pair it again.</p>
-    <a href="/mobile-access/pair">Open pairing</a>
-  </section>
-</main>
-<script src="/mobile-access/login.js" defer></script>
-</html>
-`
-
-const LOGIN_SCRIPT = `(() => {
-  const candidate = new URL(location.href).searchParams.get('return')
-  let returnPath = '/'
-  if (candidate && candidate.startsWith('/')) {
-    try {
-      const resolved = new URL(candidate, location.origin)
-      const pathname = decodeURIComponent(resolved.pathname)
-      if (resolved.origin === location.origin && pathname !== '/mobile-access'
-        && !pathname.startsWith('/mobile-access/') && !pathname.includes('\\\\')) {
-        returnPath = resolved.pathname + resolved.search + resolved.hash
-      }
-    } catch {
-      // Malformed untrusted return targets keep the safe root default.
-    }
-  }
-  fetch('/mobile-access/auth/renew', {
-    method: 'POST',
-    credentials: 'same-origin',
-    headers: { 'content-type': 'application/json' },
-    body: '{}',
-  }).then((response) => {
-    if (response.ok) {
-      location.replace(returnPath)
-      return
-    }
-    document.getElementById('login-progress').hidden = true
-    document.getElementById('login-failed').hidden = false
-  }).catch(() => {
-    document.getElementById('login-progress').textContent = 'The computer is unavailable.'
-  })
-})()
-`
 
 class ByteLimitTransform extends Transform {
   private total = 0
@@ -864,6 +794,8 @@ export class MobileAccessGateway {
   private readonly extensionEventListeners = new Set<(revision: number) => void>()
   private extensionEventRevision = 0
   private readonly taskEventListeners = new Set<(payload: string) => void>()
+  private readonly deviceEventListeners = new Map<string, Set<(payload: string) => void>>()
+  private readonly pendingDeviceRevocations = new Set<string>()
   private extensionChangeTimer: NodeJS.Timeout | undefined
   private extensionChangeTask: Promise<void> | undefined
   private legacyCustomDigest = ''
@@ -878,6 +810,7 @@ export class MobileAccessGateway {
   private readonly removeSessionListener: () => void
   private readonly removeExtensionContentListener: () => void
   private readonly renewLimiter: BoundedRateLimiter
+  private readonly probeLimiter: BoundedRateLimiter
 
   constructor(
     readonly config: ResolvedGatewayConfig,
@@ -904,8 +837,28 @@ export class MobileAccessGateway {
       config.rateLimitWindowMs,
       config.maxRateLimitKeys,
     )
-    this.removeSessionListener = this.access.onSessionEnded(authorization => {
-      this.abortSessionResources(authorization.sessionKey)
+    // Reachability checks do not create Sessions; allow one short poll for
+    // each configured device without weakening the Session-creating limit.
+    this.probeLimiter = new BoundedRateLimiter(
+      Math.min(1_000, config.maxDevices * 4),
+      config.rateLimitWindowMs,
+      config.maxRateLimitKeys,
+    )
+    this.removeSessionListener = this.access.onSessionEnded((authorization, reason) => {
+      if (reason === 'revoked') {
+        if (!this.pendingDeviceRevocations.has(authorization.deviceId)) {
+          this.pendingDeviceRevocations.add(authorization.deviceId)
+          this.broadcastDeviceRevoked(authorization.deviceId)
+        }
+        // Let the final SSE frame enter the socket before revocation closes
+        // the session-owned stream and WebSockets.
+        setImmediate(() => {
+          this.abortSessionResources(authorization.sessionKey)
+          this.pendingDeviceRevocations.delete(authorization.deviceId)
+        })
+      } else {
+        this.abortSessionResources(authorization.sessionKey)
+      }
     })
     this.removeExtensionContentListener = this.extensions?.onContentChanged(() => {
       this.broadcastExtensionChange()
@@ -1201,6 +1154,20 @@ export class MobileAccessGateway {
     }, this.tlsEnabled)
   }
 
+  private async handleNativeProbe(request: IncomingMessage, response: ServerResponse): Promise<void> {
+    if (!this.probeLimiter.take(request.socket.remoteAddress ?? 'unknown', Date.now())) {
+      throw new HttpError(429, 'rate_limited')
+    }
+    const body = await readJsonObject(request, MAX_CONTROL_BODY_BYTES)
+    if (typeof body.deviceToken !== 'string') throw new HttpError(400, 'bad_request')
+    const result = await this.access.probe(body.deviceToken)
+    sendJson(response, 200, {
+      instanceId: this.config.instanceId,
+      deviceId: result.deviceId,
+      deviceExpiresAt: result.deviceExpiresAt,
+    }, this.tlsEnabled)
+  }
+
   private async handleLogout(request: IncomingMessage, response: ServerResponse): Promise<void> {
     await readJsonObject(request, MAX_CONTROL_BODY_BYTES)
     const authorization = this.authorize(request)
@@ -1261,8 +1228,11 @@ export class MobileAccessGateway {
     if (target.search === '' && request.method === 'GET'
       && (target.decodedPathname === `${AUTH_PREFIX}/pair` || target.decodedPathname === `${AUTH_PREFIX}/pair.js`)) {
       if (!this.access.pairingStatus().open) throw new HttpError(404, 'not_found')
+      const languageHeader = request.headers['accept-language']
+      const locale = resolveAuthPageLocale(typeof languageHeader === 'string' ? languageHeader : undefined)
       setSecurityHeaders(response, this.tlsEnabled)
-      const body = target.decodedPathname.endsWith('.js') ? PAIR_SCRIPT : PAIR_PAGE
+      response.setHeader('Vary', 'Accept-Language')
+      const body = target.decodedPathname.endsWith('.js') ? renderPairScript(locale) : renderPairPage(locale)
       response.writeHead(200, {
         'Content-Type': target.decodedPathname.endsWith('.js') ? 'text/javascript; charset=utf-8' : 'text/html; charset=utf-8',
         'Content-Length': Buffer.byteLength(body),
@@ -1273,8 +1243,11 @@ export class MobileAccessGateway {
     if (request.method === 'GET'
       && (target.decodedPathname === `${AUTH_PREFIX}/login` || target.decodedPathname === `${AUTH_PREFIX}/login.js`)) {
       if (target.decodedPathname.endsWith('.js') && target.search !== '') throw new HttpError(400, 'bad_request')
+      const languageHeader = request.headers['accept-language']
+      const locale = resolveAuthPageLocale(typeof languageHeader === 'string' ? languageHeader : undefined)
       setSecurityHeaders(response, this.tlsEnabled)
-      const body = target.decodedPathname.endsWith('.js') ? LOGIN_SCRIPT : LOGIN_PAGE
+      response.setHeader('Vary', 'Accept-Language')
+      const body = target.decodedPathname.endsWith('.js') ? renderLoginScript(locale) : renderLoginPage(locale)
       response.writeHead(200, {
         'Content-Type': target.decodedPathname.endsWith('.js') ? 'text/javascript; charset=utf-8' : 'text/html; charset=utf-8',
         'Content-Length': Buffer.byteLength(body),
@@ -1296,6 +1269,10 @@ export class MobileAccessGateway {
     }
     if (target.search === '' && request.method === 'POST' && target.decodedPathname === `${AUTH_PREFIX}/auth/native-renew`) {
       await this.handleNativeRenew(request, response)
+      return
+    }
+    if (target.search === '' && request.method === 'POST' && target.decodedPathname === `${AUTH_PREFIX}/auth/native-probe`) {
+      await this.handleNativeProbe(request, response)
       return
     }
     if (target.search === '' && request.method === 'POST' && target.decodedPathname === `${AUTH_PREFIX}/auth/logout`) {
@@ -2066,6 +2043,14 @@ export class MobileAccessGateway {
     for (const listener of this.taskEventListeners) listener(payload)
   }
 
+  /** Notify only the device whose persistent credential was revoked by the Host. */
+  private broadcastDeviceRevoked(deviceId: string): void {
+    const listeners = this.deviceEventListeners.get(deviceId)
+    if (listeners === undefined) return
+    const payload = JSON.stringify({ reason: 'device_revoked' })
+    for (const listener of [...listeners]) listener(payload)
+  }
+
   private pollLegacyCustomChanges(): Promise<void> {
     if (this.extensionChangeTask !== undefined) return this.extensionChangeTask
     const digestFile = async (path: string, fallback: string): Promise<string> => {
@@ -2106,6 +2091,9 @@ export class MobileAccessGateway {
       if (heartbeat !== undefined) clearInterval(heartbeat)
       this.extensionEventListeners.delete(send)
       this.taskEventListeners.delete(sendTask)
+      const deviceListeners = this.deviceEventListeners.get(authorization.deviceId)
+      deviceListeners?.delete(sendDevice)
+      if (deviceListeners?.size === 0) this.deviceEventListeners.delete(authorization.deviceId)
       request.removeListener('aborted', close)
       response.removeListener('close', close)
       operation.release()
@@ -2118,6 +2106,10 @@ export class MobileAccessGateway {
       if (closed || response.destroyed || response.writableEnded) return
       response.write(`event: task-notify\ndata: ${payload}\n\n`)
     }
+    const sendDevice = (payload: string): void => {
+      if (closed || response.destroyed || response.writableEnded) return
+      response.write(`event: device-revoked\ndata: ${payload}\n\n`)
+    }
     setSecurityHeaders(response, this.tlsEnabled)
     response.writeHead(200, {
       'Content-Type': 'text/event-stream; charset=utf-8',
@@ -2128,6 +2120,9 @@ export class MobileAccessGateway {
     response.write('retry: 2000\n: ready\n\n')
     this.extensionEventListeners.add(send)
     this.taskEventListeners.add(sendTask)
+    const deviceListeners = this.deviceEventListeners.get(authorization.deviceId) ?? new Set<(payload: string) => void>()
+    deviceListeners.add(sendDevice)
+    this.deviceEventListeners.set(authorization.deviceId, deviceListeners)
     heartbeat = setInterval(() => {
       if (!closed && !response.destroyed && !response.writableEnded) response.write(': heartbeat\n\n')
     }, EXTENSION_EVENT_HEARTBEAT_MS)
@@ -2407,6 +2402,7 @@ export class MobileAccessGateway {
     this.upstreamAuthRequest?.destroy()
     this.upstreamAuthRequest = undefined
     this.removeSessionListener()
+    this.pendingDeviceRevocations.clear()
     const accessClose = this.access.close()
     for (const stored of this.mobileBootBatches.values()) stored.assembly?.controller.abort()
     for (const request of this.activeRequests.values()) request.abort()

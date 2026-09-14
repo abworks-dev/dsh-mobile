@@ -128,6 +128,12 @@ internal class NativeBridge(
     /** Opaque DSH base background reported after theme resolution. */
     var onPageBackgroundColor: ((color: Int) -> Unit)? = null
 
+    /** Called when the authenticated Host revokes this device's credential. */
+    var onDeviceRevoked: (() -> Unit)? = null
+
+    /** Called by the WebView settings action to return to the native device list. */
+    var onSwitchComputer: (() -> Unit)? = null
+
     /** Install the origin-scoped WebMessage channel and page-side Promise adapter. */
     fun install(): Boolean {
         if (installed) return true
@@ -250,6 +256,7 @@ internal class NativeBridge(
         }
         onPageBackgroundColor = null
         onScrollDirection = null
+        onDeviceRevoked = null
 
         val temporaryResources = synchronized(requestLock) {
             cancelActivityTimeoutLocked()
@@ -400,6 +407,19 @@ internal class NativeBridge(
                 "clipboard.read" -> startClipboardRead(requestId)
                 "clipboard.write" -> startClipboardWrite(requestId, input.optString("text", ""))
                 "notification.notify" -> startTaskNotification(requestId, input)
+                "mobile.switch-computer" -> activity.runOnUiThread {
+                    val callback = onSwitchComputer
+                    if (!installed || preservingForConfiguration || callback == null) {
+                        finishPending(requestId, errorJson("unavailable", "device switching is unavailable", requestId))
+                    } else {
+                        finishPending(requestId, successJson(requestId, JSONObject().put("ok", true)))
+                        callback.invoke()
+                    }
+                }
+                "device.revoked" -> {
+                    activity.runOnUiThread { if (installed) onDeviceRevoked?.invoke() }
+                    finishPending(requestId, successJson(requestId, JSONObject().put("ok", true)))
+                }
                 else -> finishPending(requestId, errorJson("unsupported", "native capability is unavailable", requestId))
             }
         } catch (_: Exception) {
@@ -1014,7 +1034,7 @@ internal class NativeBridge(
           bridge.onmessage = handleReply;
           window.__DSH_MOBILE_NATIVE_STATE__ = { pending };
           window.__DSH_MOBILE_NATIVE__ = {
-            capabilities: () => Promise.resolve(['files.pick','camera.capture','share','clipboard.read','clipboard.write','notification.notify']),
+            capabilities: () => Promise.resolve(['files.pick','camera.capture','share','clipboard.read','clipboard.write','notification.notify','mobile.switch-computer']),
             invoke: (action, input = {}) => new Promise((resolve, reject) => {
               const requestId = crypto.randomUUID();
               let raw;
@@ -1029,6 +1049,7 @@ internal class NativeBridge(
               catch (_) { clearTimeout(timer); pending.delete(requestId); reject(Object.assign(new Error('native capability unavailable'), { code: 'unavailable' })); }
             })
           };
+          window.dispatchEvent(new Event('dsh-mobile-native-ready'));
 
           const previousChromeSync = window.__DSH_MOBILE_CHROME_SYNC__;
           if (previousChromeSync && typeof previousChromeSync.dispose === 'function') previousChromeSync.dispose();

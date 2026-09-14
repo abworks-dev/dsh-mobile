@@ -19,14 +19,14 @@
 
 > DSH Mobile is a DeepSeek Harness community plugin; the native app supports Android only.
 >
-> **0.3.16 update**: supports community task-board pane anchors, improves wide-screen rightbar docking and phone question cards, and fixes custom DSH Web ports still targeting the saved default upstream. [Details](CHANGELOG.md).
+> **0.4.0 update**: adds multi-device management, computer-side revocation status sync, and session-free reachability checks; improves plugin-market LAN onboarding, task-state notifications, the immersive WebView layout, and three-language pairing pages. [Details](CHANGELOG.md).
 >
-> **Upgrade reminder**: update the plugin to **0.3.16** and restart DSH. Existing pairings and app 0.3.15 remain compatible; the 0.3.16 APK changes only Android version metadata, so the app update is optional. [Compatibility notes](#compatibility).
+> **Upgrade reminder**: 0.4.0 requires the plugin and Android app to be updated together for the multi-device list. Older apps continue to use their existing single-device pairing. [Compatibility notes](#compatibility).
 
 <p align="center">
-  <a href="https://github.com/saya-ch/dsh-mobile/releases/download/v0.3.16/dsh-mobile-android-v0.3.16.apk"><img src="assets/brand/app-icon-rounded.svg" alt="DSH Mobile Android app icon" width="72" height="72"></a><br>
-  <a href="https://github.com/saya-ch/dsh-mobile/releases/download/v0.3.16/dsh-mobile-android-v0.3.16.apk"><strong>Download Android app 0.3.16</strong></a><br>
-  <sub><a href="https://github.com/saya-ch/dsh-mobile/releases/tag/v0.3.16">Release notes and checksums</a></sub>
+  <a href="https://github.com/saya-ch/dsh-mobile/releases/download/v0.4.0/dsh-mobile-android-v0.4.0.apk"><img src="assets/brand/app-icon-rounded.svg" alt="DSH Mobile Android app icon" width="72" height="72"></a><br>
+  <a href="https://github.com/saya-ch/dsh-mobile/releases/download/v0.4.0/dsh-mobile-android-v0.4.0.apk"><strong>Download Android app 0.4.0</strong></a><br>
+  <sub><a href="https://github.com/saya-ch/dsh-mobile/releases/tag/v0.4.0">Release notes and checksums</a></sub>
 </p>
 
 DSH Mobile is a DeepSeek Harness plugin that lets a mobile browser or the Android app connect over a protected LAN or an optional Tailscale Funnel, cpolar, or self-hosted FRP remote path. Local and remote access keep the same sessions, Workspaces, messages, and tools while using separate switches and paired-device stores without modifying DeepSeek Harness source.
@@ -40,7 +40,7 @@ It also lets you customize the phone from a DSH conversation: `/mobile <what you
 - **Continue DSH work from a phone**: the same sessions, Workspaces, messages, and tools, in real time.
 - **Customize the phone UI by talking to DSH**: change the mobile layout, interactions, and features from a conversation; open pages refresh within seconds.
 - **A dedicated touch layout**: session drawer, tool details, settings, question cards, and composer reorganized for phones. Native app screens follow the Android system locale in Simplified Chinese, English, or Italian. Plugin-owned Web UI follows DSH's selected locale; Italian resources are ready for a future DSH Italian locale.
-- **Image attachments**: use the top row of the composer plus menu to select an image or take a photo; PNG, JPEG, WebP, and GIF files up to 8 MiB are supported, plus full-resolution JPEG capture.
+- **Image attachments**: file selection uses DSH's native **Add** group; DSH Mobile only adds **Take photo** to that group, and captured images follow DSH's native attachment flow.
 - **Auto-discovery, no re-pairing**: Wi-Fi, hotspot, or IP changes normally recover automatically.
 - **One-click connection diagnostics**: check versions, gateway, network interface, firewall, and the remote path; stable reason codes are localized in the UI, and the copied report excludes credentials and complete addresses.
 - **One-click approval for third-party plugin WebSockets**: the diagnostics view groups blocked plugin connections by directory (with attempt counts); allowing a path unblocks that exact path while everything unapproved stays blocked, and a red badge marks the sidebar entry until reviewed (#47). If a plugin keeps failing to connect (for example a terminal reporting 1006), first look at the diagnostics view for blocked connections and approve them in one click — manual configuration is usually unnecessary.
@@ -103,6 +103,8 @@ Port note: `dsh web --port` changes the DSH Web upstream port (3080 by default),
 
 The app is optional: select **Copy pairing link** and open it in a mobile browser. The browser must manually trust the plugin certificate on the first visit.
 
+Browser pairing and reauthentication pages use the browser's `Accept-Language` to show Simplified Chinese, English, or Italian. Android screens follow the system language, while the DSH plugin control panel follows the language selected by DSH.
+
 ### Remote access
 
 Use this after the phone leaves the computer's network. Remote access is disabled by default, and the phone needs no separate Tailscale, cpolar, or FRP app.
@@ -160,6 +162,54 @@ The examples above, applied:
   <img src="https://raw.githubusercontent.com/saya-ch/dsh-mobile/main/assets/screenshots/cyberpunk-monitor-1.png" width="22%" style="margin-left:8px" alt="Mobile UI customized into a cyberpunk computer monitor">
 </p>
 
+### Device management
+
+The Android app keeps LAN, cpolar, Tailscale Funnel, and self-hosted FRP pairings in one **Paired computers** list. The first upgrade migrates the legacy LAN and remote credentials without requiring another pairing; when an address changes, the app merges the row by the DSH installation's stable `instanceId` and keeps its custom name. Device tokens and LAN CAs remain encrypted by Android Keystore and never appear in the list or QR code.
+
+Each row shows its custom name, transport, Origin, live reachability, and last connection time. A green dot means **Reachable**; a gray dot means **Checking**, **Temporarily unreachable**, **Pairing expired**, or **Removed on computer**. The check validates the DSH Gateway over HTTPS instead of using ICMP, so a temporary network outage is not mistaken for computer-side revocation.
+
+- **Startup behavior → Open DSH directly** (default): one device connects directly; with multiple devices, the app tries the last-used device first, then the still-valid device with the most recent connection. A bounded connection budget returns to the list instead of spinning forever.
+- **Startup behavior → Show device list**: choose a computer on every launch, which is useful when switching between several machines. The option is in the list's top-right settings button and is saved immediately.
+- Tap a row to connect. The overflow button and long press open the same action sheet for rename, check now, pair again, or delete the local record. Deletion has a second confirmation and a short undo window; undo restores only the local row and never restores a computer-side revocation.
+- Open DSH **Settings → General** in the WebView and select **Switch computer** to return to the paired-device list; this action appears only in the Android app. If the computer revokes a device, the app keeps its row as **Removed on computer**, stops automatic reconnection, and offers **Pair again** or **Delete device**.
+
+<table>
+  <tr>
+    <td align="center" valign="top" width="50%">
+      <img src="https://raw.githubusercontent.com/saya-ch/dsh-mobile/main/assets/screenshots/device-management.jpg" width="44%" alt="Paired computer list in the Android app"><br>
+      <sub>Device management: paired computers, transport, and reachability</sub>
+    </td>
+    <td align="center" valign="top" width="50%">
+      <img src="https://raw.githubusercontent.com/saya-ch/dsh-mobile/main/assets/screenshots/startup-behavior.jpg" width="44%" alt="Startup behavior settings in the Android app"><br>
+      <sub>Startup behavior: open DSH directly or show the device list</sub>
+    </td>
+  </tr>
+</table>
+
+### Third-party plugin compatibility
+
+The mobile adaptation keeps DSH's existing Workspace, task-management, terminal, and file-panel entry points instead of isolating third-party plugin content in a separate page. The wide-layout screenshot below shows the Android app in a wide viewport. The app adapts to the available width: phones use drawers and overlays, while wide screens use side-by-side panels; both layouts expose the same features and connection methods. DSH still loads third-party plugins itself—the mobile layer only adapts layout and access, without modifying DeepSeek Harness source.
+
+Compatibility and WebSocket rules:
+
+- This release is contract-checked against DSH `0.1.5-rc.2` (renderer-v2) and retains the `0.1.5-rc.1` LAN verification. The DSH page must expose the standard session, `main`/`panelInfo`, and `rightbar` slots; the community plugin must register its panel or sidebar content through DSH's standard entry points.
+- The gateway allows first-party DSH WebSocket paths by default, including `/sidebar/ws/terminal`. Other paths used by community sidebar plugins are blocked by default and appear in Diagnostics; the `/sidebar/ws/agent-opens` and `/sidebar/ws/agent-terminals` paths in the image are examples that must be reviewed for the actual plugin.
+- In **Connection diagnostics → Third-party WebSocket paths**, select **Allow** only for an exact path you have verified. Query strings and fuzzy prefixes are rejected; **Allow all** is not recommended. Approved paths can be removed at any time, and the same policy applies to LAN and remote connections.
+- Approval only lets that path pass through the authenticated, same-origin DSH Mobile gateway. It does not open arbitrary TCP/UDP ports or bypass device pairing. If a community plugin still fails, check the path recorded by Diagnostics and approve one path at a time.
+
+<table>
+  <tr>
+    <td align="center" valign="top" width="50%">
+      <img src="https://raw.githubusercontent.com/saya-ch/dsh-mobile/main/assets/screenshots/third-party-plugin-adaptation.png" width="96%" alt="Android app wide layout with a community sidebar plugin adapted"><br>
+      <sub>Community sidebar plugin compatibility in the Android app</sub>
+    </td>
+    <td align="center" valign="top" width="50%">
+      <img src="https://raw.githubusercontent.com/saya-ch/dsh-mobile/main/assets/screenshots/websocket-diagnostics.png" width="96%" alt="Third-party WebSocket path diagnostics in the Android app"><br>
+      <sub>Connection diagnostics: review and allow third-party WebSocket paths</sub>
+    </td>
+  </tr>
+</table>
+
 ## App or mobile browser
 
 | Client | Best for | Notes |
@@ -203,7 +253,7 @@ The table below lists, for each plugin version, the DeepSeek Harness version it 
 
 | DSH Mobile plugin | Verified DeepSeek Harness version |
 | --- | --- |
-| `0.3.15`, `0.3.16` | `0.1.5-rc.2` (contract check); `0.1.5-rc.1` (@idoall LAN verification) |
+| `0.3.15`, `0.3.16`, `0.4.0` | `0.1.5-rc.2` (contract check); `0.1.5-rc.1` (@idoall LAN verification) |
 | `0.3.14` | `0.1.3-alpha.2` |
 | `0.3.9`-`0.3.12` | `0.1.3-alpha.1` |
 | `0.3.6`-`0.3.8` | `0.1.2-rc.1` |
@@ -211,7 +261,7 @@ The table below lists, for each plugin version, the DeepSeek Harness version it 
 | `0.3.0`-`0.3.3` | `0.1.2-alpha.1` |
 | `0.1.4`, `0.2.x` | `0.1.1-rc.2` |
 
-Existing 0.3.3–0.3.16 apps do not need re-pairing. cpolar users should use app 0.3.15 or later because earlier apps may time out before a slow first load over the free route finishes; earlier apps also use a different status-bar strategy. App 0.1.3 or earlier requires reinstalling and pairing again.
+Existing 0.3.3–0.4.0 apps do not need re-pairing. cpolar users should use app 0.3.15 or later because earlier apps may time out before a slow first load over the free route finishes; earlier apps also use a different status-bar strategy. The 0.4.0 app adds the multi-device list, startup behavior, and computer-side revocation status; older apps continue to connect to their saved single device. App 0.1.3 or earlier requires reinstalling and pairing again.
 
 ## Uninstall
 

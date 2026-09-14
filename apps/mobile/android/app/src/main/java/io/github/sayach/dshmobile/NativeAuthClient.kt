@@ -26,8 +26,17 @@ internal data class NativeSession(
     val sessionExpiresAt: Long,
 )
 
+internal data class NativeProbe(
+    val origin: GatewayOrigin,
+    val instanceId: String,
+    val deviceId: String,
+    val deviceExpiresAt: Long,
+)
+
 internal enum class NativeAuthFailureKind {
     PAIRING_EXPIRED,
+    DEVICE_REVOKED,
+    DEVICE_EXPIRED,
     DEVICE_LIMIT,
     RATE_LIMITED,
     TIMEOUT,
@@ -42,12 +51,16 @@ internal class NativeAuthFailure(
     cause: Throwable? = null,
 ) : IOException(kind.name, cause)
 
-internal fun nativeAuthFailureForStatus(status: Int): NativeAuthFailureKind = when (status) {
-    HttpURLConnection.HTTP_UNAUTHORIZED, HttpURLConnection.HTTP_FORBIDDEN -> NativeAuthFailureKind.PAIRING_EXPIRED
-    HttpURLConnection.HTTP_CONFLICT -> NativeAuthFailureKind.DEVICE_LIMIT
-    429 -> NativeAuthFailureKind.RATE_LIMITED
-    in 500..599 -> NativeAuthFailureKind.SERVER_UNAVAILABLE
-    else -> NativeAuthFailureKind.INVALID_RESPONSE
+internal fun nativeAuthFailureForStatus(status: Int, errorCode: String? = null): NativeAuthFailureKind = when (errorCode) {
+    "device_revoked" -> NativeAuthFailureKind.DEVICE_REVOKED
+    "device_expired" -> NativeAuthFailureKind.DEVICE_EXPIRED
+    else -> when (status) {
+        HttpURLConnection.HTTP_UNAUTHORIZED, HttpURLConnection.HTTP_FORBIDDEN -> NativeAuthFailureKind.PAIRING_EXPIRED
+        HttpURLConnection.HTTP_CONFLICT -> NativeAuthFailureKind.DEVICE_LIMIT
+        429 -> NativeAuthFailureKind.RATE_LIMITED
+        in 500..599 -> NativeAuthFailureKind.SERVER_UNAVAILABLE
+        else -> NativeAuthFailureKind.INVALID_RESPONSE
+    }
 }
 
 internal data class NativeAuthTimeouts(
@@ -75,7 +88,7 @@ internal fun nativeAuthTimeouts(host: String): NativeAuthTimeouts =
         )
     }
 
-/** Uses platform TLS validation for native pairing and renewal. */
+/** Uses platform TLS validation for native pairing, renewal, and reachability checks. */
 internal object NativeAuthClient {
     fun pair(
         origin: GatewayOrigin,
@@ -88,8 +101,7 @@ internal object NativeAuthClient {
         JSONObject().put("token", token).put("label", "DeepSeek Harness Android"),
         caCertificate,
         expectedInstanceId,
-        requireDeviceCredential = true,
-    )
+    ) { input -> parseNativeSessionResponse(input, origin, expectedInstanceId, requireDeviceCredential = true) }
 
     fun renew(
         origin: GatewayOrigin,
@@ -102,8 +114,20 @@ internal object NativeAuthClient {
         JSONObject().put("deviceToken", deviceToken),
         caCertificate,
         expectedInstanceId,
-        requireDeviceCredential = false,
-    )
+    ) { input -> parseNativeSessionResponse(input, origin, expectedInstanceId, requireDeviceCredential = false) }
+
+    fun probe(
+        origin: GatewayOrigin,
+        deviceToken: String,
+        caCertificate: ByteArray?,
+        expectedInstanceId: String,
+    ): NativeProbe = post(
+        origin,
+        "/mobile-access/auth/native-probe",
+        JSONObject().put("deviceToken", deviceToken),
+        caCertificate,
+        expectedInstanceId,
+    ) { input -> parseNativeProbeResponse(input, origin, expectedInstanceId) }
 
     /** Fetches the public CA without credentials; the caller must fingerprint-bind it before use. */
     fun fetchPairingCa(origin: GatewayOrigin): ByteArray = requireNotNull(
@@ -154,14 +178,14 @@ internal object NativeAuthClient {
         }
     }
 
-    private fun post(
+    private fun <T> post(
         origin: GatewayOrigin,
         path: String,
         body: JSONObject,
         caCertificate: ByteArray?,
         expectedInstanceId: String,
-        requireDeviceCredential: Boolean,
-    ): NativeSession {
+        parser: (InputStream) -> T,
+    ): T {
         val connection = URL(origin.serialized + path).openConnection() as HttpsURLConnection
         val timeouts = nativeAuthTimeouts(origin.host)
         try {
@@ -175,8 +199,9 @@ internal object NativeAuthClient {
             connection.setRequestProperty("Origin", origin.serialized)
             connection.setRequestProperty("Sec-Fetch-Site", "same-origin")
             connection.outputStream.use { it.write(body.toString().toByteArray()) }
-            if (connection.responseCode !in 200..299) {
-                throw NativeAuthFailure(nativeAuthFailureForStatus(connection.responseCode))
+            val responseCode = connection.responseCode
+            if (responseCode !in 200..299) {
+                throw NativeAuthFailure(nativeAuthFailureForStatus(responseCode, readErrorCode(connection)))
             }
             if (!connection.contentType.orEmpty().substringBefore(';').equals("application/json", ignoreCase = true)) {
                 throw NativeAuthFailure(NativeAuthFailureKind.INVALID_RESPONSE)
@@ -184,14 +209,7 @@ internal object NativeAuthClient {
             if (connection.contentLengthLong > MAX_NATIVE_AUTH_RESPONSE_BYTES) {
                 throw NativeAuthFailure(NativeAuthFailureKind.INVALID_RESPONSE)
             }
-            return connection.inputStream.use { input ->
-                parseNativeSessionResponse(
-                    input = input,
-                    origin = origin,
-                    expectedInstanceId = expectedInstanceId,
-                    requireDeviceCredential = requireDeviceCredential,
-                )
-            }
+            return connection.inputStream.use(parser)
         } catch (failure: NativeAuthFailure) {
             throw failure
         } catch (failure: SocketTimeoutException) {
@@ -207,9 +225,16 @@ internal object NativeAuthClient {
         }
     }
 
+    private fun readErrorCode(connection: HttpsURLConnection): String? = runCatching {
+        val stream = connection.errorStream ?: return@runCatching null
+        val bytes = stream.use { readAtMost(it, MAX_NATIVE_ERROR_BYTES) }
+        JSONObject(bytes.toString(Charsets.UTF_8)).optString("error").takeIf { it.length in 1..64 }
+    }.getOrNull()
+
 }
 
 internal const val MAX_NATIVE_AUTH_RESPONSE_BYTES = 32 * 1024
+private const val MAX_NATIVE_ERROR_BYTES = 8 * 1024
 private val INSTANCE_ID_PATTERN = Regex("^[a-f0-9]{64}$")
 private val DEVICE_ID_PATTERN = Regex("^[a-f0-9]{32}$")
 private val OPAQUE_TOKEN_PATTERN = Regex("^[A-Za-z0-9_-]{43}$")
@@ -304,6 +329,31 @@ private fun requiredFutureEpoch(response: JSONObject, name: String, now: Long): 
 
 private fun invalidNativeAuthResponse(): Nothing =
     throw NativeAuthFailure(NativeAuthFailureKind.INVALID_RESPONSE)
+
+/** Parse the small reachability response without accepting a Session token. */
+internal fun parseNativeProbeResponse(
+    input: InputStream,
+    origin: GatewayOrigin,
+    expectedInstanceId: String,
+    now: Long = System.currentTimeMillis(),
+): NativeProbe {
+    val bytes = readAtMost(input, MAX_NATIVE_AUTH_RESPONSE_BYTES + 1)
+    if (bytes.size > MAX_NATIVE_AUTH_RESPONSE_BYTES) invalidNativeAuthResponse()
+    val response = try {
+        JSONObject(bytes.toString(Charsets.UTF_8))
+    } catch (failure: JSONException) {
+        throw NativeAuthFailure(NativeAuthFailureKind.INVALID_RESPONSE, failure)
+    }
+    val keys = mutableSetOf<String>()
+    val iterator = response.keys()
+    while (iterator.hasNext()) keys += iterator.next()
+    if (keys != setOf("instanceId", "deviceId", "deviceExpiresAt")) invalidNativeAuthResponse()
+    val instanceId = requiredString(response, "instanceId", INSTANCE_ID_PATTERN)
+    if (instanceId != expectedInstanceId) invalidNativeAuthResponse()
+    val deviceId = requiredString(response, "deviceId", DEVICE_ID_PATTERN)
+    val deviceExpiresAt = requiredFutureEpoch(response, "deviceExpiresAt", now)
+    return NativeProbe(origin, instanceId, deviceId, deviceExpiresAt)
+}
 
 internal fun parseGatewayMetadata(body: JSONObject): GatewayMetadata? {
     val version = body.optInt("version", -1)

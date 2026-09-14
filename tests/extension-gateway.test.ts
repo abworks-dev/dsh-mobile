@@ -358,12 +358,15 @@ describe('gateway extension namespace', () => {
     await writeFile(join(directory, 'mobile.js'), 'window.dshMobile?.register(() => undefined)\n// pushed\n')
     await stream.waitFor('data: {"revision":2}')
 
+    const revokedEvent = stream.waitFor('event: device-revoked')
     const disconnected = new Promise<void>(resolve => {
       stream.response.once('aborted', resolve)
       stream.response.once('close', resolve)
       stream.response.once('end', resolve)
     })
     expect(await gateway.access.revokeDevice(pairedBody.deviceId)).toBe(true)
+    const revokedBody = await revokedEvent
+    expect(revokedBody).toContain('data: {"reason":"device_revoked"}')
     await expect(Promise.race([
       disconnected,
       new Promise<never>((_, reject) => setTimeout(() => reject(new Error('event stream remained open after revocation')), 2_000)),

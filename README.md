@@ -26,14 +26,14 @@
 
 > DSH Mobile 是 DeepSeek Harness 社区插件，原生 App 仅支持 Android。
 >
-> **0.3.16 更新**：兼容社区任务看板的移动布局锚点，优化宽屏右栏与手机提问卡片，并修复自定义 DSH Web 端口仍连接旧默认端口的问题。[详细记录](CHANGELOG.md)。
+> **0.4.0 更新**：加入多设备管理、电脑端撤销状态同步、无 Session 可达性检查；完善插件市场局域网引导、任务状态通知、原生 WebView 沉浸布局和三语配对页。[详细记录](CHANGELOG.md)。
 >
-> **升级提醒**：建议将插件升级至 **0.3.16** 并重启 DSH；现有配对与 0.3.15 App 保持兼容，本次 Android App 仅同步版本号，可按需更新。[兼容说明](#兼容性)。
+> **升级提醒**：0.4.0 需要同步更新插件与 Android App 才能使用多设备列表；旧 App 仍可使用原有单设备配对。[兼容说明](#兼容性)。
 
 <p align="center">
-  <a href="https://github.com/saya-ch/dsh-mobile/releases/download/v0.3.16/dsh-mobile-android-v0.3.16.apk"><img src="assets/brand/app-icon-rounded.svg" alt="DSH Mobile 安卓应用图标" width="72" height="72"></a><br>
-  <a href="https://github.com/saya-ch/dsh-mobile/releases/download/v0.3.16/dsh-mobile-android-v0.3.16.apk"><strong>下载 Android App 0.3.16</strong></a><br>
-  <sub><a href="https://github.com/saya-ch/dsh-mobile/releases/tag/v0.3.16">版本说明与校验文件</a></sub>
+  <a href="https://github.com/saya-ch/dsh-mobile/releases/download/v0.4.0/dsh-mobile-android-v0.4.0.apk"><img src="assets/brand/app-icon-rounded.svg" alt="DSH Mobile 安卓应用图标" width="72" height="72"></a><br>
+  <a href="https://github.com/saya-ch/dsh-mobile/releases/download/v0.4.0/dsh-mobile-android-v0.4.0.apk"><strong>下载 Android App 0.4.0</strong></a><br>
+  <sub><a href="https://github.com/saya-ch/dsh-mobile/releases/tag/v0.4.0">版本说明与校验文件</a></sub>
 </p>
 
 DSH Mobile 是一个 DeepSeek Harness 插件，让手机浏览器或 Android App 通过局域网，或可选的 Tailscale Funnel、cpolar、自建 FRP 远程通道连接电脑，继续使用同一份会话、工作区、消息和工具。局域网与远程访问分别启停、分别管理设备，且都不修改 DeepSeek Harness 源码。
@@ -47,7 +47,7 @@ DSH Mobile 是一个 DeepSeek Harness 插件，让手机浏览器或 Android App
 - **在手机上继续电脑端的工作**：同一份会话、工作区、消息和工具，实时同步。
 - **用对话定制手机端**：直接在 DSH 对话里改手机页面的布局、交互和功能，几秒内刷新。
 - **专属触屏布局**：会话抽屉、工具详情、设置、提问卡片和输入栏都按手机重新组织。App 原生页面跟随系统显示简体中文、英文或意大利文；插件界面跟随 DSH 的语言设置，意大利语资源已为 DSH 后续支持预留。
-- **图片附件**：在已打开会话的输入栏加号菜单顶部选择图片或拍照；支持 PNG、JPEG、WebP、GIF（不超过 8 MiB）和完整分辨率 JPEG。
+- **图片附件**：文件选择使用 DSH 原生“添加”组；DSH Mobile 只在该组补充“拍照”，拍摄结果按 DSH 原生附件流程发送。
 - **自动发现、无需重新配对**：切换 Wi-Fi、热点或 IP 后通常自动恢复。
 - **一键连接诊断**：检查版本、网关、网卡、防火墙和远程通道；稳定的原因码在界面中本地化，并生成不含凭据与完整地址的脱敏报告。
 - **第三方插件 WebSocket 一键放行**：诊断页按目录分组记录被拦截的插件连接（含次数），点允许即放行确切路径，未批准的一律拦截；有新拦截时侧栏红点提醒（#47）。若某插件的连接一直失败（如终端报 1006），先到诊断页看看有没有被拦的连接，一键放行即可，通常无需手动配置。
@@ -110,6 +110,8 @@ dsh plugin --profile web add dshmarket
 
 不安装 App 也可以访问：点击 **复制配对链接**，在手机浏览器中打开；首次访问需要按浏览器提示手动信任插件证书。
 
+手机浏览器中的配对和重新连接页面会按浏览器的 `Accept-Language` 显示简体中文、英文或意大利文；Android App 则跟随系统语言。DSH 内的插件控制面板继续跟随 DSH 当前语言。
+
 ### 远程访问
 
 适合手机离开电脑所在网络后使用。远程访问默认关闭，手机不需要另外安装 Tailscale、cpolar 或 FRP。
@@ -167,6 +169,54 @@ Tailscale Funnel 覆盖范围广，但在中国大陆网络下可能不稳定。
   <img src="https://raw.githubusercontent.com/saya-ch/dsh-mobile/main/assets/screenshots/cyberpunk-monitor-1.png" width="22%" style="margin-left:8px" alt="/mobile 定制为赛博朋克监控面板">
 </p>
 
+### 设备管理
+
+Android App 将局域网、cpolar、Tailscale Funnel 和自建 FRP 统一整理到“已配对设备”列表。首次升级会自动迁移旧版局域网与远程凭据，不要求重新配对；地址变化时按 DSH 安装的稳定 `instanceId` 合并原记录，保留自定义名称。设备 Token 和局域网 CA 继续由 Android Keystore 加密保存，不会显示在列表或二维码中。
+
+每条记录显示自定义名称、连接方式、Origin、实时可达状态和最近连接时间。绿色状态点表示“可达”，灰色状态点表示“检测中”“暂不可达”“配对已过期”或“电脑端已移除”；可达性检查直接验证 DSH Gateway，不依赖 ICMP，也不会把暂时断网误判成电脑端撤销。
+
+- **启动时打开 → 直接进入 DSH**（默认）：单设备直接连接；多设备优先连接上次使用的设备，其次按最近连接时间选择仍有效的设备。连接超过有限重试预算后自动回到列表，不会无限转圈。
+- **启动时打开 → 显示设备列表**：每次启动先选择电脑，适合经常在多台设备之间切换。该选项位于列表右上角的设置按钮中，修改后立即保存。
+- 点按设备行可连接；右侧“…”和长按提供相同的操作面板，可编辑名称、立即检测、重新配对或删除本地记录。删除前会二次确认，并提供短暂撤销；撤销只恢复本机记录，不恢复电脑端已经撤销的授权。
+- 在 WebView 页面打开 DSH **设置 → 通用**，选择 **切换电脑** 可回到已配对设备列表；该动作仅在 Android App 中显示。电脑端撤销设备后，App 保留该条目并显示“电脑端已移除”，停止自动重连，同时提供 **重新配对** 和 **删除本地记录**。
+
+<table>
+  <tr>
+    <td align="center" valign="top" width="50%">
+      <img src="https://raw.githubusercontent.com/saya-ch/dsh-mobile/main/assets/screenshots/device-management.jpg" width="44%" alt="Android App 已配对设备列表"><br>
+      <sub>设备管理列表：查看已配对电脑、连接方式和可达状态</sub>
+    </td>
+    <td align="center" valign="top" width="50%">
+      <img src="https://raw.githubusercontent.com/saya-ch/dsh-mobile/main/assets/screenshots/startup-behavior.jpg" width="44%" alt="Android App 启动行为设置"><br>
+      <sub>启动行为设置：选择直接进入 DSH 或显示设备列表</sub>
+    </td>
+  </tr>
+</table>
+
+### 第三方插件适配
+
+移动适配保持 DSH 原有的工作区、任务管理、终端和文件面板入口，不会把第三方插件内容隔离成另一套页面。下面的宽屏截图展示 Android App 在宽屏下的布局。App 会根据屏幕宽度自适应：手机使用抽屉和浮层，宽屏使用并排面板；两种布局共享相同的功能和连接方式。第三方插件仍由 DSH 自己加载，移动层负责适配布局与连接，不修改 DeepSeek Harness 源码。
+
+兼容条件与 WebSocket 放行规则：
+
+- 本版本已按 DSH `0.1.5-rc.2` 的 renderer-v2 合同检查，并保留对 `0.1.5-rc.1` 局域网路径的验证。DSH 页面需要提供标准的会话、`main`/`panelInfo` 和 `rightbar` 插槽；插件自身需要通过 DSH 的标准面板或侧边栏入口注册内容。
+- 网关默认只允许 DSH 内置的第一方 WebSocket 路径。社区侧边栏插件使用的其他路径默认拦截，通常会在诊断页显示为待处理项目；截图中的`/sidebar/ws/agent-terminals` 就属于这类需要按实际插件确认的路径。
+- 在 **连接诊断 → 第三方 WebSocket 路径** 中，只对确认过的精确路径点击 **允许**。系统不接受带查询字符串或模糊前缀的路径；不建议使用“全部允许”。已允许的路径可以随时移除，局域网和远程连接使用同一套规则。
+- 放行只代表该路径可以通过已认证、同源的 DSH Mobile 网关，不会开放任意 TCP/UDP 端口，也不会绕过设备配对。若社区插件仍然连接失败，先看诊断页的实际拦截路径，再按一条路径放行。
+
+<table>
+  <tr>
+    <td align="center" valign="top" width="50%">
+      <img src="https://raw.githubusercontent.com/saya-ch/dsh-mobile/main/assets/screenshots/third-party-plugin-adaptation.png" width="96%" alt="Android App 宽屏布局与社区侧边栏插件适配"><br>
+      <sub>Android App 下社区侧边栏插件的兼容</sub>
+    </td>
+    <td align="center" valign="top" width="50%">
+      <img src="https://raw.githubusercontent.com/saya-ch/dsh-mobile/main/assets/screenshots/websocket-diagnostics.png" width="96%" alt="Android App 第三方 WebSocket 路径诊断"><br>
+      <sub>连接诊断：检查第三方 WebSocket 路径并按需放行</sub>
+    </td>
+  </tr>
+</table>
+
 ## App 与手机浏览器
 
 
@@ -210,17 +260,18 @@ flowchart LR
 
 下表列出各插件版本验证支持到的 DeepSeek Harness 版本（早于该版本的 0.1.x 均兼容）。0.3.6 起插件不再按版本号拒绝启动，未列出的更新版本由 CI 契约检查兜底。历史记录见 [CHANGELOG.md](CHANGELOG.md)。
 
-| DSH Mobile 插件 | 验证支持的 DeepSeek Harness 版本 |
-| --- | --- |
-| `0.3.15`、`0.3.16` | `0.1.5-rc.2`（契约检查）；`0.1.5-rc.1`（@idoall 局域网实测） |
-| `0.3.14` | `0.1.3-alpha.2` |
-| `0.3.9`-`0.3.12` | `0.1.3-alpha.1` |
-| `0.3.6`-`0.3.8` | `0.1.2-rc.1` |
-| `0.3.4`、`0.3.5` | `0.1.2-alpha.2` |
-| `0.3.0`-`0.3.3` | `0.1.2-alpha.1` |
-| `0.1.4`、`0.2.x` | `0.1.1-rc.2` |
 
-现有 0.3.3–0.3.16 App 无需重新配对；cpolar 用户应使用 0.3.15 或更新 App，较早版本可能在免费线路的慢速首次加载完成前超时；更早的 App 还使用不同的状态栏策略。App 0.1.3 及更早版本需卸载重装并重新配对。
+| DSH Mobile 插件                         | 验证支持的 DeepSeek Harness 版本                             |
+| ----------------------------------------- | -------------------------------------------------------------- |
+| `0.3.15`、`0.3.16`、`0.4.0` | `0.1.5-rc.2`（契约检查）；`0.1.5-rc.1`（@idoall 局域网实测） |
+| `0.3.14`                                | `0.1.3-alpha.2`                                              |
+| `0.3.9`-`0.3.12`                        | `0.1.3-alpha.1`                                              |
+| `0.3.6`-`0.3.8`                         | `0.1.2-rc.1`                                                 |
+| `0.3.4`、`0.3.5`                        | `0.1.2-alpha.2`                                              |
+| `0.3.0`-`0.3.3`                         | `0.1.2-alpha.1`                                              |
+| `0.1.4`、`0.2.x`                        | `0.1.1-rc.2`                                                 |
+
+现有 0.3.3–0.4.0 App 无需重新配对；cpolar 用户应使用 0.3.15 或更新 App，较早版本可能在免费线路的慢速首次加载完成前超时；更早的 App 还使用不同的状态栏策略。App 0.4.0 才支持多设备列表、启动行为设置和电脑端撤销状态同步；旧版 App 仍可连接已保存的单台设备。App 0.1.3 及更早版本需卸载重装并重新配对。
 
 ## 卸载
 

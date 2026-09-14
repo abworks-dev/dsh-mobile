@@ -40,17 +40,18 @@ import android.widget.FrameLayout
 import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.LinearLayout
-import android.widget.PopupMenu
+import android.widget.PopupWindow
 import android.widget.ProgressBar
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import java.io.File
 import java.io.FileOutputStream
+import java.text.DateFormat
+import java.util.Date
 import java.util.concurrent.Executors
 import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.atomic.AtomicBoolean
-import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.min
 
 /** Native Android shell for one authenticated DSH HTTPS origin. */
@@ -112,9 +113,11 @@ class MainActivity : Activity() {
     private val preferences by lazy { getSharedPreferences(PREFERENCES_NAME, MODE_PRIVATE) }
     private val lanCredentialStore by lazy { DeviceCredentialStore(this, "lan") }
     private val remoteCredentialStore by lazy { DeviceCredentialStore(this, "remote") }
+    private val pairedDeviceStore by lazy { PairedDeviceStore(this) }
     private val ioExecutor = Executors.newSingleThreadExecutor()
     private val restoreExecutor = Executors.newFixedThreadPool(3)
     private val recoveryHandler = Handler(Looper.getMainLooper())
+    private val deviceStatusHandler = Handler(Looper.getMainLooper())
     private var webView: WebView? = null
     private var secureWebViewClient: SecureWebViewClient? = null
     private var nativeBridge: NativeBridge? = null
@@ -139,9 +142,13 @@ class MainActivity : Activity() {
     private var recoveryAttempt = 0
     private var recoveryScheduled = false
     private val warnedTailscaleOrigins = mutableSetOf<String>()
-    // The floating toolbar starts hidden so the page's own header stays clear;
-    // scrolling back up brings it in, scrolling down slides it away.
-    private var toolbarHidden = true
+    private var deviceListGeneration = 0
+    private var deviceListRefreshRunnable: Runnable? = null
+    private var activeDeviceKey: String? = null
+    private val deviceStatusViews = mutableMapOf<String, TextView>()
+    private var deviceListStatus: TextView? = null
+    private var deviceUndoPopup: PopupWindow? = null
+    private var deviceListVisible = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -149,6 +156,7 @@ class MainActivity : Activity() {
         configureEdgeToEdgeWindow(window)
         applyStatusBarIconContrast(window, getColor(R.color.app_background))
         nearbyPermissionLimited = preferences.getBoolean(PREFERENCE_NEARBY_PERMISSION_LIMITED, false)
+        migrateLegacyDeviceSlots()
         val retainedHandoff = lastNonConfigurationInstance as? RetainedBridgeHandoff
         restoredNativeBridgeState = retainedHandoff?.bridgeState
             ?: savedInstanceState?.getBundle(STATE_NATIVE_BRIDGE)
@@ -228,15 +236,19 @@ class MainActivity : Activity() {
         super.onResume()
         nativeBridge?.onHostResumed()
         webView?.onResume()
+        if (deviceListVisible && showingSetup) refreshDeviceStatuses(pairedDeviceStore.load())
     }
 
     override fun onPause() {
+        pauseDeviceListRefresh()
         webView?.onPause()
         CookieManager.getInstance().flush()
         super.onPause()
     }
 
     override fun onDestroy() {
+        dismissDeviceUndo()
+        stopDeviceListRefresh()
         cancelAutomaticRecovery()
         invalidateRestoreAttempts()
         invalidatePairingAttempts()
@@ -265,6 +277,50 @@ class MainActivity : Activity() {
         }
     }
 
+    /** Convert the legacy one-LAN/one-remote stores into the encrypted device list once. */
+    private fun migrateLegacyDeviceSlots() {
+        if (pairedDeviceStore.isMigrationComplete()) return
+        val rows = AccessMode.entries.mapNotNull { mode ->
+            val origin = GatewayOrigin.parse(preferences.getString(originPreference(mode), "").orEmpty())
+            val credential = credentialStore(mode).load()
+            if (origin == null || credential == null || credential.expiresAt <= 0L) return@mapNotNull null
+            PairedDeviceRecord(
+                instanceId = credential.instanceId,
+                deviceId = "",
+                displayName = localizedDefaultDeviceName(mode),
+                mode = mode,
+                origin = origin,
+                deviceToken = credential.deviceToken,
+                expiresAt = credential.expiresAt,
+                caCertificate = credential.caCertificate,
+                lastConnectedAt = preferences.getLong(lastConnectedPreference(mode), 0L).takeIf { it > 0L },
+                lastReachableAt = null,
+                status = if (credential.expiresAt > System.currentTimeMillis()) PairedDeviceStatus.UNKNOWN else PairedDeviceStatus.EXPIRED,
+            )
+        }
+        pairedDeviceStore.migrateLegacy(rows)
+    }
+
+    private fun lastConnectedPreference(mode: AccessMode): String = when (mode) {
+        AccessMode.LAN -> PREFERENCE_LAST_CONNECTED_LAN
+        AccessMode.REMOTE -> PREFERENCE_LAST_CONNECTED_REMOTE
+    }
+
+    private fun localizedDefaultDeviceName(mode: AccessMode): String = when (mode) {
+        AccessMode.LAN -> getString(R.string.default_lan_device_name)
+        AccessMode.REMOTE -> getString(R.string.default_remote_device_name)
+    }
+
+    private fun PairedDeviceRecord.credential(): DeviceCredential = DeviceCredential(
+        instanceId = instanceId,
+        deviceToken = deviceToken,
+        expiresAt = expiresAt,
+        caCertificate = caCertificate,
+    )
+
+    private fun launchBehavior(): LaunchBehavior =
+        LaunchBehavior.parse(preferences.getString(PREFERENCE_LAUNCH_BEHAVIOR, null)) ?: LaunchBehavior.DIRECT_DSH
+
     private fun credentialStore(mode: AccessMode = accessMode): DeviceCredentialStore = when (mode) {
         AccessMode.LAN -> lanCredentialStore
         AccessMode.REMOTE -> remoteCredentialStore
@@ -276,45 +332,453 @@ class MainActivity : Activity() {
     }
 
     private fun restoreColdStartConnection(preferredMode: AccessMode?) {
-        val targets = ConnectionRestorePolicy.targets(
-            preferredMode = preferredMode,
-            lanOrigin = preferences.getString(PREFERENCE_LAN_ORIGIN, null),
-            lanCredential = lanCredentialStore.load(),
-            remoteOrigin = preferences.getString(PREFERENCE_REMOTE_ORIGIN, null),
-            remoteCredential = remoteCredentialStore.load(),
-            now = System.currentTimeMillis(),
-        )
-        if (targets.isEmpty()) {
+        val devices = pairedDeviceStore.load()
+        if (devices.isEmpty() || launchBehavior() == LaunchBehavior.DEVICE_LIST) {
             showConnectionCenter()
             return
         }
-        showConnectionCenter()
-        connectionCenterStatus?.apply {
-            setText(R.string.background_restore_running)
-            visibility = View.VISIBLE
+        val preferred = ConnectionRestorePolicy.selectStartupDevice(
+            devices = devices,
+            savedKey = preferences.getString(PREFERENCE_LAST_DEVICE_KEY, null),
+            preferredMode = preferredMode,
+            now = System.currentTimeMillis(),
+        )
+        if (preferred == null) {
+            showDeviceList()
+            return
         }
-        val generation = beginRestoreAttempt()
-        val claimed = AtomicBoolean(false)
-        val remaining = AtomicInteger(targets.size)
-        targets.forEach { target ->
-            restoreTrustedDevice(
-                preferredOrigin = target.origin,
-                credential = target.credential,
-                mode = target.mode,
-                generation = generation,
-                claimSuccess = { claimed.compareAndSet(false, true) },
-            ) {
-                if (remaining.decrementAndGet() == 0 && !claimed.get() && generation == restoreGeneration) {
-                    connectionCenterStatus?.apply {
-                        setText(R.string.background_restore_failed)
-                        visibility = View.VISIBLE
-                    }
+        // Direct startup should not flash the device list. Keep a small native
+        // loading surface while the most recently used device is renewed.
+        showRestoringTrust()
+        activeDeviceKey = preferred.key
+        restoreTrustedDevice(
+            preferredOrigin = preferred.origin,
+            credential = preferred.credential(),
+            mode = preferred.mode,
+            generation = beginRestoreAttempt(),
+            deviceKey = preferred.key,
+        ) { disposition ->
+            if (disposition == RestoreFailureDisposition.RETRY_TRANSIENT) {
+                if (!scheduleAutomaticRecovery() && !isFinishing && !isDestroyed) {
+                    showDeviceList()
+                    deviceListStatus?.setText(R.string.background_restore_failed)
                 }
+            } else if (!isFinishing && !isDestroyed) {
+                showDeviceList()
+                deviceListStatus?.setText(R.string.background_restore_failed)
             }
         }
     }
 
     private fun showConnectionCenter() {
+        if (pairedDeviceStore.load().isNotEmpty()) {
+            showDeviceList()
+            return
+        }
+        showConnectionChoices()
+    }
+
+    /** Render the stable device-management root used when more than one computer is paired. */
+    private fun showDeviceList() {
+        stopDeviceListRefresh()
+        invalidateRestoreAttempts()
+        invalidatePairingAttempts()
+        showingSetup = true
+        setupBackAction = null
+        gatewayOrigin = null
+        retryUrl = null
+        destroyWebView()
+        cancelAutomaticRecovery()
+        failureDialog?.dismiss()
+        deviceListVisible = true
+        deviceStatusViews.clear()
+
+        val card = createSetupCard(surface = false)
+        val heading = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        heading.addView(textView(R.string.paired_devices_title, 30f, Typeface.BOLD), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        heading.addView(toolbarIconButton(R.drawable.ic_settings, R.string.launch_settings).apply {
+            setOnClickListener { showLaunchSettings() }
+        }, LinearLayout.LayoutParams(dp(48), dp(48)))
+        card.addView(heading)
+        card.addView(spacer(8))
+        deviceListStatus = textView(R.string.paired_devices_description, 16f, Typeface.NORMAL, R.color.app_secondary).apply {
+            accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
+        }
+        card.addView(deviceListStatus)
+        card.addView(spacer(18))
+        val rows = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val devices = pairedDeviceStore.load()
+        devices.forEachIndexed { index, device ->
+            if (index > 0) rows.addView(spacer(10))
+            rows.addView(deviceRow(device))
+        }
+        card.addView(rows)
+        card.addView(spacer(18))
+        card.addView(primaryButton(R.string.add_computer, 52) { showConnectionChoices() }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        refreshDeviceStatuses(devices)
+    }
+
+    private fun deviceRow(device: PairedDeviceRecord): View {
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(16), dp(12), dp(8), dp(12))
+            background = roundedRipple(getColor(R.color.app_surface), 16)
+            isClickable = true
+            isFocusable = true
+            contentDescription = getString(R.string.open_paired_device, device.displayName)
+        }
+        val details = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val title = TextView(this).apply {
+            text = device.displayName
+            textSize = 17f
+            setTypeface(Typeface.DEFAULT, Typeface.BOLD)
+            setTextColor(getColor(R.color.app_foreground))
+            maxLines = 1
+            ellipsize = TextUtils.TruncateAt.END
+        }
+        val address = TextView(this).apply {
+            text = getString(R.string.paired_device_address, device.modeLabel(), device.origin.serialized)
+            textSize = 12f
+            setTextColor(getColor(R.color.app_secondary))
+            maxLines = 1
+            ellipsize = TextUtils.TruncateAt.MIDDLE
+        }
+        val status = TextView(this).apply {
+            textSize = 12f
+            setTextColor(getColor(R.color.app_secondary))
+            deviceStatusViews[device.key] = this
+            setDeviceStatusText(this, device)
+        }
+        details.addView(title)
+        details.addView(spacer(3))
+        details.addView(address)
+        details.addView(status)
+        row.addView(details, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        updateDeviceRowAccessibility(row, device, status.text)
+        row.addView(toolbarIconButton(R.drawable.ic_more_vertical, R.string.device_actions).apply {
+            setOnClickListener { showDeviceActions(device) }
+        }, LinearLayout.LayoutParams(dp(48), dp(48)))
+        row.addView(ImageView(this).apply {
+            setImageResource(R.drawable.ic_chevron_right)
+            contentDescription = null
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+        }, LinearLayout.LayoutParams(dp(32), dp(48)))
+        row.setOnClickListener { connectPairedDevice(device) }
+        row.setOnLongClickListener {
+            row.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+            showDeviceActions(device)
+            true
+        }
+        return row
+    }
+
+    private fun PairedDeviceRecord.modeLabel(): String = when (mode) {
+        AccessMode.LAN -> getString(R.string.connection_mode_lan)
+        AccessMode.REMOTE -> getString(R.string.connection_mode_remote)
+    }
+
+    private fun setDeviceStatusText(view: TextView, device: PairedDeviceRecord) {
+        val current = device.key == activeDeviceKey && webView != null
+        val statusResource = when {
+            current -> R.string.device_status_current
+            device.status == PairedDeviceStatus.REACHABLE -> R.string.device_status_reachable
+            device.status == PairedDeviceStatus.REVOKED -> R.string.device_status_revoked
+            device.status == PairedDeviceStatus.EXPIRED -> R.string.device_status_expired
+            device.status == PairedDeviceStatus.ADDRESS_CHANGED -> R.string.device_status_address_changed
+            device.status == PairedDeviceStatus.UNREACHABLE -> R.string.device_status_unreachable
+            else -> R.string.device_status_checking
+        }
+        val status = getString(statusResource)
+        view.text = if (device.lastConnectedAt != null || device.status != PairedDeviceStatus.UNKNOWN) {
+            getString(R.string.device_status_summary, status, formatLastConnected(device.lastConnectedAt))
+        } else {
+            status
+        }
+        val color = getColor(if (device.status == PairedDeviceStatus.REACHABLE || current) R.color.app_success else R.color.app_secondary)
+        view.setTextColor(color)
+        view.setCompoundDrawablesWithIntrinsicBounds(
+            GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(color)
+                setSize(dp(8), dp(8))
+            },
+            null,
+            null,
+            null,
+        )
+        view.compoundDrawablePadding = dp(6)
+        updateDeviceRowAccessibility(view.parent?.parent as? View, device, view.text)
+    }
+
+    private fun formatLastConnected(timestamp: Long?): String {
+        if (timestamp == null) return getString(R.string.device_last_connected_never)
+        val elapsed = (System.currentTimeMillis() - timestamp).coerceAtLeast(0L)
+        return when {
+            elapsed < 60_000L -> getString(R.string.device_last_connected_now)
+            elapsed < 3_600_000L -> getString(R.string.device_last_connected_minutes, (elapsed / 60_000L).coerceAtLeast(1L))
+            elapsed < 86_400_000L -> getString(R.string.device_last_connected_hours, (elapsed / 3_600_000L).coerceAtLeast(1L))
+            elapsed < 7 * 86_400_000L -> getString(R.string.device_last_connected_days, (elapsed / 86_400_000L).coerceAtLeast(1L))
+            else -> DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(timestamp))
+        }
+    }
+
+    private fun updateDeviceRowAccessibility(row: View?, device: PairedDeviceRecord, status: CharSequence) {
+        row?.contentDescription = getString(
+            R.string.paired_device_accessibility,
+            device.displayName,
+            device.modeLabel(),
+            device.origin.serialized,
+            status,
+        )
+    }
+
+    private fun refreshDeviceStatuses(devices: List<PairedDeviceRecord>) {
+        val generation = ++deviceListGeneration
+        devices.forEach { device ->
+            restoreExecutor.execute {
+                val result = runCatching {
+                    NativeAuthClient.probe(device.origin, device.deviceToken, device.caCertificate, device.instanceId)
+                }.recoverCatching { failure ->
+                    // Older plugins do not expose the session-free probe yet.
+                    // Keep their trusted renewal path as a compatibility fallback.
+                    if ((failure as? NativeAuthFailure)?.kind != NativeAuthFailureKind.INVALID_RESPONSE) throw failure
+                    val session = NativeAuthClient.renew(device.origin, device.deviceToken, device.caCertificate, device.instanceId)
+                    NativeProbe(device.origin, device.instanceId, session.deviceId, device.expiresAt)
+                }
+                val probe = result.getOrNull()
+                val status = when {
+                    probe != null && (device.deviceId.isEmpty() || probe.deviceId == device.deviceId) -> PairedDeviceStatus.REACHABLE
+                    probe != null -> PairedDeviceStatus.ADDRESS_CHANGED
+                    (result.exceptionOrNull() as? NativeAuthFailure)?.kind == NativeAuthFailureKind.DEVICE_REVOKED -> PairedDeviceStatus.REVOKED
+                    (result.exceptionOrNull() as? NativeAuthFailure)?.kind == NativeAuthFailureKind.DEVICE_EXPIRED -> PairedDeviceStatus.EXPIRED
+                    (result.exceptionOrNull() as? NativeAuthFailure)?.kind == NativeAuthFailureKind.PAIRING_EXPIRED -> PairedDeviceStatus.EXPIRED
+                    else -> PairedDeviceStatus.UNREACHABLE
+                }
+                runOnUiThread {
+                    if (generation != deviceListGeneration || isFinishing || isDestroyed) return@runOnUiThread
+                    val now = System.currentTimeMillis()
+                    pairedDeviceStore.update(device.key) { current ->
+                        current.copy(
+                            deviceId = if (probe != null && current.deviceId.isEmpty()) probe.deviceId else current.deviceId,
+                            expiresAt = probe?.deviceExpiresAt ?: current.expiresAt,
+                            status = status,
+                            lastReachableAt = if (status == PairedDeviceStatus.REACHABLE) now else current.lastReachableAt,
+                        )
+                    }
+                    pairedDeviceStore.load().firstOrNull { it.key == device.key }?.let { setDeviceStatusText(deviceStatusViews[device.key] ?: return@let, it) }
+                }
+            }
+        }
+        deviceListRefreshRunnable = Runnable {
+            if (!isFinishing && !isDestroyed && deviceListVisible && showingSetup && pairedDeviceStore.load().isNotEmpty()) refreshDeviceStatuses(pairedDeviceStore.load())
+        }.also { deviceStatusHandler.postDelayed(it, DEVICE_STATUS_REFRESH_MS) }
+    }
+
+    private fun stopDeviceListRefresh() {
+        deviceListGeneration += 1
+        deviceListRefreshRunnable?.let(deviceStatusHandler::removeCallbacks)
+        deviceListRefreshRunnable = null
+        deviceStatusViews.clear()
+    }
+
+    private fun pauseDeviceListRefresh() {
+        deviceListGeneration += 1
+        deviceListRefreshRunnable?.let(deviceStatusHandler::removeCallbacks)
+        deviceListRefreshRunnable = null
+    }
+
+    private fun showDeviceActions(device: PairedDeviceRecord) {
+        val needsRepair = device.status == PairedDeviceStatus.REVOKED
+            || device.status == PairedDeviceStatus.EXPIRED
+            || device.status == PairedDeviceStatus.ADDRESS_CHANGED
+        AlertDialog.Builder(this)
+            .setTitle(device.displayName)
+            .setItems(arrayOf(
+                getString(if (needsRepair) R.string.device_action_repair else R.string.device_action_connect),
+                getString(R.string.device_action_edit),
+                getString(R.string.device_action_check),
+                getString(R.string.device_action_delete),
+            )) { _, which ->
+                when (which) {
+                    0 -> if (needsRepair) repairPairedDevice(device) else connectPairedDevice(device)
+                    1 -> editDeviceName(device)
+                    2 -> { pairedDeviceStore.update(device.key) { it.copy(status = PairedDeviceStatus.UNKNOWN) }; showDeviceList() }
+                    3 -> confirmDeleteDevice(device)
+                }
+            }
+            .setNegativeButton(R.string.cancel, null)
+            .show()
+    }
+
+    private fun repairPairedDevice(device: PairedDeviceRecord) {
+        activeDeviceKey = null
+        accessMode = device.mode
+        if (device.mode == AccessMode.LAN) showSetup() else showRemoteSetup()
+    }
+
+    private fun editDeviceName(device: PairedDeviceRecord) {
+        val input = EditText(this).apply {
+            setText(device.displayName)
+            setSelection(text.length)
+            hint = getString(R.string.device_name_hint)
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+            minHeight = dp(48)
+            setPadding(dp(12), 0, dp(12), 0)
+        }
+        AlertDialog.Builder(this)
+            .setTitle(R.string.edit_device_name)
+            .setView(input)
+            .setNegativeButton(R.string.cancel, null)
+            .setPositiveButton(R.string.save) { _, _ ->
+                val name = java.text.Normalizer.normalize(input.text.toString(), java.text.Normalizer.Form.NFC).trim()
+                if (name.length !in 1..32 || Regex("[\\u0000-\\u001f\\u007f]").containsMatchIn(name)) {
+                    Toast.makeText(this, R.string.invalid_device_name, Toast.LENGTH_SHORT).show()
+                } else {
+                    pairedDeviceStore.update(device.key) { it.copy(displayName = name) }
+                    showDeviceList()
+                }
+            }
+            .show()
+    }
+
+    private fun confirmDeleteDevice(device: PairedDeviceRecord) {
+        AlertDialog.Builder(this)
+            .setTitle(getString(R.string.delete_device_title, device.displayName))
+            .setMessage(R.string.delete_device_message)
+            .setNegativeButton(R.string.cancel, null)
+            .setPositiveButton(R.string.delete) { _, _ ->
+                val legacyCredential = credentialStore(device.mode).load()
+                    ?.takeIf { it.instanceId == device.instanceId }
+                val legacyOrigin = preferences.getString(originPreference(device.mode), null)
+                if (activeDeviceKey == device.key) {
+                    activeDeviceKey = null
+                    destroyWebView()
+                }
+                pairedDeviceStore.remove(device.key)
+                if (legacyCredential != null) credentialStore(device.mode).clear()
+                if (legacyCredential != null && legacyOrigin == device.origin.serialized) {
+                    preferences.edit().remove(originPreference(device.mode)).apply()
+                }
+                showConnectionCenter()
+                showDeviceUndo(device, legacyCredential, legacyOrigin)
+            }
+            .show()
+    }
+
+    private fun showDeviceUndo(
+        record: PairedDeviceRecord,
+        legacyCredential: DeviceCredential?,
+        legacyOrigin: String?,
+    ) {
+        dismissDeviceUndo()
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(16), dp(8), dp(8), dp(8))
+            background = roundedSurface(getColor(R.color.app_surface), 16).apply {
+                setStroke(dp(1), getColor(R.color.app_border))
+            }
+        }
+        content.addView(
+            TextView(this).apply {
+                text = getString(R.string.device_deleted, record.displayName)
+                textSize = 14f
+                setTextColor(getColor(R.color.app_foreground))
+            },
+            LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
+        )
+        val popup = PopupWindow(
+            content,
+            min(resources.displayMetrics.widthPixels - dp(32), dp(560)),
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+            false,
+        ).apply {
+            isOutsideTouchable = true
+            elevation = dp(8).toFloat()
+            setBackgroundDrawable(roundedSurface(getColor(R.color.app_surface), 16))
+        }
+        content.addView(Button(this).apply {
+            setText(R.string.undo)
+            isAllCaps = false
+            minHeight = dp(48)
+            setTextColor(getColor(R.color.app_accent))
+            backgroundTintList = null
+            background = roundedRipple(getColor(R.color.app_surface), 12)
+            setOnClickListener {
+                pairedDeviceStore.upsert(record)
+                if (legacyCredential != null) credentialStore(record.mode).save(legacyCredential)
+                if (legacyCredential != null && legacyOrigin != null) {
+                    preferences.edit().putString(originPreference(record.mode), legacyOrigin).apply()
+                }
+                popup.dismiss()
+                deviceUndoPopup = null
+                showDeviceList()
+                deviceListStatus?.setText(R.string.device_undo_done)
+            }
+        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        popup.setOnDismissListener {
+            if (deviceUndoPopup === popup) deviceUndoPopup = null
+        }
+        deviceUndoPopup = popup
+        popup.showAtLocation(window.decorView, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL, 0, dp(24))
+        recoveryHandler.postDelayed({
+            if (deviceUndoPopup === popup) popup.dismiss()
+        }, DEVICE_UNDO_TIMEOUT_MS)
+    }
+
+    private fun dismissDeviceUndo() {
+        deviceUndoPopup?.dismiss()
+        deviceUndoPopup = null
+    }
+
+    private fun showLaunchSettings() {
+        val values = arrayOf(getString(R.string.launch_direct_dsh), getString(R.string.launch_device_list))
+        val selected = if (launchBehavior() == LaunchBehavior.DEVICE_LIST) 1 else 0
+        AlertDialog.Builder(this)
+            .setTitle(R.string.launch_settings)
+            .setSingleChoiceItems(values, selected) { dialog, which ->
+                preferences.edit().putString(PREFERENCE_LAUNCH_BEHAVIOR, if (which == 1) LaunchBehavior.DEVICE_LIST.name else LaunchBehavior.DIRECT_DSH.name).apply()
+                dialog.dismiss()
+                deviceListStatus?.setText(R.string.launch_setting_saved)
+            }
+            .setNegativeButton(R.string.cancel, null)
+            .show()
+    }
+
+    private fun connectPairedDevice(device: PairedDeviceRecord) {
+        if (device.status == PairedDeviceStatus.REVOKED
+            || device.status == PairedDeviceStatus.EXPIRED
+            || device.status == PairedDeviceStatus.ADDRESS_CHANGED
+        ) {
+            showDeviceActions(device)
+            return
+        }
+        activeDeviceKey = device.key
+        accessMode = device.mode
+        (deviceListStatus ?: connectionCenterStatus)?.apply {
+            text = getString(R.string.connecting_to_device, device.displayName)
+            visibility = View.VISIBLE
+        }
+        restoreTrustedDevice(device.origin, device.credential(), device.mode, beginRestoreAttempt(), deviceKey = device.key) { disposition ->
+            if (disposition != RestoreFailureDisposition.RETRY_TRANSIENT) {
+                pairedDeviceStore.update(device.key) {
+                    if (it.status == PairedDeviceStatus.REVOKED
+                        || it.status == PairedDeviceStatus.EXPIRED
+                        || it.status == PairedDeviceStatus.ADDRESS_CHANGED
+                    ) it else it.copy(status = PairedDeviceStatus.UNREACHABLE)
+                }
+                showDeviceList()
+            }
+        }
+    }
+
+    private fun showConnectionChoices() {
+        stopDeviceListRefresh()
+        deviceListVisible = false
         invalidateRestoreAttempts()
         invalidatePairingAttempts()
         showingSetup = true
@@ -346,7 +810,7 @@ class MainActivity : Activity() {
             R.string.lan_access_title,
             R.string.lan_access_description,
             lanCredentialStore.load()?.expiresAt?.let { it > System.currentTimeMillis() } == true,
-            action = { openAccessMode(AccessMode.LAN) },
+            action = { openAccessMode(AccessMode.LAN, restoreSaved = pairedDeviceStore.load().isEmpty()) },
             configure = { openAccessMode(AccessMode.LAN, restoreSaved = false) },
         ))
         card.addView(spacer(12))
@@ -354,7 +818,7 @@ class MainActivity : Activity() {
             R.string.remote_access_title,
             R.string.remote_access_description,
             remoteCredentialStore.load()?.expiresAt?.let { it > System.currentTimeMillis() } == true,
-            action = { openAccessMode(AccessMode.REMOTE) },
+            action = { openAccessMode(AccessMode.REMOTE, restoreSaved = pairedDeviceStore.load().isEmpty()) },
             configure = { openAccessMode(AccessMode.REMOTE, restoreSaved = false) },
         ))
     }
@@ -416,7 +880,9 @@ class MainActivity : Activity() {
     }
 
     private fun showSetup() {
+        stopDeviceListRefresh()
         invalidatePairingAttempts()
+        deviceListVisible = false
         accessMode = AccessMode.LAN
         showingSetup = true
         setupBackAction = ::showConnectionCenter
@@ -482,7 +948,9 @@ class MainActivity : Activity() {
     }
 
     private fun showRemoteSetup() {
+        stopDeviceListRefresh()
         invalidatePairingAttempts()
+        deviceListVisible = false
         accessMode = AccessMode.REMOTE
         showingSetup = true
         setupBackAction = ::showConnectionCenter
@@ -560,6 +1028,8 @@ class MainActivity : Activity() {
     }
 
     private fun showRestoringTrust() {
+        stopDeviceListRefresh()
+        deviceListVisible = false
         showingSetup = false
         setupBackAction = null
         destroyWebView()
@@ -584,7 +1054,9 @@ class MainActivity : Activity() {
     }
 
     private fun showPairing(harness: DiscoveredHarness, prefilledInput: String = "", autoConnect: Boolean = false) {
+        stopDeviceListRefresh()
         invalidatePairingAttempts()
+        deviceListVisible = false
         showingSetup = true
         setupBackAction = if (accessMode == AccessMode.LAN) ::showSetup else ::showRemoteSetup
         val card = createSetupCard()
@@ -792,10 +1264,11 @@ class MainActivity : Activity() {
                 return@execute
             }
             val (certificate, expectedInstanceId) = trust
+            val existingRecord = pairedDeviceStore.load().firstOrNull { it.mode == mode && it.instanceId == key.instanceId }
             val savedOrigin = GatewayOrigin.parse(
                 preferences.getString(originPreference(mode), "").orEmpty(),
-            )
-            val existingCredential = store.load().takeIf {
+            ) ?: existingRecord?.origin
+            val existingCredential = (existingRecord?.credential() ?: store.load()).takeIf {
                 ConnectionRestorePolicy.shouldRenewBeforePairing(
                     mode = mode,
                     credential = it,
@@ -823,6 +1296,7 @@ class MainActivity : Activity() {
                             status.setText(R.string.pairing_failed)
                             button.isEnabled = true
                         } else {
+                            savePairedDevice(mode, origin, renewed, existingCredential)
                             installNativeSession(
                                 origin = origin,
                                 session = renewed,
@@ -862,11 +1336,20 @@ class MainActivity : Activity() {
                         status.setText(R.string.pairing_failed)
                         button.isEnabled = true
                     } else {
+                        val record = savePairedDevice(
+                            mode = mode,
+                            origin = origin,
+                            session = session,
+                            credential = DeviceCredential(session.instanceId, deviceToken, expiresAt, certificate),
+                        )
                         installNativeSession(
                             origin = origin,
                             session = session,
                             isCurrent = { generation == pairingGeneration && accessMode == mode },
-                        ) { showBrowser(origin, certificate) }
+                        ) {
+                            if (record.displayName == localizedDefaultDeviceName(record.mode)) showPairedDeviceNamePrompt(record) { showBrowser(origin, certificate) }
+                            else showBrowser(origin, certificate)
+                        }
                     }
                 } }
                 .onFailure { error -> runOnUiThread {
@@ -901,6 +1384,8 @@ class MainActivity : Activity() {
 
     private fun pairingFailureMessage(error: Throwable, origin: GatewayOrigin): Int = when ((error as? NativeAuthFailure)?.kind) {
         NativeAuthFailureKind.PAIRING_EXPIRED -> R.string.pairing_expired
+        NativeAuthFailureKind.DEVICE_REVOKED -> R.string.device_revoked_message
+        NativeAuthFailureKind.DEVICE_EXPIRED -> R.string.pairing_expired
         NativeAuthFailureKind.DEVICE_LIMIT -> R.string.pairing_device_limit
         NativeAuthFailureKind.RATE_LIMITED -> R.string.pairing_rate_limited
         NativeAuthFailureKind.TIMEOUT -> if (RemoteHostPolicy.needsTailscaleVpnNotice(origin.host)) R.string.pairing_tailscale_unreachable else R.string.pairing_timeout
@@ -963,9 +1448,12 @@ class MainActivity : Activity() {
                     status.text = resources.getQuantityString(R.plurals.harnesses_found, found.size, found.size)
                     found.forEachIndexed { index, harness ->
                         if (index > 0) results.addView(spacer(8))
-                        val trustedCredential = lanCredentialStore.load()?.takeIf {
-                            it.expiresAt > System.currentTimeMillis() && it.instanceId == harness.instanceId
-                        }
+                        val trustedCredential = pairedDeviceStore.load()
+                            .firstOrNull { it.mode == AccessMode.LAN && it.instanceId == harness.instanceId && it.expiresAt > System.currentTimeMillis() }
+                            ?.credential()
+                            ?: lanCredentialStore.load()?.takeIf {
+                                it.expiresAt > System.currentTimeMillis() && it.instanceId == harness.instanceId
+                            }
                         val trusted = trustedCredential != null
                         results.addView(Button(this).apply {
                             text = getString(R.string.harness_list_item, harness.deviceName, harness.origin.serialized)
@@ -1074,7 +1562,108 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun savePairedDevice(
+        mode: AccessMode,
+        origin: GatewayOrigin,
+        session: NativeSession,
+        credential: DeviceCredential,
+    ): PairedDeviceRecord {
+        dismissDeviceUndo()
+        val key = "${mode.name.lowercase()}:${session.instanceId}"
+        val existing = pairedDeviceStore.load().firstOrNull { it.key == key }
+        val name = existing?.displayName ?: localizedDefaultDeviceName(mode)
+        val token = session.deviceToken ?: credential.deviceToken
+        val expiresAt = session.deviceExpiresAt ?: credential.expiresAt
+        val now = System.currentTimeMillis()
+        val record = PairedDeviceRecord(
+                instanceId = session.instanceId,
+                deviceId = session.deviceId,
+                displayName = name,
+                mode = mode,
+                origin = origin,
+                deviceToken = token,
+                expiresAt = expiresAt,
+                caCertificate = credential.caCertificate,
+                lastConnectedAt = now,
+                lastReachableAt = now,
+                status = PairedDeviceStatus.REACHABLE,
+        )
+        pairedDeviceStore.upsert(record)
+        activeDeviceKey = key
+        preferences.edit()
+            .putString(PREFERENCE_LAST_DEVICE_KEY, key)
+            .putLong(lastConnectedPreference(mode), now)
+            .putString(originPreference(mode), origin.serialized)
+            .apply()
+        return record
+    }
+
+    private fun showPairedDeviceNamePrompt(record: PairedDeviceRecord, complete: () -> Unit) {
+        val input = EditText(this).apply {
+            setText(record.displayName)
+            setSelection(text.length)
+            hint = getString(R.string.device_name_hint)
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+            minHeight = dp(48)
+        }
+        val dialog = AlertDialog.Builder(this)
+            .setTitle(R.string.name_new_device)
+            .setMessage(R.string.name_new_device_message)
+            .setView(input)
+            .setNegativeButton(R.string.skip) { _, _ -> complete() }
+            .setPositiveButton(R.string.save_and_connect, null)
+            .create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val name = java.text.Normalizer.normalize(input.text.toString(), java.text.Normalizer.Form.NFC).trim()
+                if (name.length !in 1..32 || Regex("[\\u0000-\\u001f\\u007f]").containsMatchIn(name)) {
+                    Toast.makeText(this, R.string.invalid_device_name, Toast.LENGTH_SHORT).show()
+                } else {
+                    pairedDeviceStore.update(record.key) { it.copy(displayName = name) }
+                    dialog.dismiss()
+                    complete()
+                }
+            }
+        }
+        dialog.setOnCancelListener { complete() }
+        dialog.show()
+    }
+
+    private fun handleDeviceRevoked() {
+        val key = activeDeviceKey ?: return
+        pairedDeviceStore.update(key) { it.copy(status = PairedDeviceStatus.REVOKED) }
+        runOnUiThread {
+            if (activeDeviceKey != key || isFinishing || isDestroyed) return@runOnUiThread
+            activeDeviceKey = null
+            destroyWebView()
+            Toast.makeText(this, R.string.device_revoked_message, Toast.LENGTH_LONG).show()
+            showDeviceList()
+        }
+    }
+
     private fun recoverAutomatically() {
+        val paired = activeDeviceKey?.let { key -> pairedDeviceStore.load().firstOrNull { it.key == key } }
+        if (paired != null) {
+            if (paired.status == PairedDeviceStatus.REVOKED
+                || paired.status == PairedDeviceStatus.EXPIRED
+                || paired.status == PairedDeviceStatus.ADDRESS_CHANGED
+                || paired.expiresAt <= System.currentTimeMillis()
+            ) {
+                cancelAutomaticRecovery()
+                if (!isFinishing && !isDestroyed) showDeviceList()
+                return
+            }
+            val generation = beginRestoreAttempt()
+            restoreTrustedDevice(paired.origin, paired.credential(), paired.mode, generation, deviceKey = paired.key) { disposition ->
+                if (disposition == RestoreFailureDisposition.RETRY_TRANSIENT) {
+                    if (!scheduleAutomaticRecovery() && !isFinishing && !isDestroyed) showDeviceList()
+                } else {
+                    cancelAutomaticRecovery()
+                    if (!isFinishing && !isDestroyed) showDeviceList()
+                }
+            }
+            return
+        }
         val mode = accessMode
         val credential = credentialStore(mode).load() ?: return
         if (credential.expiresAt <= System.currentTimeMillis()) {
@@ -1087,21 +1676,34 @@ class MainActivity : Activity() {
         val generation = beginRestoreAttempt()
         restoreTrustedDevice(preferred, credential, mode, generation) { disposition ->
             if (disposition == RestoreFailureDisposition.RETRY_TRANSIENT) {
-                scheduleAutomaticRecovery()
+                if (!scheduleAutomaticRecovery() && !isFinishing && !isDestroyed) showConnectionCenter()
             } else {
                 cancelAutomaticRecovery()
             }
         }
     }
 
-    private fun scheduleAutomaticRecovery() {
-        if (recoveryScheduled || recoveryAttempt >= RECOVERY_DELAYS_MS.size || credentialStore().load() == null) return
+    private fun canRecoverAutomatically(): Boolean {
+        val paired = activeDeviceKey?.let { key -> pairedDeviceStore.load().firstOrNull { it.key == key } }
+        if (paired != null) {
+            return paired.status != PairedDeviceStatus.REVOKED
+                && paired.status != PairedDeviceStatus.EXPIRED
+                && paired.status != PairedDeviceStatus.ADDRESS_CHANGED
+                && paired.expiresAt > System.currentTimeMillis()
+        }
+        return credentialStore().load()?.expiresAt?.let { it > System.currentTimeMillis() } == true
+    }
+
+    private fun scheduleAutomaticRecovery(): Boolean {
+        if (recoveryScheduled) return true
+        if (recoveryAttempt >= RECOVERY_DELAYS_MS.size || !canRecoverAutomatically()) return false
         val delay = RECOVERY_DELAYS_MS[recoveryAttempt++]
         recoveryScheduled = true
         recoveryHandler.postDelayed({
             recoveryScheduled = false
             if (!isFinishing && !isDestroyed) recoverAutomatically()
         }, delay)
+        return true
     }
 
     private fun cancelAutomaticRecovery() {
@@ -1134,12 +1736,16 @@ class MainActivity : Activity() {
         credential: DeviceCredential,
         mode: AccessMode = accessMode,
         generation: Int = beginRestoreAttempt(),
+        deviceKey: String? = null,
         claimSuccess: () -> Boolean = { true },
         onFailure: (RestoreFailureDisposition) -> Unit,
     ) {
         if (!RemoteHostPolicy.isAllowed(mode, preferredOrigin.host)) {
-            preferences.edit().remove(originPreference(mode)).apply()
-            credentialStore(mode).clear()
+            if (deviceKey != null) pairedDeviceStore.update(deviceKey) { it.copy(status = PairedDeviceStatus.ADDRESS_CHANGED) }
+            else {
+                preferences.edit().remove(originPreference(mode)).apply()
+                credentialStore(mode).clear()
+            }
             if (generation == restoreGeneration) onFailure(RestoreFailureDisposition.REQUIRE_USER_ACTION)
             return
         }
@@ -1183,15 +1789,27 @@ class MainActivity : Activity() {
 
                 val renewed = session
                 val finalDisposition = disposition
-                val credentialRevoked = (lastFailure as? NativeAuthFailure)?.kind == NativeAuthFailureKind.PAIRING_EXPIRED
+                val failureKind = (lastFailure as? NativeAuthFailure)?.kind
                 runOnUiThread {
                     if (generation != restoreGeneration) return@runOnUiThread
                     if (renewed == null) {
-                        if (credentialRevoked) credentialStore(mode).clear()
+                        if (deviceKey != null) {
+                            val status = when (failureKind) {
+                                NativeAuthFailureKind.DEVICE_REVOKED -> PairedDeviceStatus.REVOKED
+                                NativeAuthFailureKind.DEVICE_EXPIRED,
+                                NativeAuthFailureKind.PAIRING_EXPIRED,
+                                -> PairedDeviceStatus.EXPIRED
+                                else -> if (instanceMismatch) PairedDeviceStatus.ADDRESS_CHANGED else PairedDeviceStatus.UNREACHABLE
+                            }
+                            pairedDeviceStore.update(deviceKey) { it.copy(status = status) }
+                        } else if (failureKind == NativeAuthFailureKind.PAIRING_EXPIRED) {
+                            credentialStore(mode).clear()
+                        }
                         onFailure(finalDisposition)
                     } else {
                         if (!claimSuccess()) return@runOnUiThread
                         accessMode = mode
+                        savePairedDevice(mode, selectedOrigin, renewed, credential)
                         warnIfTailscale(selectedOrigin)
                         cancelAutomaticRecovery()
                         failureDialog?.dismiss()
@@ -1224,6 +1842,8 @@ class MainActivity : Activity() {
             return
         }
         destroyWebView()
+        stopDeviceListRefresh()
+        deviceListVisible = false
         showingSetup = false
         setupBackAction = null
         gatewayOrigin = origin
@@ -1243,30 +1863,6 @@ class MainActivity : Activity() {
         val statusBarBackdrop = View(this).apply {
             setBackgroundColor(initialChromeColor)
         }
-        val bar = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(16), 0, dp(4), 0)
-            setBackgroundColor(getColor(R.color.app_surface))
-            elevation = dp(2).toFloat()
-        }
-        val title = textView(R.string.toolbar_title, 16f, Typeface.BOLD).apply {
-            gravity = Gravity.CENTER_VERTICAL
-            maxLines = 1
-            ellipsize = TextUtils.TruncateAt.END
-        }
-        bar.addView(title, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
-        val refresh = toolbarIconButton(R.drawable.ic_refresh, R.string.refresh)
-        val more = toolbarIconButton(R.drawable.ic_more_vertical, R.string.more)
-        bar.addView(refresh, LinearLayout.LayoutParams(dp(40), dp(40)))
-        bar.addView(more, LinearLayout.LayoutParams(dp(40), dp(40)))
-
-        val loading = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
-            max = 100
-            visibility = View.GONE
-            progressTintList = ColorStateList.valueOf(getColor(R.color.app_accent))
-        }
-
         val browser = WebView(this)
         webView = browser
         browser.setBackgroundColor(getColor(R.color.app_background))
@@ -1308,11 +1904,6 @@ class MainActivity : Activity() {
         secureWebViewClient = secureClient
         browser.webViewClient = secureClient
         browser.webChromeClient = object : WebChromeClient() {
-            override fun onProgressChanged(view: WebView, newProgress: Int) {
-                loading.progress = newProgress
-                loading.visibility = if (newProgress in 1..99) View.VISIBLE else View.GONE
-            }
-
             override fun onShowFileChooser(
                 webView: WebView,
                 filePathCallback: ValueCallback<Array<Uri>>,
@@ -1331,6 +1922,8 @@ class MainActivity : Activity() {
                 applyStatusBarIconContrast(window, color)
                 preferences.edit().putInt(PREFERENCE_WEB_CHROME_COLOR, color).apply()
             }
+            bridge.onDeviceRevoked = ::handleDeviceRevoked
+            bridge.onSwitchComputer = ::showDeviceList
             bridge.install()
             deferredBridgeResult?.let { result ->
                 if (bridge.onActivityResult(result.requestCode, result.resultCode, result.data)) deferredBridgeResult = null
@@ -1339,14 +1932,11 @@ class MainActivity : Activity() {
                 if (bridge.onRequestPermissionsResult(NativeBridge.CAMERA_PERMISSION_REQUEST, grants)) deferredBridgePermission = null
             }
         }
-        nativeBridge?.onScrollDirection = { direction -> animateToolbar(direction, bar, loading) }
         browser.setDownloadListener { url, userAgent, contentDisposition, mimeType, _ ->
             requestDownload(origin, caCertificate, url, userAgent, contentDisposition, mimeType)
         }
         root.addView(browser, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         root.addView(statusBarBackdrop, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, Gravity.TOP))
-        root.addView(bar, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(48), Gravity.TOP))
-        root.addView(loading, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(3), Gravity.TOP))
         setContentView(root)
 
         // Native chrome owns the status-bar strip. The WebView keeps the remaining
@@ -1366,56 +1956,9 @@ class MainActivity : Activity() {
                 top,
                 Gravity.TOP,
             )
-            bar.layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(48), Gravity.TOP).apply {
-                topMargin = top
-            }
-            loading.layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(3), Gravity.TOP).apply {
-                topMargin = dp(48) + top
-            }
-            bar.translationY = if (toolbarHidden) -dp(48).toFloat() else 0f
-            bar.alpha = if (toolbarHidden) 0f else 1f
-            loading.translationY = bar.translationY
-            loading.alpha = bar.alpha
             insetsForWebContent(insets, top)
         }
         root.requestApplyInsets()
-
-        refresh.setOnClickListener { browser.reload() }
-
-        more.setOnClickListener {
-            PopupMenu(this, more).apply {
-                menu.add(0, MENU_SHARE, 0, R.string.share)
-                menu.add(0, MENU_TASK_NOTIFICATIONS, 1, R.string.task_notification_settings)
-                menu.add(0, MENU_EDIT_CONNECTION, 2, R.string.edit_connection)
-                menu.add(0, MENU_CLEAR_DATA, 3, R.string.clear_site_data)
-                setOnMenuItemClickListener { item ->
-                    when (item.itemId) {
-                        MENU_SHARE -> {
-                            shareGateway(origin)
-                            true
-                        }
-
-                        MENU_TASK_NOTIFICATIONS -> {
-                            openTaskNotificationSettings()
-                            true
-                        }
-
-                        MENU_EDIT_CONNECTION -> {
-                            showConnectionCenter()
-                            true
-                        }
-
-                        MENU_CLEAR_DATA -> {
-                            confirmClearSiteData()
-                            true
-                        }
-
-                        else -> false
-                    }
-                }
-                show()
-            }
-        }
         val initialUrl = requestedInitialUrl.takeIf { GatewayUrlPolicy.isSameOrigin(origin, it) }
             ?: origin.serialized
         retryUrl = initialUrl
@@ -1443,18 +1986,6 @@ class MainActivity : Activity() {
         } catch (_: ActivityNotFoundException) {
             startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")))
         }
-    }
-
-    /** Slide the floating toolbar out of view while the page scrolls down. */
-    private fun animateToolbar(direction: String, bar: View, loading: View) {
-        val hide = direction == "down"
-        if (hide == toolbarHidden) return
-        toolbarHidden = hide
-        val offset = bar.height.toFloat()
-        if (offset <= 0f) return
-        val duration = 180L
-        bar.animate().translationY(if (hide) -offset else 0f).alpha(if (hide) 0f else 1f).setDuration(duration).start()
-        loading.animate().translationY(if (hide) -offset else 0f).alpha(if (hide) 0f else 1f).setDuration(duration).start()
     }
 
     private fun showFileChooser(
@@ -1598,6 +2129,7 @@ class MainActivity : Activity() {
         preferences.edit().clear().apply()
         lanCredentialStore.clear()
         remoteCredentialStore.clear()
+        pairedDeviceStore.clear()
         CookieManager.getInstance().removeAllCookies {
             CookieManager.getInstance().flush()
             if (!isFinishing && !isDestroyed) runOnUiThread { showConnectionCenter() }
@@ -1626,7 +2158,8 @@ class MainActivity : Activity() {
     private fun showLoadFailure(failure: LoadFailure) {
         if (isFinishing || failureDialog?.isShowing == true) return
         if ((failure == LoadFailure.NETWORK || failure == LoadFailure.AUTH_EXPIRED || failure == LoadFailure.SERVICE_UNAVAILABLE)
-            && credentialStore().load() != null) {
+            && canRecoverAutomatically()
+        ) {
             scheduleAutomaticRecovery()
         }
         val cpolarAddressFailure = isCpolarAddressFailure(failure, accessMode, gatewayOrigin)
@@ -1650,7 +2183,8 @@ class MainActivity : Activity() {
             .setMessage(message)
             .setPositiveButton(R.string.retry) { _, _ ->
                 if ((failure == LoadFailure.NETWORK || failure == LoadFailure.AUTH_EXPIRED || failure == LoadFailure.SERVICE_UNAVAILABLE)
-                    && credentialStore().load() != null) {
+                    && canRecoverAutomatically()
+                ) {
                     recoverAutomatically()
                 } else {
                     val target = retryUrl ?: gatewayOrigin?.serialized
@@ -1806,6 +2340,10 @@ class MainActivity : Activity() {
         const val PREFERENCE_LAN_ORIGIN = "gateway_origin"
         const val PREFERENCE_REMOTE_ORIGIN = "remote_gateway_origin"
         const val PREFERENCE_LAST_ACCESS_MODE = "last_access_mode"
+        const val PREFERENCE_LAST_DEVICE_KEY = "last_device_key"
+        const val PREFERENCE_LAST_CONNECTED_LAN = "last_connected_lan"
+        const val PREFERENCE_LAST_CONNECTED_REMOTE = "last_connected_remote"
+        const val PREFERENCE_LAUNCH_BEHAVIOR = "launch_behavior"
         const val PREFERENCE_NEARBY_PERMISSION_LIMITED = "nearby_permission_limited"
         const val PREFERENCE_NOTIFICATION_PERMISSION_REQUESTED = "notification_permission_requested"
         const val PREFERENCE_WEB_CHROME_COLOR = "web_chrome_color"
@@ -1823,10 +2361,8 @@ class MainActivity : Activity() {
         const val NEARBY_WIFI_REQUEST = 4104
         const val TASK_NOTIFICATION_PERMISSION_REQUEST = 4105
         const val SCAN_QR_REQUEST = 4106
-        const val MENU_EDIT_CONNECTION = 1
-        const val MENU_CLEAR_DATA = 2
-        const val MENU_SHARE = 3
-        const val MENU_TASK_NOTIFICATIONS = 4
+        const val DEVICE_STATUS_REFRESH_MS = 20_000L
+        const val DEVICE_UNDO_TIMEOUT_MS = 6_000L
         const val APP_RELEASES_URL = "https://github.com/saya-ch/dsh-mobile/releases/latest"
         val RECOVERY_DELAYS_MS = longArrayOf(0L, 1_000L, 3_000L, 8_000L)
         val MIME_TYPE = Regex("^[a-z0-9!#$&^_.+-]+/[a-z0-9!#$&^_.+*-]+$")

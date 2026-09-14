@@ -47,6 +47,15 @@ export interface SessionAuthorization {
   readonly expiresAt: number
 }
 
+/** Result of a persistent-device reachability check without opening a Session. */
+export interface DeviceProbeResult {
+  readonly deviceId: string
+  readonly deviceExpiresAt: number
+}
+
+/** Why a short-lived Session ended; only device revocation is sent to clients. */
+export type SessionEndReason = 'logout' | 'expired' | 'evicted' | 'revoked'
+
 /** Safe device metadata returned by the loopback administration API. */
 export interface DeviceSummary {
   readonly id: string
@@ -149,7 +158,7 @@ export class AccessController {
   private devices: StoredDevice[] = []
   private pairingWindow: PairingWindow | undefined
   private readonly sessions = new Map<string, SessionRecord>()
-  private readonly sessionEndedListeners = new Set<(authorization: SessionAuthorization) => void>()
+  private readonly sessionEndedListeners = new Set<(authorization: SessionAuthorization, reason: SessionEndReason) => void>()
   private mutation: Promise<void> = Promise.resolve()
   private initialized = false
   private closing = false
@@ -193,25 +202,25 @@ export class AccessController {
     return Object.freeze({ version: 1, devices: Object.freeze([...devices]) })
   }
 
-  private emitSessionEnded(session: SessionRecord): void {
+  private emitSessionEnded(session: SessionRecord, reason: SessionEndReason): void {
     const authorization = Object.freeze({
       sessionKey: session.key,
       deviceId: session.deviceId,
       expiresAt: session.expiresAt,
     })
-    for (const listener of this.sessionEndedListeners) listener(authorization)
+    for (const listener of this.sessionEndedListeners) listener(authorization, reason)
   }
 
-  private removeSession(key: string): void {
+  private removeSession(key: string, reason: SessionEndReason): void {
     const session = this.sessions.get(key)
     if (session === undefined) return
     this.sessions.delete(key)
-    this.emitSessionEnded(session)
+    this.emitSessionEnded(session, reason)
   }
 
   private pruneSessions(now: number): void {
     for (const [key, session] of this.sessions) {
-      if (session.expiresAt <= now) this.removeSession(key)
+      if (session.expiresAt <= now) this.removeSession(key, 'expired')
     }
   }
 
@@ -219,7 +228,7 @@ export class AccessController {
     this.pruneSessions(now)
     if (this.sessions.size >= this.options.maxSessions) {
       const oldest = [...this.sessions.values()].sort((left, right) => left.createdAt - right.createdAt)[0]
-      if (oldest !== undefined) this.removeSession(oldest.key)
+      if (oldest !== undefined) this.removeSession(oldest.key, 'evicted')
     }
     const sessionToken = opaqueToken()
     const csrfToken = opaqueToken()
@@ -297,15 +306,38 @@ export class AccessController {
       const tokenDigest = digest(deviceToken)
       const index = this.devices.findIndex(device => timingSafeEqual(Buffer.from(device.tokenDigest, 'hex'), tokenDigest))
       const device = this.devices[index]
-      if (device === undefined || device.revokedAt !== undefined || device.expiresAt <= now) {
+      if (device === undefined) {
         throw new AccessError(401, 'authentication_failed')
       }
+      if (device.revokedAt !== undefined) throw new AccessError(401, 'device_revoked')
+      if (device.expiresAt <= now) throw new AccessError(401, 'device_expired')
       const updated: StoredDevice = Object.freeze({ ...device, lastSeenAt: now })
       const next = [...this.devices]
       next[index] = updated
       await this.store.save(this.snapshot(next))
       this.devices = next
       return this.createSession(device.id, now, device.expiresAt)
+    })
+  }
+
+  /** Validate a persistent device credential without consuming a Session slot. */
+  async probe(deviceToken: string): Promise<DeviceProbeResult> {
+    this.requireInitialized()
+    if (deviceToken.length > 512) throw new AccessError(401, 'authentication_failed')
+    return this.exclusive(async () => {
+      const now = this.now()
+      const tokenDigest = digest(deviceToken)
+      const index = this.devices.findIndex(device => timingSafeEqual(Buffer.from(device.tokenDigest, 'hex'), tokenDigest))
+      const device = this.devices[index]
+      if (device === undefined) throw new AccessError(401, 'authentication_failed')
+      if (device.revokedAt !== undefined) throw new AccessError(401, 'device_revoked')
+      if (device.expiresAt <= now) throw new AccessError(401, 'device_expired')
+      const updated: StoredDevice = Object.freeze({ ...device, lastSeenAt: now })
+      const next = [...this.devices]
+      next[index] = updated
+      await this.store.save(this.snapshot(next))
+      this.devices = next
+      return Object.freeze({ deviceId: device.id, deviceExpiresAt: device.expiresAt })
     })
   }
 
@@ -319,7 +351,7 @@ export class AccessController {
     const session = this.sessions.get(key)
     const device = session === undefined ? undefined : this.devices.find(candidate => candidate.id === session.deviceId)
     if (session === undefined || device === undefined || device.revokedAt !== undefined || device.expiresAt <= now) {
-      if (session !== undefined) this.removeSession(session.key)
+      if (session !== undefined) this.removeSession(session.key, 'expired')
       throw new AccessError(401, 'authentication_failed')
     }
     return Object.freeze({ sessionKey: key, deviceId: session.deviceId, expiresAt: session.expiresAt })
@@ -336,7 +368,7 @@ export class AccessController {
 
   /** End one short Session and notify the gateway to abort its attached work. */
   logout(authorization: SessionAuthorization): void {
-    this.removeSession(authorization.sessionKey)
+    this.removeSession(authorization.sessionKey, 'logout')
   }
 
   /** Persist revocation, then end every Session owned by that device. */
@@ -351,7 +383,7 @@ export class AccessController {
       await this.store.save(this.snapshot(next))
       this.devices = next
       for (const [key, session] of this.sessions) {
-        if (session.deviceId === deviceId) this.removeSession(key)
+        if (session.deviceId === deviceId) this.removeSession(key, 'revoked')
       }
       return true
     })
@@ -363,7 +395,7 @@ export class AccessController {
     await this.exclusive(async () => {
       await this.store.save(this.snapshot([]))
       this.devices = []
-      for (const key of [...this.sessions.keys()]) this.removeSession(key)
+      for (const key of [...this.sessions.keys()]) this.removeSession(key, 'revoked')
       this.pairingWindow = undefined
     })
   }
@@ -386,7 +418,7 @@ export class AccessController {
   }
 
   /** Subscribe gateway resources to Session logout, expiry, eviction, and device revocation. */
-  onSessionEnded(listener: (authorization: SessionAuthorization) => void): () => void {
+  onSessionEnded(listener: (authorization: SessionAuthorization, reason: SessionEndReason) => void): () => void {
     this.sessionEndedListeners.add(listener)
     return () => { this.sessionEndedListeners.delete(listener) }
   }
@@ -402,7 +434,7 @@ export class AccessController {
   private async finishClose(): Promise<void> {
     await this.mutation
     this.pairingWindow = undefined
-    for (const key of [...this.sessions.keys()]) this.removeSession(key)
+    for (const key of [...this.sessions.keys()]) this.removeSession(key, 'expired')
     this.sessionEndedListeners.clear()
     this.initialized = false
   }
