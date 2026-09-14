@@ -242,7 +242,7 @@ export class CpolarController implements RemoteProviderController {
     const args = [
       'http',
       `-config=${resolve(this.options.configFile)}`,
-      `-region=${this.options.region ?? 'cn'}`,
+      ...(this.options.region === undefined ? [] : [`-region=${this.options.region}`]),
       '-inspect-addr=false',
       '-redirect-https=true',
       '-log=stdout',

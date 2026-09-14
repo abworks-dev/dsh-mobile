@@ -92,10 +92,14 @@ function deferred(): { readonly promise: Promise<void>; readonly resolve: () => 
   return { promise, resolve }
 }
 
-async function fixture(createGateway: (origin: string, port: number) => Promise<MobileAccessGateway>): Promise<{
+async function fixture(
+  createGateway: (origin: string, port: number) => Promise<MobileAccessGateway>,
+  options: { readonly region?: string } = {},
+): Promise<{
   readonly child: FakeChild
   readonly controller: CpolarController
   readonly journal: StatusJournal
+  readonly args: () => readonly string[]
 }> {
   const directory = await mkdtemp(join(tmpdir(), 'dsh-mobile-cpolar-'))
   temporaryDirectories.push(directory)
@@ -104,18 +108,23 @@ async function fixture(createGateway: (origin: string, port: number) => Promise<
   await Promise.all([mkdir(dirname(executable), { recursive: true }), mkdir(dirname(configFile), { recursive: true })])
   await Promise.all([writeFile(executable, 'fake-cpolar'), writeFile(configFile, 'fake-config')])
   const child = new FakeChild()
+  let startedArgs: readonly string[] = []
   const journal = new StatusJournal()
   const controller = new CpolarController({
     store: new MemoryControlStore(),
     executable,
     configFile,
     createGateway,
+    ...(options.region === undefined ? {} : { region: options.region }),
     onStatus: journal.publish,
-    spawnProcess: () => child as unknown as ChildProcessWithoutNullStreams,
+    spawnProcess: (_executable, args) => {
+      startedArgs = [...args]
+      return child as unknown as ChildProcessWithoutNullStreams
+    },
   })
   controllers.push(controller)
   await controller.initialize()
-  return { child, controller, journal }
+  return { child, controller, journal, args: () => startedArgs }
 }
 
 describe('cpolar log protocol', () => {
@@ -134,6 +143,16 @@ describe('cpolar log protocol', () => {
 })
 
 describe('cpolar provider lifecycle', () => {
+  it('lets cpolar choose its default region unless one is explicitly configured', async () => {
+    const automatic = await fixture(async () => gateway('https://automatic.r8.cpolar.cn', 1))
+    expect(automatic.args()).not.toContain('-region=cn')
+
+    const explicit = await fixture(async () => gateway('https://explicit.r8.cpolar.cn', 1), { region: 'cn_vip' })
+    // The controller accepts an explicit region through its public options;
+    // the product wiring leaves this unset so cpolar can choose a route.
+    expect(explicit.args()).toContain('-region=cn_vip')
+  })
+
   it('rotates different origins in order on the same loopback port', async () => {
     const firstClose = deferred()
     const gateways: FakeGateway[] = []

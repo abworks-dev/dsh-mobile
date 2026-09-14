@@ -477,7 +477,6 @@ export async function apply(ctx: Context, config: PluginConfig): Promise<void> {
       store: cpolarStore,
       executable: cpolarComponent.executable,
       configFile: cpolarComponent.configFile,
-      region: 'cn',
       createGateway: createRemoteGateway,
     }),
     frp: new FrpController({
