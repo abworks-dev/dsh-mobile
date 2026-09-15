@@ -4,6 +4,10 @@ Notable changes to DSH Mobile are recorded here. GitHub Releases remain the sour
 
 ## Unreleased
 
+No unreleased changes.
+
+## 0.4.1 - 2026-09-15
+
 - Allow the desktop Mobile access admin API and sidebar control on RFC1918 and IPv4 link-local Host values when the TCP peer remains loopback, so headless Linux hosts and LAN reverse proxies can open DSH Web without a localhost-only browser. Public IPs, CGNAT, and arbitrary DNS names stay rejected. The dedicated Mobile HTTPS listener remains the phone surface (thanks @xingleiwu for PR #79).
 - Let the proxied DSH GUI frame its own same-origin surfaces and embed external http(s) and blob: pages, so the right-sidebar browser tab, the HTML/diff previews, and the PDF preview work over LAN and remote access; gateway-owned login, pairing, and JSON responses keep refusing every frame (thanks @idoall for PR #77).
 - Bound advisory operating-system route inspection so a slow Windows network query falls back to explicit network selection instead of holding the local setup page open.

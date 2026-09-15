@@ -30,14 +30,16 @@
 
 > DSH Mobile 是 DeepSeek Harness 社区插件，原生 App 仅支持 Android。
 >
-> **0.4.0 更新**：加入多设备管理、电脑端撤销状态同步、无 Session 可达性检查；完善插件市场局域网引导、任务状态通知、原生 WebView 沉浸布局和三语配对页。[详细记录](CHANGELOG.md)。
+> **0.4.1 更新**：适配 DeepSeek Harness 0.1.6-alpha.1，修复扩展动作请求和局域网路由检测，强化管理请求 CSRF、HTTP iframe 警告与前端兼容性检查，并补齐中英文 FRP 文档。[详细记录](CHANGELOG.md)。
 >
-> **升级提醒**：0.4.0 需要同步更新插件与 Android App 才能使用多设备列表；旧 App 仍可使用原有单设备配对。[兼容说明](#兼容性)。
+> **升级提醒**：0.4.1 插件可继续使用 0.4.0 Android App；已有设备无需重新配对。若要使用本次 Android 构建，请同时安装 0.4.1 App。[兼容说明](#兼容性)。
+>
+> 0.4.1 尚未发布；上方下载链接会在创建对应 GitHub Release 后生效。
 
 <p align="center">
-  <a href="https://github.com/saya-ch/dsh-mobile/releases/download/v0.4.0/dsh-mobile-android-v0.4.0.apk"><img src="assets/brand/app-icon-rounded.svg" alt="DSH Mobile 安卓应用图标" width="72" height="72"></a><br>
-  <a href="https://github.com/saya-ch/dsh-mobile/releases/download/v0.4.0/dsh-mobile-android-v0.4.0.apk"><strong>下载 Android App 0.4.0</strong></a><br>
-  <sub><a href="https://github.com/saya-ch/dsh-mobile/releases/tag/v0.4.0">版本说明与校验文件</a></sub>
+  <a href="https://github.com/saya-ch/dsh-mobile/releases/download/v0.4.1/dsh-mobile-android-v0.4.1.apk"><img src="assets/brand/app-icon-rounded.svg" alt="DSH Mobile 安卓应用图标" width="72" height="72"></a><br>
+  <a href="https://github.com/saya-ch/dsh-mobile/releases/download/v0.4.1/dsh-mobile-android-v0.4.1.apk"><strong>下载 Android App 0.4.1</strong></a><br>
+  <sub><a href="https://github.com/saya-ch/dsh-mobile/releases/tag/v0.4.1">版本说明与校验文件</a></sub>
 </p>
 
 DSH Mobile 是一个 DeepSeek Harness 插件，让手机浏览器或 Android App 通过局域网，或可选的 Tailscale Funnel、cpolar、自建 FRP 远程通道连接电脑，继续使用同一份会话、工作区、消息和工具。局域网与远程访问分别启停、分别管理设备，且都不修改 DeepSeek Harness 源码。
@@ -273,6 +275,7 @@ flowchart LR
 
 | DSH Mobile 插件                         | 验证支持的 DeepSeek Harness 版本                             |
 | ----------------------------------------- | -------------------------------------------------------------- |
+| `0.4.1`（开发中） | `0.1.6-alpha.1`（本机源码与 renderer-v2 契约检查） |
 | `0.3.15`、`0.3.16`、`0.4.0` | `0.1.5-rc.2`（契约检查）；`0.1.5-rc.1`（@idoall 局域网实测） |
 | `0.3.14`                                | `0.1.3-alpha.2`                                              |
 | `0.3.9`-`0.3.12`                        | `0.1.3-alpha.1`                                              |
@@ -282,8 +285,6 @@ flowchart LR
 | `0.1.4`、`0.2.x`                        | `0.1.1-rc.2`                                                 |
 
 现有 0.3.3–0.4.0 App 无需重新配对；cpolar 用户应使用 0.3.15 或更新 App，较早版本可能在免费线路的慢速首次加载完成前超时；更早的 App 还使用不同的状态栏策略。App 0.4.0 才支持多设备列表、启动行为设置和电脑端撤销状态同步；旧版 App 仍可连接已保存的单台设备。App 0.1.3 及更早版本需卸载重装并重新配对。
-
-本地未发布的适配候选已针对 DeepSeek Harness `0.1.6-alpha.1` 完成本机源码与 renderer-v2 契约检查；该结果不代表公开的 0.4.0 包已包含这项适配。
 
 ## 卸载
 
