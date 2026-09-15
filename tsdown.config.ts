@@ -1,4 +1,19 @@
-import { defineConfig } from 'tsdown'
+import { defineConfig, type UserConfig } from 'tsdown'
+
+/** Standalone IIFE: no module loader or DSH services may be required at this point. */
+export const mobileCompatibilityBuild = {
+  entry: { 'mobile-compat': 'src/mobile-compat.ts' },
+  outDir: 'lib',
+  format: ['iife'],
+  platform: 'browser',
+  target: 'es2022',
+  dts: false,
+  sourcemap: true,
+  clean: false,
+  minify: true,
+  deps: { alwaysBundle: ['core-js'], onlyBundle: ['core-js'] },
+  outputOptions: { entryFileNames: 'mobile-compat.js' },
+} satisfies UserConfig
 
 export default defineConfig([{
   entry: ['src/index.ts'],
@@ -57,4 +72,4 @@ export default defineConfig([{
     intro: 'var module = { exports: {} }; var exports = module.exports;',
     footer: 'return module.exports; } });',
   },
-}])
+}, mobileCompatibilityBuild])

@@ -42,6 +42,8 @@ export interface PluginConfig {
   customScriptFile?: string
   /** Internal dedicated mobile layout browser bundle. */
   mobileLayoutFile?: string
+  /** Standalone browser compatibility bundle used before DSH boot. */
+  mobileCompatibilityFile?: string
   /** Stable public discovery identifier; it is not an authentication secret. */
   instanceId?: string
   /** Managed CA certificate offered to the Android installer after fingerprint binding. */
@@ -82,6 +84,7 @@ export interface ResolvedGatewayConfig {
   readonly customCssFile: string
   readonly customScriptFile: string
   readonly mobileLayoutFile: string
+  readonly mobileCompatibilityFile: string
   readonly instanceId: string
   readonly pairingCaFile?: string
   readonly tls: TlsConfig
@@ -118,6 +121,7 @@ export const Config: z<PluginConfig> = z.object({
   customCssFile: z.string().hidden(),
   customScriptFile: z.string().hidden(),
   mobileLayoutFile: z.string().hidden(),
+  mobileCompatibilityFile: z.string().hidden(),
   instanceId: z.string().hidden(),
   pairingCaFile: z.string().hidden(),
   initiallyEnabled: z.boolean().hidden().required(),
@@ -293,6 +297,9 @@ export function parseGatewayConfig(raw: unknown): ResolvedGatewayConfig {
     mobileLayoutFile: value.mobileLayoutFile === undefined
       ? fileURLToPath(new URL('./mobile-layout.js', import.meta.url))
       : absoluteFile(value.mobileLayoutFile, 'mobileLayoutFile'),
+    mobileCompatibilityFile: value.mobileCompatibilityFile === undefined
+      ? fileURLToPath(new URL('./mobile-compat.js', import.meta.url))
+      : absoluteFile(value.mobileCompatibilityFile, 'mobileCompatibilityFile'),
     instanceId: value.instanceId === undefined
       ? createHash('sha256').update(absoluteFile(value.stateFile, 'stateFile')).digest('hex')
       : /^[a-f\d]{64}$/u.test(value.instanceId)

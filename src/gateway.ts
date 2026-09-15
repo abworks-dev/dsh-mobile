@@ -30,6 +30,7 @@ import {
   type SessionAuthorization,
 } from './access.js'
 import type { ResolvedGatewayConfig } from './config.js'
+import { ensureMobileCompatibility, MOBILE_COMPAT_PATH } from './mobile-compat-bootstrap.js'
 import {
   AUTH_PREFIX,
   assertExternalTrust,
@@ -341,7 +342,7 @@ function rewriteMobileIndexWithBatch(html: string): RewrittenMobileIndex {
   const transportBootstrap = remoteSettings ? MOBILE_AUTHENTICATED_TRANSPORT_BOOTSTRAP : ''
   const replacement = `${transportBootstrap}${MOBILE_CSRF_FETCH_BOOTSTRAP}window.__DSH_MOBILE_FRONTEND__="dedicated";${assignment[0]}${JSON.stringify(parsed)};`
   return Object.freeze({
-    html: ensureMobileViewport(`${html.slice(0, start)}${replacement}${html.slice(scriptEnd)}`),
+    html: ensureMobileViewport(ensureMobileCompatibility(`${html.slice(0, start)}${replacement}${html.slice(scriptEnd)}`)),
     ...(mobileBatch === undefined ? {} : { batch: mobileBatch }),
   })
 }
@@ -1302,7 +1303,13 @@ export class MobileAccessGateway {
                 contentType: 'text/javascript; charset=utf-8',
                 fallback: undefined,
               }
-          : undefined
+            : target.decodedPathname === MOBILE_COMPAT_PATH
+              ? {
+                  file: this.config.mobileCompatibilityFile,
+                  contentType: 'text/javascript; charset=utf-8',
+                  fallback: undefined,
+                }
+              : undefined
       : undefined
     if (customAsset === undefined && requestedMobileBootBatch === undefined && !computerImages && !computerImage
       && extensionTarget(target.decodedPathname) === undefined
