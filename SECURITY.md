@@ -16,6 +16,7 @@ The maintainer will acknowledge a complete report within seven days. Publication
 
 - Keep the ordinary DSH Web listener on loopback.
 - Expose only the plugin-owned HTTPS listener to the LAN.
+- The desktop admin API may accept an RFC1918 or IPv4 link-local Host only when the TCP peer is loopback, for a trusted local reverse proxy or headless host. Do not publicly forward `/api/mobile-access`; Host and loopback checks are not a replacement for proxy access control. Mutating admin requests must carry a same-origin `Origin` header.
 - DNS-SD/mDNS, periodic UDP announcements, active UDP query replies, and HTTPS discovery return only the device name, public HTTPS origin, port, protocol version, and stable non-secret installation identifier. Discovery never returns the CA, a pairing key, a device token, Cookies, credentials, or private configuration.
 - For LAN pairing, only after a user selects a device and enters the fingerprint-bound pairing key may Android fetch the public CA from that exact HTTPS origin. The bootstrap GET sends no key or credential. The app retains the CA in its encrypted credential record and never adds it to Android's system trust settings. Native requests use a private trust store; WebView accepts only the otherwise-untrusted leaf signed by that CA, for the exact origin and validity period. Every other TLS error is cancelled.
 - Public remote origins provided by Funnel, cpolar, or self-hosted FRP use platform-trusted HTTPS. Android stores no private CA for those credentials and cancels every TLS error. It sends a persisted device token only to the exact Origin that previously received it; a changed remote Origin requires a current one-time pairing token before the app replaces the saved credential. A QR-provided installation identifier alone never authorizes credential renewal. Browser clients likewise require a certificate trusted by their platform.
@@ -33,6 +34,7 @@ The maintainer will acknowledge a complete report within seven days. Publication
 - Treat `mobile.js` as application code with the paired page's same-origin authority. Restrict write access to trusted host-side DSH sessions and review generated API calls or browser-permission use.
 - Treat every extension `host.mjs` as a local program with the desktop user's Node.js privileges. It is never sandboxed and is not editable through the mobile gateway; only place code there that you trust.
 - Extension Actions and Routes receive filtered request data, a device identifier, and an abort signal. They cannot set proxy security headers or access the gateway's cookies, device tokens, CSRF tokens, or internal request headers.
+- Proxied GUI responses allow HTTP iframe sources for compatibility with community surfaces. HTTP content is unauthenticated and unencrypted; use HTTPS for sensitive work, and do not treat the compatibility allowance as a transport-security guarantee.
 
 ## Known limitation
 

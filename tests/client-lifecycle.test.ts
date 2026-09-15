@@ -58,6 +58,7 @@ describe('mobile-control localization', () => {
     expect(CONTROL_STYLES).toContain('dsh-mobile-control__token')
     expect(CONTROL_STYLES).toContain('grid-template-columns:repeat(2,minmax(0,1fr))')
     expect(CONTROL_STYLES).toContain('dsh-mobile-control__remote-workspace')
+    expect(CONTROL_STYLES).toContain('dsh-mobile-control__http-frame-warning')
     expect(CONTROL_STYLES).toContain('dsh-mobile-control__stage-value')
     expect(CONTROL_STYLES).toContain('dsh-mobile-control__state-badge')
     expect(CONTROL_STYLES).toContain('dsh-mobile-control__lan-setup{')
@@ -195,6 +196,7 @@ describe('mobile-control localization', () => {
     expect(source).toContain("capabilities.includes('mobile.switch-computer')")
     expect(source).toContain("dsh-mobile-native-ready")
     expect(source).toContain("if (!desktopAdmin) {")
+    expect(source).toContain("t('httpFrameWarning')")
   })
 
   it('remounts plugin-owned UI only when the DSH document language changes', () => {

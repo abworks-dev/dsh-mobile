@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises'
+import { readdir, readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 
 const arguments_ = process.argv.slice(2)
@@ -29,6 +29,20 @@ async function optionalText(path) {
 async function optionalJson(path) {
   const source = await optionalText(path)
   return source === undefined ? undefined : JSON.parse(source)
+}
+
+async function sourceFilesUnder(relativeDirectory) {
+  const pending = [resolve(sourceRoot, relativeDirectory)]
+  const files = []
+  while (pending.length > 0) {
+    const directory = pending.pop()
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      const target = resolve(directory, entry.name)
+      if (entry.isDirectory()) pending.push(target)
+      else if (entry.isFile() && /\.(?:ts|tsx)$/u.test(entry.name)) files.push(target)
+    }
+  }
+  return files
 }
 
 const root = await json('package.json')
@@ -98,8 +112,9 @@ for (const declaration of [
   if (!layoutSource.includes(declaration)) throw new Error(`DSH layout contract changed: missing ${declaration}`)
 }
 
-const conversation = await text('packages/client/ui-conversation/src/client/skeleton/ConversationRoot.tsx')
-if (!conversation.includes('data-conversation-scroll')) {
+const conversationSources = await Promise.all((await sourceFilesUnder('packages/client/ui-conversation/src/client/skeleton'))
+  .map(path => readFile(path, 'utf8')))
+if (!conversationSources.some(source => source.includes('data-conversation-scroll'))) {
   throw new Error('DSH conversation no longer exposes data-conversation-scroll')
 }
 

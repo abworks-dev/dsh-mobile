@@ -8,6 +8,9 @@ Notable changes to DSH Mobile are recorded here. GitHub Releases remain the sour
 - Let the proxied DSH GUI frame its own same-origin surfaces and embed external http(s) and blob: pages, so the right-sidebar browser tab, the HTML/diff previews, and the PDF preview work over LAN and remote access; gateway-owned login, pairing, and JSON responses keep refusing every frame (thanks @idoall for PR #77).
 - Bound advisory operating-system route inspection so a slow Windows network query falls back to explicit network selection instead of holding the local setup page open.
 - Keep Android CI and release setup limited to currently available SDK packages so APK verification is not blocked by the retired `tools` package.
+- Require a same-origin `Origin` header on every mutating desktop management request, including clients that omit Fetch Metadata, so private-Host reverse proxies cannot bypass the browser CSRF check.
+- Accept the DSH conversation scroll marker wherever it lives under the conversation skeleton, keeping the compatibility gate valid when upstream extracts the body into a separate component.
+- Allow HTTP iframe sources for compatibility while showing a localized warning that unencrypted pages can be altered and should not be used for sensitive work.
 - Fix mobile extension Host actions that sent JSON without an explicit content type, which caused every `api.host.invoke()` call to return `415 unsupported_media_type`.
 - Accept callable Schemastery input schemas as well as existing `parse(value)` adapters for extension actions, so documented `api.schema.object(...)` inputs are validated and normalized before `run()`.
 

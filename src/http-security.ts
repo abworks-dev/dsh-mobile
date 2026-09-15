@@ -247,7 +247,13 @@ export function assertLocalAdminTrust(request: IncomingMessage, requireBrowserOr
       throw new HttpError(403, 'forbidden')
     }
   }
-  if (requireBrowserOrigin && site !== undefined && (origin === undefined || site !== 'same-origin')) {
+  // Mutating admin requests are browser-only. Fetch metadata is optional on
+  // older clients, so a missing Sec-Fetch-Site must not make a missing Origin
+  // acceptable; Origin is the stable CSRF signal across supported browsers.
+  if (requireBrowserOrigin && origin === undefined) {
+    throw new HttpError(403, 'forbidden')
+  }
+  if (requireBrowserOrigin && site !== undefined && site !== 'same-origin') {
     throw new HttpError(403, 'forbidden')
   }
 }

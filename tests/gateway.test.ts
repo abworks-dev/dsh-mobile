@@ -878,7 +878,7 @@ describe('HTTP gateway', () => {
     expect(rebound.status).toBe(403)
     const opened = await request(adminPort, '/api/mobile-access/pairing/open', {
       method: 'POST',
-      headers: { host, 'content-type': 'application/json' },
+      headers: { host, origin: `http://${host}`, 'sec-fetch-site': 'same-origin', 'content-type': 'application/json' },
       body: '{}',
     })
     expect(opened.status).toBe(201)
@@ -905,19 +905,19 @@ describe('HTTP gateway', () => {
 
     const revoked = await request(adminPort, '/api/mobile-access/devices/revoke', {
       method: 'POST',
-      headers: { host, 'content-type': 'application/json' },
+      headers: { host, origin: `http://${host}`, 'sec-fetch-site': 'same-origin', 'content-type': 'application/json' },
       body: JSON.stringify({ deviceId: pairedBody.deviceId }),
     })
     expect(revoked.status).toBe(200)
     const resetWithoutConfirmation = await request(adminPort, '/api/mobile-access/devices/reset', {
       method: 'POST',
-      headers: { host, 'content-type': 'application/json' },
+      headers: { host, origin: `http://${host}`, 'sec-fetch-site': 'same-origin', 'content-type': 'application/json' },
       body: '{}',
     })
     expect(resetWithoutConfirmation.status).toBe(400)
     const reset = await request(adminPort, '/api/mobile-access/devices/reset', {
       method: 'POST',
-      headers: { host, 'content-type': 'application/json' },
+      headers: { host, origin: `http://${host}`, 'sec-fetch-site': 'same-origin', 'content-type': 'application/json' },
       body: '{"confirm":true}',
     })
     expect(reset.status).toBe(200)

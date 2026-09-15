@@ -111,4 +111,8 @@ describe('assertLocalAdminTrust', () => {
       site: 'same-origin',
     }), true)).not.toThrow()
   })
+
+  it('rejects mutating requests with no Origin even when Fetch Metadata is absent', () => {
+    reject({ host: '192.168.50.23:8080' }, true)
+  })
 })
