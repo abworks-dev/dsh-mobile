@@ -41,6 +41,9 @@ const VIRTUAL_INTERFACE_MARKERS = [
   'utun', 'vbox', 'veth', 'virtual', 'vmware', 'vpn', 'vethernet', 'wsl', 'zerotier',
 ]
 
+/** Route inspection is advisory; never let a system command hold setup open indefinitely. */
+const ROUTE_COMMAND_TIMEOUT_MS = 5_000
+
 function requiredString(value: unknown, name: string): string {
   if (typeof value !== 'string' || value.length === 0) throw new Error(`${name} must be a non-empty string`)
   return value
@@ -114,7 +117,7 @@ function likelyVirtualInterface(name: string): boolean {
 }
 
 async function runRouteCommand(file: string, args: readonly string[]): Promise<string> {
-  const result = await execFile(file, [...args], { encoding: 'utf8', windowsHide: true })
+  const result = await execFile(file, [...args], { encoding: 'utf8', timeout: ROUTE_COMMAND_TIMEOUT_MS })
   return result.stdout
 }
 
