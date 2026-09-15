@@ -34,6 +34,7 @@
     "docs/DSH_0.1.5_LAN.md",
     "docs/SELF_HOSTED_FRP.md",
     "docs/SELF_HOSTED_FRP.en.md",
+    "docs/SELF_HOSTED_ORIGIN.md",
     "LICENSE",
     "FUNNEL_THIRD_PARTY_LICENSES.txt",
     "SECURITY.md",
@@ -96,6 +97,7 @@
     "cpolar",
     "frp",
     "self-hosted",
+    "reverse-proxy",
     "mobile",
     "https"
   ],

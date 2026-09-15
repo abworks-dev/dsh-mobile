@@ -40,7 +40,7 @@
   <sub><a href="https://github.com/saya-ch/dsh-mobile/releases/tag/v0.4.1">版本说明与校验文件</a></sub>
 </p>
 
-DSH Mobile 是一个 DeepSeek Harness 插件，让手机浏览器或 Android App 通过局域网，或可选的 Tailscale Funnel、cpolar、自建 FRP 远程通道连接电脑，继续使用同一份会话、工作区、消息和工具。局域网与远程访问分别启停、分别管理设备，且都不修改 DeepSeek Harness 源码。
+DSH Mobile 是一个 DeepSeek Harness 插件，让手机浏览器或 Android App 通过局域网，或可选的 Tailscale Funnel、cpolar、自建 FRP 或自有反向代理远程通道连接电脑，继续使用同一份会话、工作区、消息和工具。局域网与远程访问分别启停、分别管理设备，且都不修改 DeepSeek Harness 源码。
 
 移动访问使用独立的 HTTPS 与证书固定，只有配对过的设备能通过校验接入。
 
@@ -132,7 +132,8 @@ dsh plugin --profile web add dshmarket
    - **Tailscale Funnel**：点击 **启用远程访问**，在打开的官方页面完成一次 Tailscale 登录；按面板提示继续允许 Funnel，然后返回 DSH 等待连接就绪。
    - **cpolar**：点击 **安装官方组件**，登录 cpolar 控制台取得 Authtoken，粘贴后点击 **保存并连接**。组件只会在确认后下载到插件私有目录；免费临时地址可能在 DSH 或 cpolar 重启后变化。
    - **自建 FRP（高级）**：展开 **自建连接**，填写 VPS、frps 端口、共享 Token 和公开 HTTPS 地址；公开地址可以是自己的域名，也可以直接是 VPS 公网 IPv4（例如 `https://203.0.113.10`，请换成你自己的真实地址，文档示例网段会被拒绝）。可以复制受限模板手动部署，也可以填写 SSH 用户、SSH 端口和本机私钥路径，点击 **部署 frps + Caddy** 自动部署。自动部署支持 Ubuntu/Debian + systemd，使用 OpenSSH 密钥或 ssh-agent，不接受密码，也不会覆盖非 DSH Mobile 管理的 Caddyfile；部署与清理前都会展示服务器主机指纹，需到 VPS 控制台核对后才能继续。公网 IP 模式会申请约 6 天有效的 Let’s Encrypt IP 证书并配置每日自动续期。部署完成后再安装官方 `frpc` 并验证连接。不再需要服务器时可用“复制 VPS 卸载脚本”或一键清理，只删除 DSH Mobile 自己的服务与配置。需要 Android App 0.3.3 或更高版本。详见 [自建 FRP 使用指南](docs/SELF_HOSTED_FRP.md)。
-2. 状态变为“远程访问已就绪”后，点击 **生成远程配对二维码**。
+   - **自有反向代理（未发布）**：展开 **自建连接 → 自有反向代理**，填写公网 HTTPS 地址（支持自定义端口）、私有监听 IPv4、独立 HTTP 后端端口（默认 3444）和代理来源 CIDR，再点击 **保存并启动后端**。适合已有 Lucky/Nginx/Caddy 的用户，无需隧道组件；需要 Android App 0.4.0 或更高版本。详见 [自有反向代理指南](docs/SELF_HOSTED_ORIGIN.md)。
+2. 状态变为“远程访问已就绪”后，点击 **生成远程配对二维码**。自有反向代理仅显示“后端已监听”：它不验证公网连通性，仍需检查代理 HTTPS、证书与 WebSocket 并用手机验收。
 3. 在 Android App 中进入 **远程访问**，扫描二维码完成独立配对。
 4. 此后 App 会保存当前地址和设备凭据并自动重连。若 cpolar 免费临时地址发生变化，请扫描电脑端当前远程二维码重新验证连接；无需清除 App 数据。旧设备 token 只会发送到原先保存的精确 Origin，不会发送给二维码中的新域名。
 
@@ -141,6 +142,8 @@ dsh plugin --profile web add dshmarket
 Tailscale Funnel 覆盖范围广，但在中国大陆网络下可能不稳定。其运行组件把公开监听生命周期绑定到父进程和受限控制通道；父进程退出、控制通道关闭或显式停止时会结束当前代次并清理资源。cpolar 更适合国内网络；自建 FRP 适合已有 VPS、希望避开公共服务带宽限制的用户。中国大陆 VPS 上的未备案域名可能被云厂商拦截，此时可使用公网 IPv4 模式。插件会校验按需下载的固定版本组件，配置与程序均保存在 `$DSH_HOME/mobile-access/`，可随时在面板中彻底清除。
 
 自建 FRP 只生成一个指向 DSH 回环网关的 HTTP vhost，不提供任意 FRP 配置、TCP/UDP 代理或 FRP 插件。VPS 的明文 vhost 必须只监听 `127.0.0.1`，由 Caddy 提供公网 HTTPS；插件会拒绝可从公网访问的明文端口，并在公开发现接口确认连接到当前电脑后才显示“已就绪”。
+
+自有反向代理的 HTTP 后端只允许留在可信私网；**不要把它映射到公网，也不要绕过它直连 DSH 或现有 LAN 3443**。来源 CIDR 匹配代理的直接 TCP 来源，不信任转发头；反代须保留外部 Host（含端口）、Origin、Cookie 和 WebSocket。清除代理配置不会删除已配对远程设备。
 
 远程公开地址仍受 DSH 设备配对保护。内置 Funnel 与托管 cpolar 当前支持 Windows x64；按需安装的 FRP 0.70.1 支持 Windows、Linux、macOS 的 x64 与 arm64。
 

@@ -26,3 +26,4 @@ apps/mobile/store/ios/
 .playwright-mcp/
 tmp-dsh-web.log
 tmp-dsh-web.err.log
+/Temp/

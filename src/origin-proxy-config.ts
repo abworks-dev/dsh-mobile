@@ -1,0 +1,195 @@
+import { randomBytes } from 'node:crypto'
+import { lstat, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { isIP } from 'node:net'
+import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
+import { addressAllowed, isGloballyRoutableIpv4, isLoopbackAddress, parseCidr } from './network.js'
+import { restrictPrivateFile } from './private-file.js'
+
+export const DEFAULT_ORIGIN_LISTEN_PORT = 3444
+const MAX_SETTINGS_BYTES = 8 * 1024
+const PRIVATE_NETWORKS = ['10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16'].map(parseCidr)
+const TRUSTED_NETWORKS = [...PRIVATE_NETWORKS, parseCidr('127.0.0.0/8')]
+
+/** A private HTTP listener behind a user-managed HTTPS reverse proxy. */
+export interface OriginSettings {
+  readonly version: 1
+  readonly publicOrigin: string
+  readonly listenHost: string
+  readonly listenPort: number
+  readonly allowedCidrs: readonly string[]
+}
+
+/** Configuration metadata returned only to the local desktop control UI. */
+export interface OriginConfigurationStatus {
+  readonly configured: boolean
+  readonly publicOrigin?: string
+  readonly listenHost?: string
+  readonly listenPort?: number
+  readonly allowedCidrs?: readonly string[]
+  readonly backendOrigin?: string
+  readonly storagePath: string
+  readonly errorCode?: string
+}
+
+/** Require a public HTTPS origin; custom external ports are supported. */
+export function validateOriginPublicOrigin(value: unknown): string {
+  if (typeof value !== 'string' || value.length > 512 || /[\s\u0000-\u001f\u007f\\@?#]/u.test(value)) {
+    throw new Error('origin_public_origin_invalid')
+  }
+  let url: URL
+  try { url = new URL(value) } catch { throw new Error('origin_public_origin_invalid') }
+  const host = url.hostname
+  const validHostname = host.length <= 253 && host.includes('.')
+    && host.split('.').every(label => label.length >= 1 && label.length <= 63
+      && /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/u.test(label))
+    && !['localhost', 'local', 'lan', 'home', 'internal', 'home.arpa']
+      .some(suffix => host === suffix || host.endsWith('.' + suffix))
+  if (url.protocol !== 'https:' || url.pathname !== '/' || url.username !== '' || url.password !== ''
+    || url.search !== '' || url.hash !== '' || (url.port !== '' && Number(url.port) < 1)
+    || (isIP(host) === 4 ? !isGloballyRoutableIpv4(host) : isIP(host) !== 0 || !validHostname)) {
+    throw new Error('origin_public_origin_invalid')
+  }
+  return url.origin
+}
+
+/** Bind only one explicit loopback or RFC1918 IPv4 interface, never all interfaces. */
+export function validateOriginListenHost(value: unknown): string {
+  if (typeof value !== 'string' || isIP(value) !== 4
+    || (!isLoopbackAddress(value) && !addressAllowed(value, PRIVATE_NETWORKS))) {
+    throw new Error('origin_listen_host_invalid')
+  }
+  return value
+}
+
+export function validateOriginListenPort(value: unknown): number {
+  if (!Number.isSafeInteger(value) || Number(value) < 1 || Number(value) > 65_535) {
+    throw new Error('origin_listen_port_invalid')
+  }
+  if (value === 3443) throw new Error('origin_listen_port_reserved')
+  return Number(value)
+}
+
+/** Authorize direct proxy socket peers, not untrusted forwarded client headers. */
+export function validateOriginAllowedCidrs(value: unknown, listenHost: string): readonly string[] {
+  const input = value === undefined && isLoopbackAddress(listenHost) ? ['127.0.0.0/8'] : value
+  if (!Array.isArray(input) || input.length === 0 || input.length > 16) {
+    throw new Error('origin_allowed_cidrs_invalid')
+  }
+  const cidrs: string[] = []
+  for (const entry of input) {
+    if (typeof entry !== 'string' || entry.length > 64 || isIP(entry.split('/')[0] ?? '') !== 4) {
+      throw new Error('origin_allowed_cidrs_invalid')
+    }
+    try {
+      const cidr = parseCidr(entry)
+      if (cidr.bits !== 32 || !TRUSTED_NETWORKS.some(range => cidr.prefix >= range.prefix
+        && addressAllowed(entry.split('/')[0], [range]))) throw new Error('untrusted CIDR')
+      cidrs.push(cidr.source)
+    } catch { throw new Error('origin_allowed_cidrs_invalid') }
+  }
+  if (!isLoopbackAddress(listenHost) && !cidrs.some(cidr => !isLoopbackAddress(cidr.split('/')[0]!))) {
+    throw new Error('origin_allowed_cidrs_invalid')
+  }
+  return Object.freeze([...new Set(cidrs)])
+}
+
+/** Validate both saved settings and local administrative requests. */
+export function parseOriginSettings(value: unknown): OriginSettings {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new Error('origin_settings_invalid')
+  const record = value as Record<string, unknown>
+  if (Reflect.ownKeys(record).some(key => !['version', 'publicOrigin', 'listenHost', 'listenPort', 'allowedCidrs'].includes(String(key)))
+    || (record.version !== undefined && record.version !== 1)) throw new Error('origin_settings_invalid')
+  const listenHost = validateOriginListenHost(record.listenHost === undefined ? '127.0.0.1' : record.listenHost)
+  return Object.freeze({
+    version: 1,
+    publicOrigin: validateOriginPublicOrigin(record.publicOrigin),
+    listenHost,
+    listenPort: validateOriginListenPort(record.listenPort === undefined ? DEFAULT_ORIGIN_LISTEN_PORT : record.listenPort),
+    allowedCidrs: validateOriginAllowedCidrs(record.allowedCidrs, listenHost),
+  })
+}
+
+async function atomicPrivateWrite(file: string, body: string): Promise<void> {
+  const directory = dirname(file)
+  await mkdir(directory, { recursive: true, mode: 0o700 })
+  try {
+    const current = await lstat(file)
+    if (!current.isFile() || current.isSymbolicLink()) throw new Error('origin_config_target_invalid')
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+  }
+  const temporary = join(directory, '.' + basename(file) + '.' + randomBytes(12).toString('hex') + '.tmp')
+  try {
+    await writeFile(temporary, body, { encoding: 'utf8', flag: 'wx', mode: 0o600 })
+    await rename(temporary, file)
+    await restrictPrivateFile(file)
+  } catch (error) {
+    await rm(temporary, { force: true })
+    throw error
+  }
+}
+
+/** Owns only origin settings; shared paired-device storage is never removed. */
+export class OriginConfigStore {
+  readonly stateRoot: string
+  readonly settingsFile: string
+  private settingsValue: OriginSettings | undefined
+  private errorCode: string | undefined
+
+  constructor(stateDirectory: string) {
+    if (!isAbsolute(stateDirectory)) throw new Error('origin config state directory must be absolute')
+    this.stateRoot = resolve(stateDirectory)
+    this.settingsFile = join(this.stateRoot, 'settings.json')
+  }
+
+  async initialize(): Promise<void> {
+    this.settingsValue = undefined
+    this.errorCode = undefined
+    let entry
+    try { entry = await lstat(this.settingsFile) } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return
+      throw error
+    }
+    if (!entry.isFile() || entry.isSymbolicLink() || entry.size > MAX_SETTINGS_BYTES) {
+      this.errorCode = 'origin_config_invalid'
+      return
+    }
+    await restrictPrivateFile(this.settingsFile)
+    try {
+      this.settingsValue = parseOriginSettings(JSON.parse(await readFile(this.settingsFile, 'utf8')) as unknown)
+    } catch { this.errorCode = 'origin_config_invalid' }
+  }
+
+  status(): OriginConfigurationStatus {
+    const settings = this.settingsValue
+    return Object.freeze({
+      configured: settings !== undefined,
+      ...(settings === undefined ? {} : {
+        publicOrigin: settings.publicOrigin,
+        listenHost: settings.listenHost,
+        listenPort: settings.listenPort,
+        allowedCidrs: settings.allowedCidrs,
+        backendOrigin: 'http://' + settings.listenHost + ':' + String(settings.listenPort),
+      }),
+      storagePath: this.stateRoot,
+      ...(this.errorCode === undefined ? {} : { errorCode: this.errorCode }),
+    })
+  }
+
+  settings(): OriginSettings | undefined { return this.settingsValue }
+
+  async configure(value: unknown): Promise<OriginConfigurationStatus> {
+    const settings = parseOriginSettings(value)
+    await atomicPrivateWrite(this.settingsFile, JSON.stringify(settings) + '\n')
+    this.settingsValue = settings
+    this.errorCode = undefined
+    return this.status()
+  }
+
+  async purge(): Promise<OriginConfigurationStatus> {
+    await rm(this.settingsFile, { force: true })
+    this.settingsValue = undefined
+    this.errorCode = undefined
+    return this.status()
+  }
+}

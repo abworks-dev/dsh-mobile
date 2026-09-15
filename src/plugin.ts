@@ -39,12 +39,15 @@ import { CpolarComponentManager, type CpolarComponentStatus } from './cpolar-com
 import { FrpComponentManager, type FrpComponentStatus } from './frp-component.js'
 import { FrpConfigStore, mergeSavedFrpSettings, mergeSavedFrpTarget, type FrpConfigurationStatus } from './frp-config.js'
 import { FrpController } from './frp.js'
+import { OriginConfigStore, parseOriginSettings, validateOriginListenPort, type OriginConfigurationStatus, type OriginSettings } from './origin-proxy-config.js'
+import { OriginController } from './origin-proxy.js'
 import { PluginReleaseManager, releaseProfileDirectory } from './release-update.js'
 import { installMobileFileLogger } from './file-logger.js'
 import {
   configuredRemoteProvider,
   JsonRemoteProviderStore,
   RemoteProviderCoordinator,
+  REMOTE_PROVIDERS,
   type RemoteProvider,
   type RemoteProviderController,
   type RemoteProviderStatus,
@@ -140,6 +143,13 @@ function mapAdminError(error: unknown): HttpError {
     'frp_settings_invalid',
   ].includes(error.message)) return new HttpError(400, error.message)
   if (error instanceof Error && error.message.startsWith('frp_')) {
+    return new HttpError(409, error.message)
+  }
+  if (error instanceof Error && [
+    'origin_settings_invalid', 'origin_public_origin_invalid', 'origin_listen_host_invalid',
+    'origin_listen_port_invalid', 'origin_listen_port_reserved', 'origin_allowed_cidrs_invalid',
+  ].includes(error.message)) return new HttpError(400, error.message)
+  if (error instanceof Error && error.message.startsWith('origin_')) {
     return new HttpError(409, error.message)
   }
   if (error instanceof Error && error.message.startsWith('vps_')) {
@@ -277,6 +287,24 @@ export function remoteGatewayConfig(
   })
 }
 
+/** Reuse remote HTTPS policy while binding a separately validated private HTTP origin. */
+export function originGatewayConfig(
+  template: ResolvedGatewayConfig,
+  settings: OriginSettings,
+  stateFile: string,
+  instanceId: string,
+  listenPort = settings.listenPort,
+): ResolvedGatewayConfig {
+  const validated = parseOriginSettings(settings)
+  // Port zero is available only to in-process tests, never to saved settings.
+  if (listenPort !== 0) validateOriginListenPort(listenPort)
+  return Object.freeze({
+    ...remoteGatewayConfig(template, validated.publicOrigin, stateFile, instanceId, listenPort),
+    listenHost: validated.listenHost,
+    allowedCidrs: Object.freeze(validated.allowedCidrs.map(parseCidr)),
+  })
+}
+
 function remoteControlPayload(
   provider: RemoteProvider,
   status: RemoteProviderStatus,
@@ -285,12 +313,14 @@ function remoteControlPayload(
   cpolarComponent: CpolarComponentStatus,
   frpComponent: FrpComponentStatus,
   frpConfiguration: FrpConfigurationStatus,
+  originConfiguration: OriginConfigurationStatus,
 ): Record<string, unknown> {
   return {
     provider,
     running: status.enabled,
     state: status.state,
     ...(status.origin === undefined ? {} : { origin: status.origin }),
+    ...(status.backendOrigin === undefined ? {} : { backendOrigin: status.backendOrigin }),
     ...(status.loginUrl === undefined ? {} : { loginUrl: status.loginUrl }),
     ...(status.setupUrl === undefined ? {} : { setupUrl: status.setupUrl }),
     ...(status.errorCode === undefined ? {} : { errorCode: status.errorCode }),
@@ -309,6 +339,12 @@ function remoteControlPayload(
         state: providerStatuses.frp.state,
         component: frpComponent,
         configuration: frpConfiguration,
+      },
+      origin: {
+        bundled: true,
+        running: providerStatuses.origin.enabled,
+        state: providerStatuses.origin.state,
+        configuration: originConfiguration,
       },
     },
   }
@@ -352,6 +388,8 @@ export async function apply(ctx: Context, config: PluginConfig): Promise<void> {
   await frpComponent.initialize()
   const frpConfig = new FrpConfigStore(join(remoteDirectory, 'frp', 'config'))
   await frpConfig.initialize()
+  const originConfig = new OriginConfigStore(join(remoteDirectory, 'origin', 'config'))
+  await originConfig.initialize()
   const unregisterBuiltin = mobileAccess.registerExtension({
     schemaVersion: 1,
     id: 'computer-images',
@@ -462,9 +500,22 @@ export async function apply(ctx: Context, config: PluginConfig): Promise<void> {
       await candidate.start()
       return candidate
   }
+  const createOriginGateway = async (settings: OriginSettings): Promise<MobileAccessGateway> => {
+    const resolved = originGatewayConfig(template, settings, remoteDeviceFile, instanceId)
+    const candidate = new MobileAccessGateway(
+      resolved, new JsonDeviceStore(resolved.stateFile, resolved.maxDevices), mobileAccess,
+      upstreamLoginUrl, webSocketPaths, blockedUpgradePaths,
+    )
+    try { await candidate.start() } catch (error) {
+      await candidate.close()
+      throw error
+    }
+    return candidate
+  }
   const tailscaleStore = new JsonMobileAccessControlStore(join(remoteDirectory, 'control.json'), false)
   const cpolarStore = new JsonMobileAccessControlStore(join(remoteDirectory, 'cpolar', 'control.json'), false)
   const frpStore = new JsonMobileAccessControlStore(join(remoteDirectory, 'frp', 'control.json'), false)
+  const originStore = new JsonMobileAccessControlStore(join(remoteDirectory, 'origin', 'control.json'), false)
   const remoteControllers: Record<RemoteProvider, RemoteProviderController> = {
     tailscale: new FunnelController({
       store: tailscaleStore,
@@ -486,12 +537,13 @@ export async function apply(ctx: Context, config: PluginConfig): Promise<void> {
       instanceId,
       createGateway: createRemoteGateway,
     }),
+    origin: new OriginController({ store: originStore, config: originConfig, createGateway: createOriginGateway }),
   }
   const remoteProviders = new RemoteProviderCoordinator(initialRemoteProvider, remoteControllers, remoteProviderStore)
   const remoteController = () => remoteProviders.controller()
   // Remote gateways rotate inside their controllers; forward through the
   // current instance so stale gateways never receive events.
-  for (const provider of ['tailscale', 'cpolar', 'frp'] as const) {
+  for (const provider of REMOTE_PROVIDERS) {
     const controller = remoteControllers[provider]
     taskEventHub.add({ broadcastTaskEvent: event => { controller.gateway()?.broadcastTaskEvent(event) } })
   }
@@ -503,10 +555,12 @@ export async function apply(ctx: Context, config: PluginConfig): Promise<void> {
       tailscale: remoteControllers.tailscale.status(),
       cpolar: remoteControllers.cpolar.status(),
       frp: remoteControllers.frp.status(),
+      origin: remoteControllers.origin.status(),
     },
     cpolarComponent.status(),
     frpComponent.status(),
     frpConfig.status(),
+    originConfig.status(),
   )
   const lanPayload = (): Record<string, unknown> => ({
     ...(loaded.kind === 'unconfigured' ? {
@@ -637,10 +691,29 @@ export async function apply(ctx: Context, config: PluginConfig): Promise<void> {
         }
         if (request.method === 'POST' && target.decodedPathname === `${LOCAL_ADMIN_PREFIX}/remote/provider`) {
           const body = await readJsonObject(request, 4096)
-          if (body.provider !== 'tailscale' && body.provider !== 'cpolar' && body.provider !== 'frp') {
+          if (body.provider !== 'tailscale' && body.provider !== 'cpolar' && body.provider !== 'frp' && body.provider !== 'origin') {
             throw new HttpError(400, 'bad_request')
           }
           await remoteProviders.select(body.provider)
+          sendJson(response, 200, remotePayload(), false)
+          return
+        }
+        if (request.method === 'POST' && target.decodedPathname === `${LOCAL_ADMIN_PREFIX}/remote/origin/configure`) {
+          const body = await readJsonObject(request, 8192)
+          await remoteProviders.mutate(async () => {
+            await originConfig.configure(body)
+            if (remoteControllers.origin.status().enabled) await remoteControllers.origin.reconnect()
+          })
+          sendJson(response, 200, remotePayload(), false)
+          return
+        }
+        if (request.method === 'POST' && target.decodedPathname === `${LOCAL_ADMIN_PREFIX}/remote/origin/purge`) {
+          const body = await readJsonObject(request, 4096)
+          if (body.confirm !== true) throw new HttpError(400, 'bad_request')
+          await remoteProviders.mutate(async () => {
+            await remoteControllers.origin.setEnabled(false)
+            await originConfig.purge()
+          })
           sendJson(response, 200, remotePayload(), false)
           return
         }
@@ -882,11 +955,12 @@ export async function apply(ctx: Context, config: PluginConfig): Promise<void> {
         tailscale: tailscaleStore,
         cpolar: cpolarStore,
         frp: frpStore,
+        origin: originStore,
       }
       await Promise.all((Object.keys(stores) as RemoteProvider[])
         .filter(provider => provider !== remoteProviders.selected)
         .map(provider => stores[provider].save({ version: 1, enabled: false })))
-      for (const provider of ['tailscale', 'cpolar', 'frp'] as const) await remoteControllers[provider].initialize()
+      for (const provider of REMOTE_PROVIDERS) await remoteControllers[provider].initialize()
     } catch (error) {
       try {
         await settleCleanupSteps([

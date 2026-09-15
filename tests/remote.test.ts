@@ -44,6 +44,7 @@ describe('remote provider selection', () => {
     expect(parseRemoteProviderState({ version: 1, provider: 'tailscale' })).toEqual({ version: 1, provider: 'tailscale' })
     expect(parseRemoteProviderState({ version: 1, provider: 'cpolar' })).toEqual({ version: 1, provider: 'cpolar' })
     expect(parseRemoteProviderState({ version: 1, provider: 'frp' })).toEqual({ version: 1, provider: 'frp' })
+    expect(parseRemoteProviderState({ version: 1, provider: 'origin' })).toEqual({ version: 1, provider: 'origin' })
     expect(() => parseRemoteProviderState({ version: 1, provider: 'other' })).toThrow('unsupported format')
     expect(() => parseRemoteProviderState({ version: 1, provider: 'cpolar', token: 'secret' })).toThrow('unsupported format')
   })
@@ -52,7 +53,8 @@ describe('remote provider selection', () => {
     expect(configuredRemoteProvider({})).toBe('tailscale')
     expect(configuredRemoteProvider({ DSH_MOBILE_REMOTE_PROVIDER: 'cpolar' })).toBe('cpolar')
     expect(configuredRemoteProvider({ DSH_MOBILE_REMOTE_PROVIDER: 'frp' })).toBe('frp')
-    expect(() => configuredRemoteProvider({ DSH_MOBILE_REMOTE_PROVIDER: 'invalid' })).toThrow('must be tailscale, cpolar, or frp')
+    expect(configuredRemoteProvider({ DSH_MOBILE_REMOTE_PROVIDER: 'origin' })).toBe('origin')
+    expect(() => configuredRemoteProvider({ DSH_MOBILE_REMOTE_PROVIDER: 'invalid' })).toThrow('must be tailscale, cpolar, frp, or origin')
 
     const directory = await mkdtemp(join(tmpdir(), 'dsh-mobile-remote-provider-'))
     temporaryDirectories.push(directory)
@@ -68,6 +70,7 @@ describe('remote provider selection', () => {
       tailscale: new FakeRemoteController(),
       cpolar: new FakeRemoteController(),
       frp: new FakeRemoteController(),
+      origin: new FakeRemoteController(),
     }
     const saved: string[] = []
     const coordinator = new RemoteProviderCoordinator('tailscale', controllers, {
@@ -100,12 +103,15 @@ describe('remote provider selection', () => {
       tailscale: new FakeRemoteController(),
       cpolar: new FakeRemoteController(),
       frp: new FakeRemoteController(),
+      origin: new FakeRemoteController(),
     }
     controllers.cpolar.enabled = true
+    controllers.origin.enabled = true
     const coordinator = new RemoteProviderCoordinator('tailscale', controllers, { save: async () => {} })
     await expect(coordinator.mutate(async () => { throw new Error('operation failed') })).rejects.toThrow('operation failed')
     expect(controllers.cpolar.enabled).toBe(false)
     expect(controllers.frp.enabled).toBe(false)
+    expect(controllers.origin.enabled).toBe(false)
   })
 
   it('waits for process close after escalating from TERM to KILL', async () => {
