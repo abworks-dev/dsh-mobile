@@ -21,10 +21,17 @@ afterEach(async () => {
   await Promise.all(temporaryDirectories.splice(0).map(directory => rm(directory, { recursive: true, force: true })))
 })
 
-async function invoke(route: WebRoute, method: 'GET' | 'POST', path: string, body = ''): Promise<{ status: number; body: string }> {
+async function invoke(
+  route: WebRoute,
+  method: 'GET' | 'POST',
+  path: string,
+  body = '',
+  hostHostname = '127.0.0.1',
+): Promise<{ status: number; body: string }> {
   const server = createServer((request, response) => { void route.handler(request, response) })
   await new Promise<void>(resolve => { server.listen(0, '127.0.0.1', resolve) })
   const port = (server.address() as AddressInfo).port
+  const authority = `${hostHostname}:${String(port)}`
   try {
     return await new Promise((resolve, reject) => {
       const request = requestHttp({
@@ -33,9 +40,9 @@ async function invoke(route: WebRoute, method: 'GET' | 'POST', path: string, bod
         method,
         path,
         headers: {
-          host: `127.0.0.1:${String(port)}`,
+          host: authority,
           ...(method === 'POST' ? {
-            origin: `http://127.0.0.1:${String(port)}`,
+            origin: `http://${authority}`,
             'sec-fetch-site': 'same-origin',
             'content-type': 'application/json',
             'content-length': Buffer.byteLength(body),
@@ -293,6 +300,24 @@ describe('stock DSH lifecycle', () => {
   it('follows the active WebServer port when no setup upstream is configured', async () => {
     const mounted = await mount(false, 43120)
     expect(mounted.upstreamBase).toBe('http://127.0.0.1:43120')
+  })
+
+  it('allows a private LAN Host on the loopback desktop admin route', async () => {
+    const mounted = await mount()
+    const allowed = await invoke(mounted.route, 'GET', '/api/mobile-access/lan/control', '', '192.168.50.23')
+    expect(allowed.status).toBe(200)
+    expect(JSON.parse(allowed.body)).toMatchObject({ running: false })
+  })
+
+  it('rejects DNS-rebinding and public Host values on the desktop admin route', async () => {
+    const mounted = await mount()
+    const rebound = await invoke(mounted.route, 'GET', '/api/mobile-access/lan/control', '', 'evil.example')
+    expect(rebound.status).toBe(403)
+    expect(JSON.parse(rebound.body)).toEqual({ error: 'forbidden' })
+    const publicHost = await invoke(mounted.route, 'GET', '/api/mobile-access/lan/control', '', '8.8.8.8')
+    expect(publicHost.status).toBe(403)
+    const cgnat = await invoke(mounted.route, 'GET', '/api/mobile-access/lan/control', '', '100.64.1.8')
+    expect(cgnat.status).toBe(403)
   })
 
   it('does not present the loopback fallback as LAN access when managed setup is missing', async () => {

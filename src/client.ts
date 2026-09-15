@@ -7,6 +7,7 @@ import {
 } from './client-messages.js'
 import { createRestrictedFrpServerTemplate } from './frp-template.js'
 import { installNativeMobileSurface, NATIVE_MOBILE_STYLES, resolveNativeMobileLanguage } from './native-mobile.js'
+import { isDesktopAdminSurface } from './local-admin-host.js'
 import { fireDeviceRevoked, fireTaskNotifyEvent, isDeviceRevokedPayload, parseTaskNotifyPayload, taskCompletionTag } from './task-notify.js'
 
 export { DIAGNOSTIC_REASON_MESSAGES, LOCALIZED_DIAGNOSTIC_COPY, MOBILE_CONTROL_MESSAGES } from './client-messages.js'
@@ -87,10 +88,6 @@ if (typeof window !== 'undefined' && window.dshMobile === undefined) {
     register: mount => { queuedLegacyMount = mount },
     define: definition => { queuedDefinitions.push(definition) },
   }
-}
-
-function isLoopbackHost(hostname: string): boolean {
-  return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1' || hostname === '[::1]'
 }
 
 export function selectMobileControlLocale(documentLanguage = '', navigatorLanguages: readonly string[] = []): MobileControlLocale {
@@ -2978,12 +2975,12 @@ export function apply(ctx: ClientContext): void {
   }, 'dsh-mobile: authenticated gateway client trust')
 
   ctx.effect(() => {
-    const loopback = isLoopbackHost(location.hostname) && !new URLSearchParams(location.search).has('dsh-mobile-preview')
-    const style = element('style'); style.dataset.plugin = 'dsh-mobile'; style.textContent = loopback
+    const desktopAdmin = isDesktopAdminSurface(location.hostname, location.search, window.__DSH_MOBILE_FRONTEND__)
+    const style = element('style'); style.dataset.plugin = 'dsh-mobile'; style.textContent = desktopAdmin
       ? CONTROL_STYLES
       : NATIVE_MOBILE_STYLES
     document.head.append(style)
-    if (!loopback) {
+    if (!desktopAdmin) {
       const removeSettingsAction = ctx.slots.inject('settings.general.item', () => ctx.slots.register({
         name: 'settings.general.item',
         id: 'dsh-mobile-switch-computer',

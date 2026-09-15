@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { addressAllowed, isLoopbackAddress, RequestTrustPolicy } from './network.js'
+import { isLocalAdminHostname } from './local-admin-host.js'
 
 export const DEVICE_COOKIE = 'dsh_ma_device'
 export const SESSION_COOKIE = 'dsh_ma_session'
@@ -189,7 +190,7 @@ export function assertLocalAdminTrust(request: IncomingMessage, requireBrowserOr
     throw new HttpError(403, 'forbidden')
   }
   const host = localAuthority(request.headers.host)
-  if (host === undefined || (host.hostname !== 'localhost' && !isLoopbackAddress(host.hostname))) {
+  if (host === undefined || !isLocalAdminHostname(host.hostname)) {
     throw new HttpError(403, 'forbidden')
   }
   const site = request.headers['sec-fetch-site']

@@ -193,7 +193,7 @@ describe('mobile-control localization', () => {
     expect(source).toContain("mobile.switch-computer")
     expect(source).toContain("capabilities.includes('mobile.switch-computer')")
     expect(source).toContain("dsh-mobile-native-ready")
-    expect(source).toContain("if (!loopback) {")
+    expect(source).toContain("if (!desktopAdmin) {")
   })
 
   it('remounts plugin-owned UI only when the DSH document language changes', () => {

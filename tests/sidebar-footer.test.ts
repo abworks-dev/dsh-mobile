@@ -82,7 +82,7 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-function installFooter(locale = 'en-US') {
+function installFooter(locale = 'en-US', hostname = 'localhost') {
   vi.useFakeTimers()
   const document = new FakeDocument()
   document.documentElement.lang = locale
@@ -94,7 +94,7 @@ function installFooter(locale = 'en-US') {
 
   vi.stubGlobal('document', document)
   vi.stubGlobal('window', window)
-  vi.stubGlobal('location', { hostname: 'localhost', search: '' })
+  vi.stubGlobal('location', { hostname, search: '' })
   vi.stubGlobal('navigator', { languages: ['en-US'], language: 'en-US' })
   vi.stubGlobal('Node', FakeElement)
   vi.stubGlobal('MutationObserver', class {
@@ -245,6 +245,12 @@ describe('desktop Mobile Access footer', () => {
     rail.button.dispatchEvent(new Event('click'))
     expect(panel?.hidden).toBe(true)
     expect(rail.button.getAttribute('aria-expanded')).toBe('false')
+  })
+
+  it('registers the desktop footer on a private LAN address', () => {
+    const footer = installFooter('zh-CN', '192.168.50.23')
+    expect(footer.injectSlot).toHaveBeenCalledExactlyOnceWith('sidebar.footer.action', expect.any(Function))
+    expect(footer.render(true).props).toMatchObject({ 'aria-label': '移动访问', title: '移动访问' })
   })
 
   it('reflects outside dismissal and removes its panel, styles, and registration on disposal', () => {

@@ -4,7 +4,7 @@ Notable changes to DSH Mobile are recorded here. GitHub Releases remain the sour
 
 ## Unreleased
 
-Future changes will be recorded here.
+- Allow the desktop Mobile access admin API and sidebar control on RFC1918 and IPv4 link-local Host values when the TCP peer remains loopback, so headless Linux hosts and LAN reverse proxies can open DSH Web without a localhost-only browser. Public IPs, CGNAT, and arbitrary DNS names stay rejected. The dedicated Mobile HTTPS listener remains the phone surface.
 
 ## 0.4.0 - 2026-09-14
 
