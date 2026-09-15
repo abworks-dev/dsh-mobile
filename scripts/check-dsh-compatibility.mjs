@@ -118,9 +118,10 @@ if (!conversationSources.some(source => source.includes('data-conversation-scrol
   throw new Error('DSH conversation no longer exposes data-conversation-scroll')
 }
 
-const composer = await text('packages/client/ui-conversation/src/client/skeleton/InputBar.tsx')
+const composerSources = await Promise.all((await sourceFilesUnder('packages/client/ui-conversation/src/client'))
+  .map(path => readFile(path, 'utf8')))
 for (const marker of ['data-composer-card', 'data-input-scroll', 'aria-haspopup="listbox"']) {
-  if (!composer.includes(marker)) throw new Error(`DSH composer command contract changed: missing ${marker}`)
+  if (!composerSources.some(source => source.includes(marker))) throw new Error(`DSH composer command contract changed: missing ${marker}`)
 }
 const triggerMenu = await text('packages/client/ui-input-trigger/src/client/MenuView.tsx')
 if (!triggerMenu.includes('data-trigger-menu=""')) {

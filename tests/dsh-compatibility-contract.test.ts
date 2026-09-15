@@ -156,6 +156,15 @@ describe('DSH source compatibility gate', () => {
     expect(result.output).toContain('DSH compatibility ok: 0.1.2-alpha.2 (renderer-v2)')
   })
 
+  it('accepts the input scroll marker after the composer editor is extracted', async () => {
+    const sources = sourceFixture()
+    sources['packages/client/ui-conversation/src/client/skeleton/InputBar.tsx'] = 'data-composer-card aria-haspopup="listbox"'
+    sources['packages/client/ui-conversation/src/client/input/editor/DraftEditor.tsx'] = 'data-input-scroll'
+    const result = await check(sources)
+    expect(result.status).toBe(0)
+    expect(result.output).toContain('DSH compatibility ok: 0.1.2-alpha.2 (renderer-v2)')
+  })
+
   it('rejects legacy settings without its direct Connection dependency', async () => {
     const sources = sourceFixture('0.1.2-alpha.1', 'renderer-v2', false)
     sources['packages/client/ui-settings/package.json'] = manifest('0.1.2-alpha.1', [remotes])
