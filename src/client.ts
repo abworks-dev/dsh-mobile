@@ -2081,6 +2081,16 @@ export function extensionGenerationHeaders(generation: string | undefined, heade
   return result
 }
 
+/** Build the JSON request used by a mobile extension to invoke a Host action. */
+export function extensionActionRequestInit(generation: string | undefined, input: unknown, signal: AbortSignal): RequestInit {
+  return {
+    method: 'POST',
+    headers: extensionGenerationHeaders(generation, { 'content-type': 'application/json' }),
+    body: JSON.stringify(input ?? {}),
+    signal,
+  }
+}
+
 export function registerUniqueDisposable<T extends { readonly dispose: () => void }>(
   entries: Map<string, T>,
   claimedIds: Set<string>,
@@ -2606,7 +2616,7 @@ function installCustomAssets(): () => void {
       host: {
         invoke: (action: string, input: unknown) => {
           ensureCurrent()
-          return mobileRequest(`/mobile-access/extensions/${encodeURIComponent(id)}/actions/${encodeURIComponent(action)}`, { method: 'POST', headers: extensionGenerationHeaders(hostGeneration), body: JSON.stringify(input ?? {}), signal: controller.signal }).then(async response => { const value = await response.json() as unknown; if (!response.ok) throw new Error(typeof value === 'object' && value !== null && 'error' in value ? String((value as { error: unknown }).error) : `HTTP ${String(response.status)}`); return value })
+          return mobileRequest(`/mobile-access/extensions/${encodeURIComponent(id)}/actions/${encodeURIComponent(action)}`, extensionActionRequestInit(hostGeneration, input, controller.signal)).then(async response => { const value = await response.json() as unknown; if (!response.ok) throw new Error(typeof value === 'object' && value !== null && 'error' in value ? String((value as { error: unknown }).error) : `HTTP ${String(response.status)}`); return value })
         },
         fetch: (path: string, init?: RequestInit) => {
           ensureCurrent()

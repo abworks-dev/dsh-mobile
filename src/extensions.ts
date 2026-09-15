@@ -57,8 +57,11 @@ export class MobileExtensionError extends Error {
 }
 
 /** One host-side action exposed by an extension. */
+type CallableActionInput = (value?: never, options?: never) => unknown
+
 export interface MobileHostAction {
-  readonly input?: { parse(value: unknown): unknown }
+  /** A callable Schemastery schema or an adapter exposing parse(). */
+  readonly input?: CallableActionInput | { parse(value: unknown): unknown }
   readonly run: (context: MobileActionContext, input: unknown) => unknown | Promise<unknown>
 }
 
@@ -423,6 +426,13 @@ function combineSignalLifetime(first: AbortSignal, second: AbortSignal): Combine
   return { signal: controller.signal, cleanup }
 }
 
+/** Validate and normalize an action input through either supported schema form. */
+function parseActionInput(schema: MobileHostAction['input'], input: unknown): unknown {
+  if (schema === undefined) return input
+  if (typeof schema === 'function') return (schema as (value: unknown) => unknown)(input)
+  return schema.parse(input) ?? input
+}
+
 /** Combine two abort lifetimes without relying on AbortSignal.any in older WebViews. */
 export function combineSignals(first: AbortSignal, second: AbortSignal): AbortSignal {
   return combineSignalLifetime(first, second).signal
@@ -556,8 +566,8 @@ export class MobileAccessService extends Service {
     const definition = 'host' in extension ? extension.host : extension
     const action = definition.actions?.[actionName]
     if (action === undefined) throw new MobileExtensionError('action_not_found', 'action not found', 404)
-    let parsed = input
-    try { parsed = action.input?.parse(input) ?? input } catch { throw new MobileExtensionError('invalid_action_input', 'action input is invalid', 400) }
+    let parsed: unknown
+    try { parsed = parseActionInput(action.input, input) } catch { throw new MobileExtensionError('invalid_action_input', 'action input is invalid', 400) }
     const lifetime = 'host' in extension ? combineSignalLifetime(extension.controller.signal, context.signal) : undefined
     const signal = lifetime?.signal ?? context.signal
     try { return await action.run({ ...context, signal }, parsed) } catch (error) {

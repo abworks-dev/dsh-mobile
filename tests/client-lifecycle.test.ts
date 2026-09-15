@@ -12,6 +12,7 @@ import {
   diagnosticOverallForChecks,
   diagnosticServerCopy,
   DIAGNOSTIC_REASON_MESSAGES,
+  extensionActionRequestInit,
   LOCALIZED_DIAGNOSTIC_COPY,
   extensionAssetUrl,
   extensionGenerationHeaders,
@@ -425,6 +426,16 @@ describe('custom asset refresh lifecycle', () => {
 })
 
 describe('extension request isolation', () => {
+  it('sends Host action input as JSON while pinning the active generation', async () => {
+    const controller = new AbortController()
+    const init = extensionActionRequestInit('a'.repeat(64), { name: 'Ada' }, controller.signal)
+    expect(init.method).toBe('POST')
+    expect(new Headers(init.headers).get('content-type')).toBe('application/json')
+    expect(new Headers(init.headers).get('x-dsh-mobile-extension-generation')).toBe('a'.repeat(64))
+    expect(init.body).toBe(JSON.stringify({ name: 'Ada' }))
+    expect(init.signal).toBe(controller.signal)
+  })
+
   it('combines abort lifetimes without AbortSignal.any', () => {
     const extension = new AbortController()
     const caller = new AbortController()

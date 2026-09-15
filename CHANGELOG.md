@@ -4,8 +4,10 @@ Notable changes to DSH Mobile are recorded here. GitHub Releases remain the sour
 
 ## Unreleased
 
-- Allow the desktop Mobile access admin API and sidebar control on RFC1918 and IPv4 link-local Host values when the TCP peer remains loopback, so headless Linux hosts and LAN reverse proxies can open DSH Web without a localhost-only browser. Public IPs, CGNAT, and arbitrary DNS names stay rejected. The dedicated Mobile HTTPS listener remains the phone surface.
-- Let the proxied DSH GUI frame its own same-origin surfaces and embed external http(s) and blob: pages, so the right-sidebar browser tab, the HTML/diff previews, and the PDF preview work over LAN and remote access; gateway-owned login, pairing, and JSON responses keep refusing every frame.
+- Allow the desktop Mobile access admin API and sidebar control on RFC1918 and IPv4 link-local Host values when the TCP peer remains loopback, so headless Linux hosts and LAN reverse proxies can open DSH Web without a localhost-only browser. Public IPs, CGNAT, and arbitrary DNS names stay rejected. The dedicated Mobile HTTPS listener remains the phone surface (thanks @xingleiwu for PR #79).
+- Let the proxied DSH GUI frame its own same-origin surfaces and embed external http(s) and blob: pages, so the right-sidebar browser tab, the HTML/diff previews, and the PDF preview work over LAN and remote access; gateway-owned login, pairing, and JSON responses keep refusing every frame (thanks @idoall for PR #77).
+- Fix mobile extension Host actions that sent JSON without an explicit content type, which caused every `api.host.invoke()` call to return `415 unsupported_media_type`.
+- Accept callable Schemastery input schemas as well as existing `parse(value)` adapters for extension actions, so documented `api.schema.object(...)` inputs are validated and normalized before `run()`.
 
 ## 0.4.0 - 2026-09-14
 

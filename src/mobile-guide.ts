@@ -71,11 +71,11 @@ const MOBILE_CUSTOMIZATION_GUIDE_BODY = `你在为用户定制 DSH Mobile 的手
 2. 电脑端能力 —— 手机需要读电脑文件、执行命令或访问硬件时，创建扩展：
    - 目录：$DSH_HOME/mobile-access/extensions/<id>/，id 用小写字母数字和连字符（如 media-remote）
    - extension.json：{"schemaVersion":1,"id":"<id>","name":"显示名","version":"0.1.0","description":"说明"}
-   - host.mjs：电脑端 Node.js 代码（可信本地代码，可读写文件、执行命令）。导出默认函数 (api) => { ... }，用 api.action('名称', { input, run }) 注册动作、api.route({ method, path, handle }) 注册路由、api.effect(fn) 注册清理
+   - host.mjs：电脑端 Node.js 代码（可信本地代码，可读写文件、执行命令）。导出默认函数 (api) => { ... }，用 api.action('名称', { input, run }) 注册动作、api.route({ method, path, handle }) 注册路由、api.effect(fn) 注册清理。input 可以直接使用 api.schema.object(...) 等 Schemastery schema，也可以传入带 parse(value) 的适配器；两种形式都会在动作执行前校验并规范化输入。
    - mobile.js：手机端脚本，用 window.dshMobile.define({ apiVersion:1, id:'<id>', activate(api) { ... } })，activate 返回清理函数
    - mobile.css：手机端样式（可选）
    - assets/：手机端静态资源（可选）
-   - mobile.js 里用 api.host.invoke('动作名', 输入) 调 host.mjs 的 action，api.host.fetch('/路由路径') 调 route，api.host.assetUrl('相对路径') 生成与当前版本绑定的资源地址
+   - mobile.js 里用 api.host.invoke('动作名', 输入) 调 host.mjs 的 action（请求会按 application/json 发送），api.host.fetch('/路由路径') 调 route，api.host.assetUrl('相对路径') 生成与当前版本绑定的资源地址
    - 也可以先用命令生成模板：dsh plugin --profile web exec dsh-mobile extension create <id> --name "<名称>"，再在模板上改
 
 安全约束：

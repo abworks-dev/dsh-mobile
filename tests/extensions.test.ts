@@ -1,4 +1,5 @@
 import { Context } from '@deepseek-ai/cordis'
+import z from '@deepseek-ai/schemastery'
 import { once } from 'node:events'
 import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -65,6 +66,39 @@ describe('mobile extension registry', () => {
     await expect(service.invoke('demo', 'ping', {}, { deviceId: 'device', signal: new AbortController().signal })).resolves.toEqual({ version: 2 })
     await service.stopLocal()
     expect(service.manifest()).toEqual([])
+  })
+
+  it('accepts callable Schemastery schemas and parse adapters for action input', async () => {
+    const context = new Context(); contexts.push(context)
+    const service = new MobileAccessService(context)
+    service.registerExtension({
+      schemaVersion: 1,
+      id: 'callable',
+      name: 'Callable',
+      version: '1.0.0',
+      actions: {
+        echo: {
+          input: z.object({ name: z.string() }),
+          run: async (_context, input) => input,
+        },
+      },
+    })
+    service.registerExtension({
+      schemaVersion: 1,
+      id: 'adapter',
+      name: 'Adapter',
+      version: '1.0.0',
+      actions: {
+        echo: {
+          input: { parse: value => ({ normalized: String((value as { name?: unknown }).name ?? '') }) },
+          run: async (_context, input) => input,
+        },
+      },
+    })
+    const request = { deviceId: 'device', signal: new AbortController().signal }
+    await expect(service.invoke('callable', 'echo', { name: 'Ada' }, request)).resolves.toEqual({ name: 'Ada' })
+    await expect(service.invoke('adapter', 'echo', { name: 42 }, request)).resolves.toEqual({ normalized: '42' })
+    await expect(service.invoke('callable', 'echo', { name: 42 }, request)).rejects.toMatchObject({ code: 'invalid_action_input', status: 400 })
   })
 
   it('keeps the immediately previous Host generation while the browser stages new UI', async () => {
