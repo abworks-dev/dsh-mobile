@@ -13,6 +13,7 @@ Notable changes to DSH Mobile are recorded here. GitHub Releases remain the sour
 - Allow HTTP iframe sources for compatibility while showing a localized warning that unencrypted pages can be altered and should not be used for sensitive work.
 - Fix mobile extension Host actions that sent JSON without an explicit content type, which caused every `api.host.invoke()` call to return `415 unsupported_media_type`.
 - Accept callable Schemastery input schemas as well as existing `parse(value)` adapters for extension actions, so documented `api.schema.object(...)` inputs are validated and normalized before `run()`.
+- Update the development peers and source compatibility gate for DeepSeek Harness `0.1.6-alpha.1`: the checker follows extracted conversation/composer markers and the named global transport hook without weakening the Host-trust or authenticated RPC checks.
 
 ## 0.4.0 - 2026-09-14
 

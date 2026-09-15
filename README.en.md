@@ -269,6 +269,8 @@ The table below lists, for each plugin version, the DeepSeek Harness version it 
 
 Existing 0.3.3–0.4.0 apps do not need re-pairing. cpolar users should use app 0.3.15 or later because earlier apps may time out before a slow first load over the free route finishes; earlier apps also use a different status-bar strategy. The 0.4.0 app adds the multi-device list, startup behavior, and computer-side revocation status; older apps continue to connect to their saved single device. App 0.1.3 or earlier requires reinstalling and pairing again.
 
+The local, unreleased compatibility candidate has been checked against DeepSeek Harness `0.1.6-alpha.1` using the local source and renderer-v2 contract gate; this does not mean the published 0.4.0 package already contains that adaptation.
+
 ## Uninstall
 
 ```powershell

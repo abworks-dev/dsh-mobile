@@ -165,6 +165,16 @@ describe('DSH source compatibility gate', () => {
     expect(result.output).toContain('DSH compatibility ok: 0.1.2-alpha.2 (renderer-v2)')
   })
 
+  it('accepts a named global transport hook used by the current Connection client', async () => {
+    const sources = sourceFixture()
+    const connectionSource = sources['packages/client/connection/src/client/index.ts']!
+    sources['packages/client/connection/src/client/index.ts'] = connectionSource
+      .replace('const transport = (globalThis as ClientTransportGlobal).__DSH_TRANSPORT__', 'const globals = globalThis as ClientTransportGlobal\nconst transport = globals.__DSH_TRANSPORT__')
+    const result = await check(sources)
+    expect(result.status).toBe(0)
+    expect(result.output).toContain('DSH compatibility ok: 0.1.2-alpha.2 (renderer-v2)')
+  })
+
   it('rejects legacy settings without its direct Connection dependency', async () => {
     const sources = sourceFixture('0.1.2-alpha.1', 'renderer-v2', false)
     sources['packages/client/ui-settings/package.json'] = manifest('0.1.2-alpha.1', [remotes])
