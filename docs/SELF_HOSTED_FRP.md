@@ -1,5 +1,7 @@
 # 自建 FRP 使用指南
 
+[English guide](SELF_HOSTED_FRP.en.md)
+
 自建 FRP 适合已有 VPS、希望避开公共隧道带宽限制的用户。手机经 VPS 上的 Caddy 进入加密 FRP 隧道，再到达电脑上的 DSH；FRP 只负责传输，仍需完成 DSH 配对才能进入。
 
 ```text
@@ -23,7 +25,7 @@
 - **手动部署**：在面板复制受限模板，把 frps 部分存为 `/etc/dsh-mobile/frps.toml`，把 Caddy 片段存为 `/etc/caddy/dsh-mobile-dsh.caddy`，并确保主 Caddyfile 里有且仅需这一行：`import /etc/caddy/dsh-mobile-dsh.caddy`（没有 Caddyfile 就新建一个只写这一行）。复制操作本身不改变任何东西。公网 IPv4 还需要按模板里的注释步骤用 Certbot 申请一次 IP 证书（Caddy 自己签发不了 IP 证书）；域名模式 Caddy 全自动。
 - **自动部署**：填写 SSH 用户、端口和本机私钥路径（留空则用 ssh-agent 或 SSH 配置），点击一键部署。要求 Ubuntu/Debian + systemd，只接受密钥登录，不接受密码。
 
-点部署按钮前，面板会列出自动部署将在 VPS 上做的全部改动：从官方 APT 源安装 Caddy、安装 Python venv 与 Certbot、创建 `dsh-mobile` 系统用户（已存在则复用，卸载时保留）、frps 配置与服务、Caddy 片段加主文件里的一行 import、证书续期定时器、在 UFW 放行 FRP 控制端口与 80/443。**主 Caddyfile 里你自己的内容永远不会被改写或合并**：没有 Caddyfile、空文件或官方默认文件时才写入这一行 import；其他情况部署直接停止并告诉你手动加这一行。
+点部署按钮前，面板会列出自动部署将在 VPS 上做的全部改动：从官方 APT 源安装 Caddy；仅在公网 IPv4 模式安装 Python venv、Certbot 和证书续期定时器；创建 `dsh-mobile` 系统用户（已存在则复用，卸载时保留）、frps 配置与服务、Caddy 片段和主文件里的一行 import；如果 UFW 已启用，则放行 FRP 控制端口与 80/443。**主 Caddyfile 里你自己的内容永远不会被改写或合并**：没有 Caddyfile、空文件或官方默认文件时才写入这一行 import；已有 DSH Mobile import 时只整理为一行，其他非空配置会停止部署并告诉你手动加这一行。
 
 ## 主机指纹核对（每次必做）
 
