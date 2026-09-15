@@ -1191,6 +1191,46 @@ describe('HTTP gateway', () => {
     expect(duplicateCookie.status).toBe(401)
   })
 
+  it('keeps the proxied GUI frameable by itself and by the sidebar browser, while gateway pages stay unframeable', async () => {
+    const inner = await upstream()
+    const instance = await gateway(inner.port)
+    const paired = await pair(instance)
+    const base = browserHeaders(instance)
+    const sessionHeaders = { ...base, cookie: `${SESSION_COOKIE}=${paired.session}` }
+
+    // The proxied GUI document and its routes: the GUI must be able to frame
+    // its own preview routes (frame-ancestors 'self' + the legacy SAMEORIGIN
+    // twin) and the sidebar browser tab must be able to embed external http(s)
+    // pages and blob: PDF previews (frame-src). A plain `default-src 'self'`
+    // with no frame-src refuses all of them.
+    const document = await request(instance.address().port, '/', {
+      headers: { ...sessionHeaders, accept: 'text/html', 'sec-fetch-dest': 'document' },
+    })
+    expect(document.status).toBe(200)
+    const csp = document.headers['content-security-policy'] ?? ''
+    expect(csp).toContain("frame-ancestors 'self'")
+    expect(csp).not.toContain("frame-ancestors 'none'")
+    expect(csp).toContain("frame-src 'self' blob: https: http:")
+    expect(csp).toContain("default-src 'self'")
+    expect(document.headers['x-frame-options']).toBe('SAMEORIGIN')
+
+    const route = await request(instance.address().port, '/sidebar/html/preview.html', { headers: sessionHeaders })
+    expect(route.status).toBe(200)
+    const routeCsp = route.headers['content-security-policy'] ?? ''
+    expect(routeCsp).toContain("frame-ancestors 'self'")
+    expect(routeCsp).toContain("frame-src 'self' blob: https: http:")
+    expect(route.headers['x-frame-options']).toBe('SAMEORIGIN')
+
+    // Gateway-owned surfaces (the login document is the one a browser actually
+    // renders) keep refusing every frame, including same-origin ones.
+    const login = await request(instance.address().port, '/mobile-access/login', { headers: base })
+    expect(login.status).toBe(200)
+    const loginCsp = login.headers['content-security-policy'] ?? ''
+    expect(loginCsp).toContain("frame-ancestors 'none'")
+    expect(loginCsp).not.toContain('frame-src')
+    expect(login.headers['x-frame-options']).toBe('DENY')
+  })
+
   it('compresses text assets when the authenticated client accepts gzip', async () => {
     const inner = await upstream()
     const instance = await gateway(inner.port)
