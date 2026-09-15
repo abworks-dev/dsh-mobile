@@ -33,8 +33,6 @@
 > **0.4.1 update**: adapts to DeepSeek Harness 0.1.6-alpha.1, fixes extension action requests and LAN route inspection, hardens admin CSRF checks, HTTP iframe warnings, and the frontend compatibility gate, and adds a complete English self-hosted FRP guide. [Details](CHANGELOG.md).
 >
 > **Upgrade reminder**: the 0.4.1 plugin continues to work with the 0.4.0 Android app and existing devices do not need re-pairing. Install the 0.4.1 app as well if you want this Android build. [Compatibility notes](#compatibility).
->
-> 0.4.1 is not published yet; the download links above become valid when the matching GitHub Release is created.
 
 <p align="center">
   <a href="https://github.com/saya-ch/dsh-mobile/releases/download/v0.4.1/dsh-mobile-android-v0.4.1.apk"><img src="assets/brand/app-icon-rounded.svg" alt="DSH Mobile Android app icon" width="72" height="72"></a><br>
@@ -272,7 +270,7 @@ The table below lists, for each plugin version, the DeepSeek Harness version it 
 
 | DSH Mobile plugin | Verified DeepSeek Harness version |
 | --- | --- |
-| `0.4.1` (in development) | `0.1.6-alpha.1` (local source and renderer-v2 contract check) |
+| `0.4.1` | `0.1.6-alpha.1` (local source and renderer-v2 contract check) |
 | `0.3.15`, `0.3.16`, `0.4.0` | `0.1.5-rc.2` (contract check); `0.1.5-rc.1` (@idoall LAN verification) |
 | `0.3.14` | `0.1.3-alpha.2` |
 | `0.3.9`-`0.3.12` | `0.1.3-alpha.1` |

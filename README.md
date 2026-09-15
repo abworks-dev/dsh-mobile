@@ -33,8 +33,6 @@
 > **0.4.1 更新**：适配 DeepSeek Harness 0.1.6-alpha.1，修复扩展动作请求和局域网路由检测，强化管理请求 CSRF、HTTP iframe 警告与前端兼容性检查，并补齐中英文 FRP 文档。[详细记录](CHANGELOG.md)。
 >
 > **升级提醒**：0.4.1 插件可继续使用 0.4.0 Android App；已有设备无需重新配对。若要使用本次 Android 构建，请同时安装 0.4.1 App。[兼容说明](#兼容性)。
->
-> 0.4.1 尚未发布；上方下载链接会在创建对应 GitHub Release 后生效。
 
 <p align="center">
   <a href="https://github.com/saya-ch/dsh-mobile/releases/download/v0.4.1/dsh-mobile-android-v0.4.1.apk"><img src="assets/brand/app-icon-rounded.svg" alt="DSH Mobile 安卓应用图标" width="72" height="72"></a><br>
@@ -275,7 +273,7 @@ flowchart LR
 
 | DSH Mobile 插件                         | 验证支持的 DeepSeek Harness 版本                             |
 | ----------------------------------------- | -------------------------------------------------------------- |
-| `0.4.1`（开发中） | `0.1.6-alpha.1`（本机源码与 renderer-v2 契约检查） |
+| `0.4.1` | `0.1.6-alpha.1`（本机源码与 renderer-v2 契约检查） |
 | `0.3.15`、`0.3.16`、`0.4.0` | `0.1.5-rc.2`（契约检查）；`0.1.5-rc.1`（@idoall 局域网实测） |
 | `0.3.14`                                | `0.1.3-alpha.2`                                              |
 | `0.3.9`-`0.3.12`                        | `0.1.3-alpha.1`                                              |
