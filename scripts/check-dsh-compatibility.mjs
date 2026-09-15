@@ -137,14 +137,16 @@ if (!connectionSource.includes(locationTrust)) {
   throw new Error(`DSH connection trust contract changed: missing ${locationTrust}`)
 }
 if (clientArchitecture === 'renderer-v2') {
-  for (const declaration of [
-    'transport?.ownsHost === true',
-    'const transport = (globalThis as ClientTransportGlobal).__DSH_TRANSPORT__',
-    'createWebConnectionRpc(transport?.fetch, transport?.openStream)',
-  ]) {
-    if (!connectionSource.includes(declaration)) {
-      throw new Error(`DSH renderer-v2 Connection transport contract changed: missing ${declaration}`)
-    }
+  if (!connectionSource.includes('transport?.ownsHost === true')) {
+    throw new Error('DSH renderer-v2 Connection transport contract changed: missing transport Host ownership check')
+  }
+  const transportGlobal = connectionSource.includes('const transport = (globalThis as ClientTransportGlobal).__DSH_TRANSPORT__')
+    || connectionSource.includes('const transport = globals.__DSH_TRANSPORT__')
+  if (!transportGlobal) {
+    throw new Error('DSH renderer-v2 Connection transport contract changed: missing global transport hook')
+  }
+  if (!connectionSource.includes('createWebConnectionRpc(transport?.fetch, transport?.openStream)')) {
+    throw new Error('DSH renderer-v2 Connection transport contract changed: missing HTTP/WebSocket RPC carrier')
   }
 }
 

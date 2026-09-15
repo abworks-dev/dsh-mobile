@@ -20,20 +20,26 @@
   <a href="#快速开始">快速开始</a> ·
   <a href="#连接教程">连接教程</a> ·
   <a href="#扩展与自定义">扩展与自定义</a> ·
+  <a href="#设备管理">设备管理</a> ·
+  <a href="#第三方插件适配">第三方插件适配</a> ·
+  <a href="#安全">安全</a> ·
+  <a href="#兼容性">兼容性</a> ·
   <a href="CHANGELOG.md">更新记录</a> ·
   <a href="README.en.md">English</a>
 </p>
 
 > DSH Mobile 是 DeepSeek Harness 社区插件，原生 App 仅支持 Android。
 >
-> **0.4.0 更新**：加入多设备管理、电脑端撤销状态同步、无 Session 可达性检查；完善插件市场局域网引导、任务状态通知、原生 WebView 沉浸布局和三语配对页。[详细记录](CHANGELOG.md)。
+> **0.4.1 更新**：适配 DeepSeek Harness 0.1.6-alpha.1，修复扩展动作请求和局域网路由检测，强化管理请求 CSRF、HTTP iframe 警告与前端兼容性检查，并补齐中英文 FRP 文档。[详细记录](CHANGELOG.md)。
 >
-> **升级提醒**：0.4.0 需要同步更新插件与 Android App 才能使用多设备列表；旧 App 仍可使用原有单设备配对。[兼容说明](#兼容性)。
+> **升级提醒**：0.4.1 插件可继续使用 0.4.0 Android App；已有设备无需重新配对。若要使用本次 Android 构建，请同时安装 0.4.1 App。[兼容说明](#兼容性)。
+>
+> 0.4.1 尚未发布；上方下载链接会在创建对应 GitHub Release 后生效。
 
 <p align="center">
-  <a href="https://github.com/saya-ch/dsh-mobile/releases/download/v0.4.0/dsh-mobile-android-v0.4.0.apk"><img src="assets/brand/app-icon-rounded.svg" alt="DSH Mobile 安卓应用图标" width="72" height="72"></a><br>
-  <a href="https://github.com/saya-ch/dsh-mobile/releases/download/v0.4.0/dsh-mobile-android-v0.4.0.apk"><strong>下载 Android App 0.4.0</strong></a><br>
-  <sub><a href="https://github.com/saya-ch/dsh-mobile/releases/tag/v0.4.0">版本说明与校验文件</a></sub>
+  <a href="https://github.com/saya-ch/dsh-mobile/releases/download/v0.4.1/dsh-mobile-android-v0.4.1.apk"><img src="assets/brand/app-icon-rounded.svg" alt="DSH Mobile 安卓应用图标" width="72" height="72"></a><br>
+  <a href="https://github.com/saya-ch/dsh-mobile/releases/download/v0.4.1/dsh-mobile-android-v0.4.1.apk"><strong>下载 Android App 0.4.1</strong></a><br>
+  <sub><a href="https://github.com/saya-ch/dsh-mobile/releases/tag/v0.4.1">版本说明与校验文件</a></sub>
 </p>
 
 DSH Mobile 是一个 DeepSeek Harness 插件，让手机浏览器或 Android App 通过局域网，或可选的 Tailscale Funnel、cpolar、自建 FRP 远程通道连接电脑，继续使用同一份会话、工作区、消息和工具。局域网与远程访问分别启停、分别管理设备，且都不修改 DeepSeek Harness 源码。
@@ -87,7 +93,7 @@ dsh plugin --profile web add dshmarket
 
 安装并启动 DSH 后，按照下一节选择局域网或远程连接。
 
-通过 npm 安装的插件会在桌面界面加载时检查新版本，有更新时在访问面板标题右侧显示“更新插件”，安装后需重启 DSH。App 下载入口展示最新版本；本地开发包不会被自动覆盖，Android App 暂无主动更新通知。
+通过 npm 安装的插件会在桌面界面加载时检查新版本，有更新时在访问面板标题右侧显示“更新插件”，安装后需重启 DSH。App 下载入口展示最新版本；本地开发包不会被自动覆盖，Android App 不会主动检查或推送版本更新。
 
 ## 连接教程
 
@@ -127,12 +133,12 @@ dsh plugin --profile web add dshmarket
 1. 在 DeepSeek Harness 左下角打开 **移动访问 → 远程**，选择一种连接方式：
    - **Tailscale Funnel**：点击 **启用远程访问**，在打开的官方页面完成一次 Tailscale 登录；按面板提示继续允许 Funnel，然后返回 DSH 等待连接就绪。
    - **cpolar**：点击 **安装官方组件**，登录 cpolar 控制台取得 Authtoken，粘贴后点击 **保存并连接**。组件只会在确认后下载到插件私有目录；免费临时地址可能在 DSH 或 cpolar 重启后变化。
-   - **自建 FRP（高级）**：展开 **自建连接**，填写 VPS、frps 端口、共享 Token 和公开 HTTPS 地址；公开地址可以是自己的域名，也可以直接是 VPS 公网 IPv4（例如 `https://203.0.113.10`，请换成你自己的真实地址，文档示例网段会被拒绝）。可以复制受限模板手动部署，也可以填写 SSH 用户、SSH 端口和本机私钥路径，点击 **部署 frps + Caddy** 自动部署。自动部署支持 Ubuntu/Debian + systemd，使用 OpenSSH 密钥或 ssh-agent，不接受密码，也不会覆盖非 DSH Mobile 管理的 Caddyfile；部署与清理前都会展示服务器主机指纹，需到 VPS 控制台核对后才能继续。公网 IP 模式会申请约 6 天有效的 Let’s Encrypt IP 证书并配置每日自动续期。部署完成后再安装官方 `frpc` 并验证连接。不再需要服务器时可用“复制 VPS 卸载脚本”或一键清理，只删除 DSH Mobile 自己的服务与配置。需要 Android App 0.3.3 或更高版本。详见[自建 FRP 使用指南](docs/SELF_HOSTED_FRP.md)。
+   - **自建 FRP（高级）**：展开 **自建连接**，填写 VPS、frps 端口、共享 Token 和公开 HTTPS 地址；公开地址可以是自己的域名，也可以直接是 VPS 公网 IPv4（例如 `https://203.0.113.10`，请换成你自己的真实地址，文档示例网段会被拒绝）。可以复制受限模板手动部署，也可以填写 SSH 用户、SSH 端口和本机私钥路径，点击 **部署 frps + Caddy** 自动部署。自动部署支持 Ubuntu/Debian + systemd，使用 OpenSSH 密钥或 ssh-agent，不接受密码，也不会覆盖非 DSH Mobile 管理的 Caddyfile；部署与清理前都会展示服务器主机指纹，需到 VPS 控制台核对后才能继续。公网 IP 模式会申请约 6 天有效的 Let’s Encrypt IP 证书并配置每日自动续期。部署完成后再安装官方 `frpc` 并验证连接。不再需要服务器时可用“复制 VPS 卸载脚本”或一键清理，只删除 DSH Mobile 自己的服务与配置。需要 Android App 0.3.3 或更高版本。详见 [自建 FRP 使用指南](docs/SELF_HOSTED_FRP.md)。
 2. 状态变为“远程访问已就绪”后，点击 **生成远程配对二维码**。
 3. 在 Android App 中进入 **远程访问**，扫描二维码完成独立配对。
 4. 此后 App 会保存当前地址和设备凭据并自动重连。若 cpolar 免费临时地址发生变化，请扫描电脑端当前远程二维码重新验证连接；无需清除 App 数据。旧设备 token 只会发送到原先保存的精确 Origin，不会发送给二维码中的新域名。
 
-> **远程通知说明**：浏览器通知权限按地址分别授权，远程地址需在浏览器中单独允许；系统级弹窗只出现在电脑上，手机收不到。任务完成要推送到手机时，请使用第三方通道（如 dsh-messager 的飞书/企业微信/Telegram 推送），它们走服务端下发，不受网关影响。
+> **远程通知说明**：浏览器的 `Notification` 权限按 Origin 分别授权，网页系统通知只显示在运行该网页的设备上。Android App 的任务提醒是独立的 0.4.0 功能，需要在 App 前台菜单中主动开启，且依赖 WebView 页面仍存活；它不是通用的后台推送。需要可靠的后台推送时，请使用你已配置的服务端 webhook 或机器人通道。
 
 Tailscale Funnel 覆盖范围广，但在中国大陆网络下可能不稳定。其运行组件把公开监听生命周期绑定到父进程和受限控制通道；父进程退出、控制通道关闭或显式停止时会结束当前代次并清理资源。cpolar 更适合国内网络；自建 FRP 适合已有 VPS、希望避开公共服务带宽限制的用户。中国大陆 VPS 上的未备案域名可能被云厂商拦截，此时可使用公网 IPv4 模式。插件会校验按需下载的固定版本组件，配置与程序均保存在 `$DSH_HOME/mobile-access/`，可随时在面板中彻底清除。
 
@@ -160,7 +166,7 @@ Tailscale Funnel 覆盖范围广，但在中国大陆网络下可能不稳定。
 
 扩展动作的 `input` 可以直接使用 `api.schema.object(...)` 等 Schemastery schema，也可以使用带 `parse(value)` 的适配器；手机端 `api.host.invoke()` 会按 JSON 请求发送，输入会在电脑端动作执行前完成校验和规范化。
 
-<sub>你甚至可以通过扩展连接电脑上运行的酒馆（</sub>
+<sub>你甚至可以通过扩展连接电脑上运行的酒馆，并从同一 App 打开它的简易移动前端。</sub>
 
 > `host.mjs` 与本机程序拥有相同权限；仅创建和运行你理解并信任的电脑端扩展。
 
@@ -205,8 +211,8 @@ Android App 将局域网、cpolar、Tailscale Funnel 和自建 FRP 统一整理�
 
 代理页面为兼容部分社区插件允许嵌入 HTTP 页面；这类内容未加密，可能被篡改，浏览器也可能因混合内容策略拦截。处理敏感内容时请使用 HTTPS。通过 HTTPS 管理入口打开远程面板时，页面顶部会显示相同提醒。
 
-- 本版本已按 DSH `0.1.5-rc.2` 的 renderer-v2 合同检查，并保留对 `0.1.5-rc.1` 局域网路径的验证。DSH 页面需要提供标准的会话、`main`/`panelInfo` 和 `rightbar` 插槽；插件自身需要通过 DSH 的标准面板或侧边栏入口注册内容。
-- 网关默认只允许 DSH 内置的第一方 WebSocket 路径。社区侧边栏插件使用的其他路径默认拦截，通常会在诊断页显示为待处理项目；截图中的`/sidebar/ws/agent-terminals` 就属于这类需要按实际插件确认的路径。
+- 已发布的 0.4.0 按 DSH `0.1.5-rc.2` 做过 renderer-v2 合同检查，并保留对 `0.1.5-rc.1` 局域网路径的验证。DSH 页面需要提供标准的会话、`main`/`panelInfo` 和 `rightbar` 插槽；插件自身需要通过 DSH 的标准面板或侧边栏入口注册内容。
+- 网关默认只允许 DSH 内置的第一方 WebSocket 路径。社区侧边栏插件使用的其他路径默认拦截，通常会在诊断页显示为待处理项目；截图中的`/sidebar/ws/agent-opens` 和`/sidebar/ws/agent-terminals` 就属于这类需要按实际插件确认的路径。
 - 在 **连接诊断 → 第三方 WebSocket 路径** 中，只对确认过的精确路径点击 **允许**。系统不接受带查询字符串或模糊前缀的路径；不建议使用“全部允许”。已允许的路径可以随时移除，局域网和远程连接使用同一套规则。
 - 放行只代表该路径可以通过已认证、同源的 DSH Mobile 网关，不会开放任意 TCP/UDP 端口，也不会绕过设备配对。若社区插件仍然连接失败，先看诊断页的实际拦截路径，再按一条路径放行。
 
@@ -269,6 +275,7 @@ flowchart LR
 
 | DSH Mobile 插件                         | 验证支持的 DeepSeek Harness 版本                             |
 | ----------------------------------------- | -------------------------------------------------------------- |
+| `0.4.1`（开发中） | `0.1.6-alpha.1`（本机源码与 renderer-v2 契约检查） |
 | `0.3.15`、`0.3.16`、`0.4.0` | `0.1.5-rc.2`（契约检查）；`0.1.5-rc.1`（@idoall 局域网实测） |
 | `0.3.14`                                | `0.1.3-alpha.2`                                              |
 | `0.3.9`-`0.3.12`                        | `0.1.3-alpha.1`                                              |

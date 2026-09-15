@@ -4,7 +4,7 @@
 
 <h1 align="center">DSH Mobile</h1>
 
-<p align="center">Secure, live LAN access to DeepSeek Harness from a phone.</p>
+<p align="center">Secure, live access to DeepSeek Harness from a phone.</p>
 
 <p align="center">
   <a href="https://www.npmjs.com/package/dsh-mobile"><img src="https://img.shields.io/npm/v/dsh-mobile?label=npm&amp;color=CB3837" alt="npm version"></a>
@@ -15,18 +15,31 @@
   <a href="https://github.com/awesome-dsh-plugin/awesome-dsh-plugin"><img src="https://awesome-dsh-plugin.com/badge.svg" alt="Awesome DSH Plugin"></a>
 </p>
 
-<p align="center"><a href="README.md">简体中文</a> · <a href="CHANGELOG.md">Changelog</a></p>
+<p align="center">
+  <a href="#what-it-does">What it does</a> ·
+  <a href="#quick-start">Quick start</a> ·
+  <a href="#connection-guide">Connection guide</a> ·
+  <a href="#extend-and-customize">Extend and customize</a> ·
+  <a href="#device-management">Device management</a> ·
+  <a href="#third-party-plugin-compatibility">Third-party plugins</a> ·
+  <a href="#security">Security</a> ·
+  <a href="#compatibility">Compatibility</a> ·
+  <a href="CHANGELOG.md">Changelog</a> ·
+  <a href="README.md">简体中文</a>
+</p>
 
 > DSH Mobile is a DeepSeek Harness community plugin; the native app supports Android only.
 >
-> **0.4.0 update**: adds multi-device management, computer-side revocation status sync, and session-free reachability checks; improves plugin-market LAN onboarding, task-state notifications, the immersive WebView layout, and three-language pairing pages. [Details](CHANGELOG.md).
+> **0.4.1 update**: adapts to DeepSeek Harness 0.1.6-alpha.1, fixes extension action requests and LAN route inspection, hardens admin CSRF checks, HTTP iframe warnings, and the frontend compatibility gate, and adds a complete English self-hosted FRP guide. [Details](CHANGELOG.md).
 >
-> **Upgrade reminder**: 0.4.0 requires the plugin and Android app to be updated together for the multi-device list. Older apps continue to use their existing single-device pairing. [Compatibility notes](#compatibility).
+> **Upgrade reminder**: the 0.4.1 plugin continues to work with the 0.4.0 Android app and existing devices do not need re-pairing. Install the 0.4.1 app as well if you want this Android build. [Compatibility notes](#compatibility).
+>
+> 0.4.1 is not published yet; the download links above become valid when the matching GitHub Release is created.
 
 <p align="center">
-  <a href="https://github.com/saya-ch/dsh-mobile/releases/download/v0.4.0/dsh-mobile-android-v0.4.0.apk"><img src="assets/brand/app-icon-rounded.svg" alt="DSH Mobile Android app icon" width="72" height="72"></a><br>
-  <a href="https://github.com/saya-ch/dsh-mobile/releases/download/v0.4.0/dsh-mobile-android-v0.4.0.apk"><strong>Download Android app 0.4.0</strong></a><br>
-  <sub><a href="https://github.com/saya-ch/dsh-mobile/releases/tag/v0.4.0">Release notes and checksums</a></sub>
+  <a href="https://github.com/saya-ch/dsh-mobile/releases/download/v0.4.1/dsh-mobile-android-v0.4.1.apk"><img src="assets/brand/app-icon-rounded.svg" alt="DSH Mobile Android app icon" width="72" height="72"></a><br>
+  <a href="https://github.com/saya-ch/dsh-mobile/releases/download/v0.4.1/dsh-mobile-android-v0.4.1.apk"><strong>Download Android app 0.4.1</strong></a><br>
+  <sub><a href="https://github.com/saya-ch/dsh-mobile/releases/tag/v0.4.1">Release notes and checksums</a></sub>
 </p>
 
 DSH Mobile is a DeepSeek Harness plugin that lets a mobile browser or the Android app connect over a protected LAN or an optional Tailscale Funnel, cpolar, or self-hosted FRP remote path. Local and remote access keep the same sessions, Workspaces, messages, and tools while using separate switches and paired-device stores without modifying DeepSeek Harness source.
@@ -80,7 +93,7 @@ Restart DSH, then search for **dsh-mobile** under **Settings → Plugin Market**
 
 After installation, start DSH and use the connection guide below to choose LAN or remote access.
 
-Registry-installed plugins check for updates when the desktop UI loads and show “Update plugin” beside the access-panel title when a newer release is available. Restart DSH after installation. The app download entry shows the latest version; local development packages are not overwritten, and Android does not send update notifications.
+Registry-installed plugins check for updates when the desktop UI loads and show “Update plugin” beside the access-panel title when a newer release is available. Restart DSH after installation. The app download entry shows the latest version; local development packages are not overwritten, and Android does not check for or push app-version updates.
 
 ## Connection guide
 
@@ -120,12 +133,12 @@ Remote providers may impose bandwidth and connection limits: the [cpolar Free pl
 1. Open **Mobile Access → Remote** in the lower-left corner of DeepSeek Harness and choose a provider:
    - **Tailscale Funnel**: select **Enable remote access**, complete the one-time Tailscale sign-in on the official page, follow the panel prompt to allow Funnel, then return to DSH and wait until the connection is ready.
    - **cpolar**: select **Install official component**, sign in to the cpolar dashboard and obtain an Authtoken, paste it, then select **Save and connect**. The component is downloaded into the plugin's private directory only after confirmation; free temporary addresses may change after DSH or cpolar restarts.
-   - **Self-hosted FRP (advanced)**: expand **Self-hosted connection**, enter the VPS, frps port, shared token, and public HTTPS origin. The origin may use your domain or the VPS public IPv4 address (for example, `https://203.0.113.10` — substitute your own real address; documentation ranges are rejected). Apply the restricted template manually or enter an SSH user, port, and local private-key path for automatic deployment. Automatic deployment supports Ubuntu/Debian with systemd, uses OpenSSH keys or an agent, refuses password auth, and does not overwrite Caddy configuration it does not manage; both deployment and server cleanup display the SSH host keys for verification against the VPS console before continuing. IPv4 mode obtains a roughly six-day Let's Encrypt IP certificate and installs daily automatic renewal. Install the official `frpc` on demand and verify the path afterward. A reviewable uninstall script or one-click server cleanup removes only DSH Mobile-owned services and configs. This requires Android app 0.3.3 or later.
+   - **Self-hosted FRP (advanced)**: expand **Self-hosted connection**, enter the VPS, frps port, shared token, and public HTTPS origin. The origin may use your domain or the VPS public IPv4 address (for example, `https://203.0.113.10` — substitute your own real address; documentation ranges are rejected). Apply the restricted template manually or enter an SSH user, port, and local private-key path for automatic deployment. Automatic deployment supports Ubuntu/Debian with systemd, uses OpenSSH keys or an agent, refuses password auth, and does not overwrite Caddy configuration it does not manage; both deployment and server cleanup display the SSH host keys for verification against the VPS console before continuing. IPv4 mode obtains a roughly six-day Let's Encrypt IP certificate and installs daily automatic renewal. Install the official `frpc` on demand and verify the path afterward. A reviewable uninstall script or one-click server cleanup removes only DSH Mobile-owned services and configs. This requires Android app 0.3.3 or later. See the [English self-hosted FRP guide](docs/SELF_HOSTED_FRP.en.md) for the complete procedure.
 2. When the panel reports that remote access is ready, select **Create remote pairing QR code**.
 3. In the Android app, open **Remote access** and scan the QR code to create its separate pairing.
 4. The app saves the current address and device credential for automatic reconnection. If a free cpolar address changes, scan the computer's current remote QR code to verify the connection again; clearing app data is unnecessary. A stored device token is sent only to its exact saved Origin, never to a new QR-code domain.
 
-> **Remote notifications**: browser notification permission is granted per origin, so allow it separately for the remote address; OS-level toasts only appear on the computer, never on the phone. To push task completion to the phone, use a third-party channel (e.g. dsh-messager's Feishu/WeCom/Telegram push), which is delivered server-side and unaffected by the gateway.
+> **Remote notifications**: browser `Notification` permission is granted per Origin, and a web-page system toast appears only on the device running that page. Android task reminders are a separate 0.4.0 feature: enable them from the app's foreground menu, and keep the WebView page alive; they are not a general background push service. For reliable background delivery, use a server-side webhook or bot channel you have configured.
 
 Tailscale Funnel has broad reach but may be unreliable from mainland China. Its runtime ties the public listener to the parent process and a bounded control channel; parent exit, channel closure, or an explicit stop ends the current generation and cleans up its resources. cpolar is better suited to mainland networks, while self-hosted FRP fits users who already have a VPS and want to avoid public-provider bandwidth quotas. An unregistered domain on a mainland-China VPS may be intercepted by the cloud provider; public IPv4 mode avoids that dependency. The plugin validates pinned on-demand components, stores their configuration and programs entirely under `$DSH_HOME/mobile-access/`, and can remove them completely from the panel.
 
@@ -198,7 +211,7 @@ Compatibility and WebSocket rules:
 
 Proxied pages allow HTTP frames for compatibility with some community plugins; those pages are unencrypted and can be altered, and browsers may still block them as mixed content. Use HTTPS for sensitive work. The same warning appears at the top of the remote panel when it is opened over HTTPS.
 
-- This release is contract-checked against DSH `0.1.5-rc.2` (renderer-v2) and retains the `0.1.5-rc.1` LAN verification. The DSH page must expose the standard session, `main`/`panelInfo`, and `rightbar` slots; the community plugin must register its panel or sidebar content through DSH's standard entry points.
+- The released 0.4.0 is contract-checked against DSH `0.1.5-rc.2` (renderer-v2) and retains the `0.1.5-rc.1` LAN verification. The DSH page must expose the standard session, `main`/`panelInfo`, and `rightbar` slots; the community plugin must register its panel or sidebar content through DSH's standard entry points.
 - The gateway allows first-party DSH WebSocket paths by default, including `/sidebar/ws/terminal`. Other paths used by community sidebar plugins are blocked by default and appear in Diagnostics; the `/sidebar/ws/agent-opens` and `/sidebar/ws/agent-terminals` paths in the image are examples that must be reviewed for the actual plugin.
 - In **Connection diagnostics → Third-party WebSocket paths**, select **Allow** only for an exact path you have verified. Query strings and fuzzy prefixes are rejected; **Allow all** is not recommended. Approved paths can be removed at any time, and the same policy applies to LAN and remote connections.
 - Approval only lets that path pass through the authenticated, same-origin DSH Mobile gateway. It does not open arbitrary TCP/UDP ports or bypass device pairing. If a community plugin still fails, check the path recorded by Diagnostics and approve one path at a time.
@@ -259,6 +272,7 @@ The table below lists, for each plugin version, the DeepSeek Harness version it 
 
 | DSH Mobile plugin | Verified DeepSeek Harness version |
 | --- | --- |
+| `0.4.1` (in development) | `0.1.6-alpha.1` (local source and renderer-v2 contract check) |
 | `0.3.15`, `0.3.16`, `0.4.0` | `0.1.5-rc.2` (contract check); `0.1.5-rc.1` (@idoall LAN verification) |
 | `0.3.14` | `0.1.3-alpha.2` |
 | `0.3.9`-`0.3.12` | `0.1.3-alpha.1` |
