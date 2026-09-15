@@ -1714,7 +1714,8 @@ export class MobileAccessGateway {
       delete headers['content-length']
       delete headers['content-encoding']
       delete headers.etag
-      setSecurityHeaders(response, this.tlsEnabled)
+      // The proxied GUI document: it must be able to frame its own surfaces.
+      setSecurityHeaders(response, this.tlsEnabled, 'proxied')
       response.writeHead(200, {
         ...headers,
         'Content-Type': 'text/html; charset=utf-8',
@@ -1990,7 +1991,10 @@ export class MobileAccessGateway {
         void bodyDone.catch(reject)
       })
       const proxied = await upstreamResponse
-      setSecurityHeaders(response, this.tlsEnabled)
+      // Proxied upstream routes (static assets, the GUI's own /sidebar routes,
+      // the API): the GUI frames some of its own routes (HTML/diff previews),
+      // so they follow the proxied framing policy.
+      setSecurityHeaders(response, this.tlsEnabled, 'proxied')
       const headers = sanitizeResponseHeaders(proxied.headers, this.config.upstreamOrigin)
       const cacheControl = revisionedStaticCacheControl(request)
       if (cacheControl !== undefined) headers['cache-control'] = cacheControl
