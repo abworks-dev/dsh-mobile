@@ -4,7 +4,7 @@ Notable changes to DSH Mobile are recorded here. GitHub Releases remain the sour
 
 ## Unreleased
 
-No unreleased changes.
+- Permanently remove revoked devices from durable storage and the desktop list, terminate their active Sessions, and compact legacy `revokedAt` rows on startup. Deleted credentials are rejected as `authentication_failed`; no revocation tombstones are retained.
 
 ## 0.4.1 - 2026-09-15
 

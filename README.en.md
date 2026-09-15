@@ -186,7 +186,9 @@ Each row shows its custom name, transport, Origin, live reachability, and last c
 - **Startup behavior → Open DSH directly** (default): one device connects directly; with multiple devices, the app tries the last-used device first, then the still-valid device with the most recent connection. A bounded connection budget returns to the list instead of spinning forever.
 - **Startup behavior → Show device list**: choose a computer on every launch, which is useful when switching between several machines. The option is in the list's top-right settings button and is saved immediately.
 - Tap a row to connect. The overflow button and long press open the same action sheet for rename, check now, pair again, or delete the local record. Deletion has a second confirmation and a short undo window; undo restores only the local row and never restores a computer-side revocation.
-- Open DSH **Settings → General** in the WebView and select **Switch computer** to return to the paired-device list; this action appears only in the Android app. If the computer revokes a device, the app keeps its row as **Removed on computer**, stops automatic reconnection, and offers **Pair again** or **Delete device**.
+- Open DSH **Settings → General** in the WebView and select **Switch computer** to return to the paired-device list; this action appears only in the Android app. When an online device receives the computer's revocation notification, the app keeps its row as **Removed on computer**, stops automatic reconnection, and offers **Pair again** or **Delete device**.
+
+Revoking a device permanently deletes its durable record and token digest instead of retaining a `revokedAt` tombstone. Startup also removes legacy revoked rows. A deleted token receives `401 authentication_failed`, just like an unknown token. Existing apps checking a device that was revoked while offline may therefore show **Pairing expired** and require pairing again; online Sessions still receive the revocation notification and disconnect immediately.
 
 <table>
   <tr>

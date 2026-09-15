@@ -1009,7 +1009,7 @@ describe('HTTP gateway', () => {
       body: JSON.stringify({ deviceToken: credential.deviceToken }),
     })
     expect(revokedProbe.status).toBe(401)
-    expect(JSON.parse(revokedProbe.body)).toEqual({ error: 'device_revoked' })
+    expect(JSON.parse(revokedProbe.body)).toEqual({ error: 'authentication_failed' })
   })
 
   it('keeps discovery metadata-only and offers the CA on a separate endpoint', async () => {

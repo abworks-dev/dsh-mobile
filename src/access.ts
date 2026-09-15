@@ -177,8 +177,11 @@ export class AccessController {
   async initialize(): Promise<void> {
     if (this.initialized || this.closing) throw new Error('access controller cannot be initialized again')
     const snapshot = await this.store.load()
-    if (snapshot.devices.length > this.options.maxDevices) throw new Error('device state exceeds configured maxDevices')
-    this.devices = [...snapshot.devices]
+    // Older releases retained revoked identities. Remove those tombstones on upgrade.
+    const devices = snapshot.devices.filter(device => device.revokedAt === undefined)
+    if (devices.length > this.options.maxDevices) throw new Error('device state exceeds configured maxDevices')
+    if (devices.length !== snapshot.devices.length) await this.store.save(this.snapshot(devices))
+    this.devices = devices
     this.initialized = true
   }
 
@@ -371,15 +374,12 @@ export class AccessController {
     this.removeSession(authorization.sessionKey, 'logout')
   }
 
-  /** Persist revocation, then end every Session owned by that device. */
+  /** Durably delete the device, then end every Session owned by that device. */
   async revokeDevice(deviceId: string): Promise<boolean> {
     this.requireInitialized()
     return this.exclusive(async () => {
-      const index = this.devices.findIndex(device => device.id === deviceId)
-      const device = this.devices[index]
-      if (device === undefined || device.revokedAt !== undefined) return false
-      const next = [...this.devices]
-      next[index] = Object.freeze({ ...device, revokedAt: this.now() })
+      const next = this.devices.filter(device => device.id !== deviceId)
+      if (next.length === this.devices.length) return false
       await this.store.save(this.snapshot(next))
       this.devices = next
       for (const [key, session] of this.sessions) {

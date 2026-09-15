@@ -70,10 +70,10 @@ describe('device and Session state', () => {
     expect(await access.revokeDevice(paired.deviceId)).toBe(true)
     expect(ended).toContain('revoked')
     expect(() => access.authorizeSession(again.sessionToken)).toThrowError(AccessError)
-    await expect(access.renew(paired.deviceToken)).rejects.toMatchObject({ status: 401, code: 'device_revoked' })
+    await expect(access.renew(paired.deviceToken)).rejects.toMatchObject({ status: 401, code: 'authentication_failed' })
   })
 
-  it('distinguishes an expired device from an explicitly revoked device', async () => {
+  it('distinguishes an expired device from a deleted, no-longer-known credential', async () => {
     let current = 20_000
     const access = controller(new MemoryDeviceStore(), () => current, { deviceTtlMs: 1_000 })
     await access.initialize()
@@ -86,7 +86,7 @@ describe('device and Session state', () => {
     const secondWindow = await access.openPairing()
     const second = await access.pair('source-b', secondWindow.token)
     await access.revokeDevice(second.deviceId)
-    await expect(access.renew(second.deviceToken)).rejects.toMatchObject({ status: 401, code: 'device_revoked' })
+    await expect(access.renew(second.deviceToken)).rejects.toMatchObject({ status: 401, code: 'authentication_failed' })
   })
 
   it('probes a device without creating a short-lived Session', async () => {
@@ -102,7 +102,7 @@ describe('device and Session state', () => {
     expect(result).toMatchObject({ deviceId: paired.deviceId, deviceExpiresAt: paired.deviceExpiresAt })
     expect(access.metrics().sessions).toBe(before)
     await access.revokeDevice(paired.deviceId)
-    await expect(access.probe(paired.deviceToken)).rejects.toMatchObject({ status: 401, code: 'device_revoked' })
+    await expect(access.probe(paired.deviceToken)).rejects.toMatchObject({ status: 401, code: 'authentication_failed' })
   })
 
   it('caps a renewed Session at the persistent device expiry', async () => {

@@ -11,6 +11,7 @@ export interface StoredDevice {
   readonly createdAt: number
   readonly expiresAt: number
   readonly lastSeenAt: number
+  /** Legacy tombstone accepted on load; AccessController removes it during initialization. */
   readonly revokedAt?: number
 }
 
