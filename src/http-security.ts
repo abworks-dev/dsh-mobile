@@ -52,8 +52,40 @@ export function parseRequestTarget(raw: string | undefined): RequestTarget {
   return Object.freeze({ raw, pathname: parsed.pathname, decodedPathname, search: parsed.search })
 }
 
-/** Set the gateway-owned browser protections and non-cacheability. */
-export function setSecurityHeaders(response: ServerResponse, tls: boolean): void {
+/**
+ * Which framing policy a response carries.
+ *
+ * - `gateway`: the gateway's OWN documents (login, pairing, the CA helper) and
+ *   its JSON/SSE responses. Nothing may frame them at all.
+ * - `proxied`: the upstream DSH GUI and its routes, forwarded through the
+ *   gateway. The GUI must be able to frame its OWN same-origin surfaces (the
+ *   sidebar's HTML/diff preview routes, the browser tab pointed at the GUI
+ *   itself) and the sidebar browser tab must be able to frame external http(s)
+ *   sites plus `blob:` PDF previews — a plain `default-src 'self'` with no
+ *   `frame-src` refuses all of them, which is what broke the sidebar browser
+ *   over remote access.
+ */
+export type FramingPolicy = 'gateway' | 'proxied'
+
+/**
+ * The frame sources a proxied GUI document may embed: its own routes, blob:
+ * (the PDF viewer's object URL) and external http(s) pages (the sidebar
+ * browser tab). The framed document runs in the tab's existing sandbox
+ * (opaque origin, no same-origin privileges), so this does not hand the
+ * embedded page anything it did not already have.
+ */
+const PROXIED_FRAME_SRC = "frame-src 'self' blob: https: http:"
+
+/**
+ * Set the gateway browser protections and non-cacheability.
+ * @param response - the response to decorate.
+ * @param tls - whether the connection is TLS (adds HSTS).
+ * @param framing - the framing policy; defaults to the strict gateway one, so
+ *   every existing call site keeps refusing to be framed. Only the two PROXIED
+ *   forwarders pass `'proxied'`.
+ */
+export function setSecurityHeaders(response: ServerResponse, tls: boolean, framing: FramingPolicy = 'gateway'): void {
+  const proxied = framing === 'proxied'
   response.setHeader('Cache-Control', 'no-store')
   // DSH emits inline boot code, revives Schemastery callbacks, and applies dynamic styles.
   // These allowances provide compatibility, not XSS isolation.
@@ -61,7 +93,10 @@ export function setSecurityHeaders(response: ServerResponse, tls: boolean): void
     "default-src 'self'",
     "base-uri 'none'",
     "object-src 'none'",
-    "frame-ancestors 'none'",
+    // A proxied GUI is frameable by ITS OWN origin only (its preview routes and
+    // the sidebar's page routes); every third-party origin stays refused, so
+    // clickjacking protection is unchanged for the gateway's own documents.
+    proxied ? "frame-ancestors 'self'" : "frame-ancestors 'none'",
     "form-action 'self'",
     "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
     "style-src 'self' 'unsafe-inline'",
@@ -69,11 +104,16 @@ export function setSecurityHeaders(response: ServerResponse, tls: boolean): void
     "font-src 'self' data:",
     "connect-src 'self'",
     "worker-src 'self' blob:",
+    // `frame-src` has no allow-by-default: the sidebar browser tab embeds
+    // cross-origin pages, which only an explicit frame-src admits.
+    ...(proxied ? [PROXIED_FRAME_SRC] : []),
   ].join('; '))
   response.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=(), usb=()')
   response.setHeader('Referrer-Policy', 'no-referrer')
   response.setHeader('X-Content-Type-Options', 'nosniff')
-  response.setHeader('X-Frame-Options', 'DENY')
+  // The legacy twin of frame-ancestors: SAMEORIGIN keeps older engines aligned
+  // with the proxied policy instead of refusing the GUI's own frames.
+  response.setHeader('X-Frame-Options', proxied ? 'SAMEORIGIN' : 'DENY')
   response.setHeader('Cross-Origin-Resource-Policy', 'same-origin')
   if (tls) response.setHeader('Strict-Transport-Security', 'max-age=31536000')
 }
