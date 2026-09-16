@@ -87,6 +87,29 @@ describe('mobile-control localization', () => {
     expect(declaration('.dsh-mobile-control__provider-description', 'font-size')).toBeGreaterThanOrEqual(12)
     expect(declaration('.dsh-mobile-control__device-revoke', 'min-height')).toBeGreaterThanOrEqual(36)
     expect(declaration('.dsh-mobile-control__ws-paths-remove', 'min-height')).toBeGreaterThanOrEqual(36)
+    // Two interactive tiers only: 36px inline, 44px primary. Nothing below the type floor either.
+    expect(declaration('.dsh-mobile-control__details>summary', 'min-height')).toBeGreaterThanOrEqual(36)
+    expect(declaration('.dsh-mobile-control__actions button', 'min-height')).toBeGreaterThanOrEqual(44)
+    expect(declaration('.dsh-mobile-control__danger', 'min-height')).toBeGreaterThanOrEqual(44)
+    expect(declaration('.dsh-mobile-control__app-download', 'min-height')).toBeGreaterThanOrEqual(44)
+    expect(CONTROL_STYLES).not.toContain('font-size:10px')
+    // The floor also covers sizes declared through the font shorthand, which is how every chip,
+    // counter and monospace value used to sit at 9-10px.
+    expect(CONTROL_STYLES).not.toContain('font:650 9px')
+    expect(CONTROL_STYLES).not.toContain('font:650 10px')
+    expect(CONTROL_STYLES).not.toContain('font:10px')
+    // Status colours ride the DSH tokens so the panel follows the dark theme, keeping today's
+    // light value only as the fallback.
+    expect(CONTROL_STYLES).toContain('var(--dsw-alias-state-success-tertiary,#e6f7f0)')
+    expect(CONTROL_STYLES).toContain('var(--dsw-alias-state-warn-tertiary,#fff4dc)')
+    expect(CONTROL_STYLES).toContain('var(--dsw-alias-state-error-primary,#dc2626)')
+    expect(CONTROL_STYLES).toContain('var(--dsw-alias-state-business-tertiary,#e8f0ff)')
+    expect(CONTROL_STYLES).toContain('--dsh-diagnostic-ok:var(--dsw-alias-state-success-primary,#087454)')
+    // Text keeps a label token: a state-* colour is a fill (green-500 measured 2.09:1 as copy on
+    // its own tint, and fixed blue measured 2.7:1 on the dark panel).
+    expect(CONTROL_STYLES).toContain('color:var(--dsw-alias-label-primary,#087454)')
+    expect(CONTROL_STYLES).not.toContain('color:#2563eb')
+    expect(CONTROL_STYLES).toContain('color:var(--dsw-alias-label-primary-bluish,#2563eb)')
   })
 
   it('renders only validated release versions and the official Android download', () => {
