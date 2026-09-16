@@ -103,6 +103,15 @@ const REMOTE_ERROR_GUIDANCE: Readonly<Record<string, string>> = Object.freeze({
   cpolar_start_timeout: '检查网络后点击“重新连接”。',
   cpolar_stopped: '点击“重新连接”。',
   cpolar_exited: '点击“重新连接”；仍失败时复制诊断报告。',
+  cloudflared_component_missing: '先安装 cloudflared 官方组件。',
+  cloudflared_component_invalid: '彻底移除 cloudflared 组件后重新安装。',
+  cloudflared_port_unavailable: '无法分配本机远程网关端口，请重试。',
+  cloudflared_launch_failed: '重新安装 cloudflared 官方组件后重试。',
+  cloudflared_start_timeout: '检查网络后点击“重新连接”。',
+  cloudflared_stopped: '点击“重新连接”。',
+  cloudflared_exited: '点击“重新连接”；仍失败时复制诊断报告。',
+  cloudflared_invalid_output: 'cloudflared 返回了无法识别的状态。',
+  cloudflared_invalid_origin: 'cloudflared 返回的公网地址未通过校验。',
   origin_config_missing: '先保存自有反向代理配置。',
   origin_config_invalid: '重新保存自有反向代理配置。',
   origin_listen_port_in_use: '更换 HTTP 后端端口；不要使用局域网的 3443 端口。',
@@ -152,6 +161,7 @@ function remoteSuffix(origin: string | undefined): string {
   try {
     const hostname = new URL(origin).hostname
     if (hostname.endsWith('.ts.net')) return '*.ts.net'
+    if (hostname.endsWith('.trycloudflare.com')) return '*.trycloudflare.com'
     for (const suffix of ['.cpolar.cn', '.cpolar.io', '.cpolar.top', '.cpolar.com']) {
       if (hostname.endsWith(suffix)) return `*${suffix}`
     }

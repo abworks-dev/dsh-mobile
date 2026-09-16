@@ -36,6 +36,8 @@ import { BlockedUpgradePathLog, WebSocketPathStore } from './websocket-paths.js'
 import { FunnelController, funnelExecutable } from './funnel.js'
 import { CpolarController } from './cpolar.js'
 import { CpolarComponentManager, type CpolarComponentStatus } from './cpolar-component.js'
+import { CloudflaredComponentManager, type CloudflaredComponentStatus } from './cloudflared-component.js'
+import { CloudflaredController } from './cloudflared.js'
 import { FrpComponentManager, type FrpComponentStatus } from './frp-component.js'
 import { FrpConfigStore, mergeSavedFrpSettings, mergeSavedFrpTarget, type FrpConfigurationStatus } from './frp-config.js'
 import { FrpController } from './frp.js'
@@ -311,6 +313,7 @@ function remoteControlPayload(
   gateway: MobileAccessGateway | undefined,
   providerStatuses: Readonly<Record<RemoteProvider, RemoteProviderStatus>>,
   cpolarComponent: CpolarComponentStatus,
+  cloudflaredComponent: CloudflaredComponentStatus,
   frpComponent: FrpComponentStatus,
   frpConfiguration: FrpConfigurationStatus,
   originConfiguration: OriginConfigurationStatus,
@@ -332,6 +335,12 @@ function remoteControlPayload(
         running: providerStatuses.cpolar.enabled,
         state: providerStatuses.cpolar.state,
         component: cpolarComponent,
+      },
+      cloudflared: {
+        bundled: false,
+        running: providerStatuses.cloudflared.enabled,
+        state: providerStatuses.cloudflared.state,
+        component: cloudflaredComponent,
       },
       frp: {
         bundled: false,
@@ -384,6 +393,8 @@ export async function apply(ctx: Context, config: PluginConfig): Promise<void> {
   const initialRemoteProvider = (await remoteProviderStore.load()).provider
   const cpolarComponent = new CpolarComponentManager({ stateDirectory })
   await cpolarComponent.initialize()
+  const cloudflaredComponent = new CloudflaredComponentManager({ stateDirectory })
+  await cloudflaredComponent.initialize()
   const frpComponent = new FrpComponentManager({ stateDirectory })
   await frpComponent.initialize()
   const frpConfig = new FrpConfigStore(join(remoteDirectory, 'frp', 'config'))
@@ -514,6 +525,7 @@ export async function apply(ctx: Context, config: PluginConfig): Promise<void> {
   }
   const tailscaleStore = new JsonMobileAccessControlStore(join(remoteDirectory, 'control.json'), false)
   const cpolarStore = new JsonMobileAccessControlStore(join(remoteDirectory, 'cpolar', 'control.json'), false)
+  const cloudflaredStore = new JsonMobileAccessControlStore(join(remoteDirectory, 'cloudflared', 'control.json'), false)
   const frpStore = new JsonMobileAccessControlStore(join(remoteDirectory, 'frp', 'control.json'), false)
   const originStore = new JsonMobileAccessControlStore(join(remoteDirectory, 'origin', 'control.json'), false)
   const remoteControllers: Record<RemoteProvider, RemoteProviderController> = {
@@ -528,6 +540,11 @@ export async function apply(ctx: Context, config: PluginConfig): Promise<void> {
       store: cpolarStore,
       executable: cpolarComponent.executable,
       configFile: cpolarComponent.configFile,
+      createGateway: createRemoteGateway,
+    }),
+    cloudflared: new CloudflaredController({
+      store: cloudflaredStore,
+      executable: cloudflaredComponent.executable,
       createGateway: createRemoteGateway,
     }),
     frp: new FrpController({
@@ -554,10 +571,12 @@ export async function apply(ctx: Context, config: PluginConfig): Promise<void> {
     {
       tailscale: remoteControllers.tailscale.status(),
       cpolar: remoteControllers.cpolar.status(),
+      cloudflared: remoteControllers.cloudflared.status(),
       frp: remoteControllers.frp.status(),
       origin: remoteControllers.origin.status(),
     },
     cpolarComponent.status(),
+    cloudflaredComponent.status(),
     frpComponent.status(),
     frpConfig.status(),
     originConfig.status(),
@@ -691,7 +710,8 @@ export async function apply(ctx: Context, config: PluginConfig): Promise<void> {
         }
         if (request.method === 'POST' && target.decodedPathname === `${LOCAL_ADMIN_PREFIX}/remote/provider`) {
           const body = await readJsonObject(request, 4096)
-          if (body.provider !== 'tailscale' && body.provider !== 'cpolar' && body.provider !== 'frp' && body.provider !== 'origin') {
+          if (body.provider !== 'tailscale' && body.provider !== 'cpolar' && body.provider !== 'cloudflared'
+            && body.provider !== 'frp' && body.provider !== 'origin') {
             throw new HttpError(400, 'bad_request')
           }
           await remoteProviders.select(body.provider)
@@ -736,6 +756,30 @@ export async function apply(ctx: Context, config: PluginConfig): Promise<void> {
           await remoteProviders.mutate(async () => {
             await remoteControllers.cpolar.setEnabled(false)
             await cpolarComponent.purge()
+          })
+          sendJson(response, 200, remotePayload(), false)
+          return
+        }
+        if (request.method === 'POST' && target.decodedPathname === `${LOCAL_ADMIN_PREFIX}/remote/cloudflared/component/install`) {
+          const body = await readJsonObject(request, 4096)
+          if (body.confirm !== true) throw new HttpError(400, 'bad_request')
+          logger.info('cloudflared component install started')
+          try {
+            await remoteProviders.mutate(async () => cloudflaredComponent.install())
+            logger.info('cloudflared component install completed')
+          } catch (error) {
+            logger.error('cloudflared component install failed: %s', error instanceof Error ? error.stack ?? error.message : String(error))
+            throw error
+          }
+          sendJson(response, 200, remotePayload(), false)
+          return
+        }
+        if (request.method === 'POST' && target.decodedPathname === `${LOCAL_ADMIN_PREFIX}/remote/cloudflared/component/purge`) {
+          const body = await readJsonObject(request, 4096)
+          if (body.confirm !== true) throw new HttpError(400, 'bad_request')
+          await remoteProviders.mutate(async () => {
+            await remoteControllers.cloudflared.setEnabled(false)
+            await cloudflaredComponent.purge()
           })
           sendJson(response, 200, remotePayload(), false)
           return
@@ -954,6 +998,7 @@ export async function apply(ctx: Context, config: PluginConfig): Promise<void> {
       const stores: Record<RemoteProvider, JsonMobileAccessControlStore> = {
         tailscale: tailscaleStore,
         cpolar: cpolarStore,
+        cloudflared: cloudflaredStore,
         frp: frpStore,
         origin: originStore,
       }

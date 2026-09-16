@@ -40,7 +40,7 @@
   <sub><a href="https://github.com/saya-ch/dsh-mobile/releases/tag/v0.4.1">版本说明与校验文件</a></sub>
 </p>
 
-DSH Mobile 是一个 DeepSeek Harness 插件，让手机浏览器或 Android App 通过局域网，或可选的 Tailscale Funnel、cpolar、自建 FRP 或自有反向代理远程通道连接电脑，继续使用同一份会话、工作区、消息和工具。局域网与远程访问分别启停、分别管理设备，且都不修改 DeepSeek Harness 源码。
+DSH Mobile 是一个 DeepSeek Harness 插件，让手机浏览器或 Android App 通过局域网，或可选的 Tailscale Funnel、cpolar、cloudflared、自建 FRP 或自有反向代理远程通道连接电脑，继续使用同一份会话、工作区、消息和工具。局域网与远程访问分别启停、分别管理设备，且都不修改 DeepSeek Harness 源码。
 
 移动访问使用独立的 HTTPS 与证书固定，只有配对过的设备能通过校验接入。
 
@@ -120,9 +120,9 @@ dsh plugin --profile web add dshmarket
 
 ### 远程访问
 
-适合手机离开电脑所在网络后使用。远程访问默认关闭，手机不需要另外安装 Tailscale、cpolar 或 FRP。
+适合手机离开电脑所在网络后使用。远程访问默认关闭，手机不需要另外安装 Tailscale、cpolar、cloudflared 或 FRP。
 
-远程服务可能受带宽和连接限额影响：[cpolar 免费方案](https://svip.cpolar.com/pricing) 当前为 1 Mbps，[Tailscale Funnel](https://tailscale.com/docs/features/tailscale-funnel#requirements-and-limitations) 也存在不可配置的带宽限制。DSH Mobile 通过 10 条分页、顶部按需加载、gzip 和 WebSocket 长连接减少流量与等待，但无法突破服务商限额。
+远程服务可能受带宽和连接限额影响：[cpolar 免费方案](https://svip.cpolar.com/pricing) 当前为 1 Mbps，[Tailscale Funnel](https://tailscale.com/docs/features/tailscale-funnel#requirements-and-limitations) 也存在不可配置的带宽限制，cloudflared 的 quick tunnel 由 Cloudflare 免费提供、地址随机且有限流。DSH Mobile 通过 10 条分页、顶部按需加载、gzip 和 WebSocket 长连接减少流量与等待，但无法突破服务商限额。
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/saya-ch/dsh-mobile/main/assets/screenshots/remote-access.png" width="82%" alt="DSH Mobile 远程访问与通道选择">
@@ -133,19 +133,20 @@ dsh plugin --profile web add dshmarket
    - **cpolar**：点击 **安装官方组件**，登录 cpolar 控制台取得 Authtoken，粘贴后点击 **保存并连接**。组件只会在确认后下载到插件私有目录；免费临时地址可能在 DSH 或 cpolar 重启后变化。
    - **自建 FRP（高级）**：展开 **自建连接**，填写 VPS、frps 端口、共享 Token 和公开 HTTPS 地址；公开地址可以是自己的域名，也可以直接是 VPS 公网 IPv4（例如 `https://203.0.113.10`，请换成你自己的真实地址，文档示例网段会被拒绝）。可以复制受限模板手动部署，也可以填写 SSH 用户、SSH 端口和本机私钥路径，点击 **部署 frps + Caddy** 自动部署。自动部署支持 Ubuntu/Debian + systemd，使用 OpenSSH 密钥或 ssh-agent，不接受密码，也不会覆盖非 DSH Mobile 管理的 Caddyfile；部署与清理前都会展示服务器主机指纹，需到 VPS 控制台核对后才能继续。公网 IP 模式会申请约 6 天有效的 Let’s Encrypt IP 证书并配置每日自动续期。部署完成后再安装官方 `frpc` 并验证连接。不再需要服务器时可用“复制 VPS 卸载脚本”或一键清理，只删除 DSH Mobile 自己的服务与配置。需要 Android App 0.3.3 或更高版本。详见 [自建 FRP 使用指南](docs/SELF_HOSTED_FRP.md)。
    - **自有反向代理（未发布）**：展开 **自建连接 → 自有反向代理**，填写公网 HTTPS 地址（支持自定义端口）、私有监听 IPv4、独立 HTTP 后端端口（默认 3444）和代理来源 CIDR，再点击 **保存并启动后端**。适合已有 Lucky/Nginx/Caddy 的用户，无需隧道组件；需要 Android App 0.4.0 或更高版本。详见 [自有反向代理指南](docs/SELF_HOSTED_ORIGIN.md)。
+   - **cloudflared（未发布）**：点击 **安装官方组件**，插件在确认后从官方发布页下载固定版本到插件私有目录，随后自动申请一个临时公网地址（quick tunnel），**无需注册或登录**。适合不想注册账号的用户；quick tunnel 地址每次重连都会变化，官方定位为测试用途、有限流且无可用性保证，请勿用于必须长期可达的生产访问。
 2. 状态变为“远程访问已就绪”后，点击 **生成远程配对二维码**。自有反向代理仅显示“后端已监听”：它不验证公网连通性，仍需检查代理 HTTPS、证书与 WebSocket 并用手机验收。
 3. 在 Android App 中进入 **远程访问**，扫描二维码完成独立配对。
 4. 此后 App 会保存当前地址和设备凭据并自动重连。若 cpolar 免费临时地址发生变化，请扫描电脑端当前远程二维码重新验证连接；无需清除 App 数据。旧设备 token 只会发送到原先保存的精确 Origin，不会发送给二维码中的新域名。
 
 > **远程通知说明**：浏览器的 `Notification` 权限按 Origin 分别授权，网页系统通知只显示在运行该网页的设备上。Android App 的任务提醒是独立的 0.4.0 功能，需要在 App 前台菜单中主动开启，且依赖 WebView 页面仍存活；它不是通用的后台推送。需要可靠的后台推送时，请使用你已配置的服务端 webhook 或机器人通道。
 
-Tailscale Funnel 覆盖范围广，但在中国大陆网络下可能不稳定。其运行组件把公开监听生命周期绑定到父进程和受限控制通道；父进程退出、控制通道关闭或显式停止时会结束当前代次并清理资源。cpolar 更适合国内网络；自建 FRP 适合已有 VPS、希望避开公共服务带宽限制的用户。中国大陆 VPS 上的未备案域名可能被云厂商拦截，此时可使用公网 IPv4 模式。插件会校验按需下载的固定版本组件，配置与程序均保存在 `$DSH_HOME/mobile-access/`，可随时在面板中彻底清除。
+Tailscale Funnel 覆盖范围广，但在中国大陆网络下可能不稳定。其运行组件把公开监听生命周期绑定到父进程和受限控制通道；父进程退出、控制通道关闭或显式停止时会结束当前代次并清理资源。cpolar 更适合国内网络；自建 FRP 适合已有 VPS、希望避开公共服务带宽限制的用户。cloudflared 不需要账号或登录，但它使用的是 Cloudflare 的 quick tunnel：地址随机、每次重连都会变化，官方定位为测试用途且无可用性保证，因此只适合临时或验证场景。中国大陆 VPS 上的未备案域名可能被云厂商拦截，此时可使用公网 IPv4 模式。插件会校验按需下载的固定版本组件，配置与程序均保存在 `$DSH_HOME/mobile-access/`，可随时在面板中彻底清除。
 
 自建 FRP 只生成一个指向 DSH 回环网关的 HTTP vhost，不提供任意 FRP 配置、TCP/UDP 代理或 FRP 插件。VPS 的明文 vhost 必须只监听 `127.0.0.1`，由 Caddy 提供公网 HTTPS；插件会拒绝可从公网访问的明文端口，并在公开发现接口确认连接到当前电脑后才显示“已就绪”。
 
 自有反向代理的 HTTP 后端只允许留在可信私网；**不要把它映射到公网，也不要绕过它直连 DSH 或现有 LAN 3443**。来源 CIDR 匹配代理的直接 TCP 来源，不信任转发头；反代须保留外部 Host（含端口）、Origin、Cookie 和 WebSocket。清除代理配置不会删除已配对远程设备。
 
-远程公开地址仍受 DSH 设备配对保护。内置 Funnel 与托管 cpolar 当前支持 Windows x64；按需安装的 FRP 0.70.1 支持 Windows、Linux、macOS 的 x64 与 arm64。
+远程公开地址仍受 DSH 设备配对保护。内置 Funnel 与托管 cpolar、cloudflared 当前支持 Windows x64；按需安装的 FRP 0.70.1 支持 Windows、Linux、macOS 的 x64 与 arm64。
 
 ## 扩展与自定义
 
@@ -182,7 +183,7 @@ Tailscale Funnel 覆盖范围广，但在中国大陆网络下可能不稳定。
 
 ### 设备管理
 
-Android App 将局域网、cpolar、Tailscale Funnel 和自建 FRP 统一整理到“已配对设备”列表。首次升级会自动迁移旧版局域网与远程凭据，不要求重新配对；地址变化时按 DSH 安装的稳定 `instanceId` 合并原记录，保留自定义名称。设备 Token 和局域网 CA 继续由 Android Keystore 加密保存，不会显示在列表或二维码中。
+Android App 将局域网、cpolar、cloudflared、Tailscale Funnel 和自建 FRP 统一整理到“已配对设备”列表。首次升级会自动迁移旧版局域网与远程凭据，不要求重新配对；地址变化时按 DSH 安装的稳定 `instanceId` 合并原记录，保留自定义名称。设备 Token 和局域网 CA 继续由 Android Keystore 加密保存，不会显示在列表或二维码中。
 
 每条记录显示自定义名称、连接方式、Origin、实时可达状态和最近连接时间。绿色状态点表示“可达”，灰色状态点表示“检测中”“暂不可达”“配对已过期”或“电脑端已移除”；可达性检查直接验证 DSH Gateway，不依赖 ICMP，也不会把暂时断网误判成电脑端撤销。
 
@@ -267,6 +268,7 @@ flowchart LR
 - 局域网监听只用于可信家庭、办公网络或可信热点；不要自行做端口转发。
 - 远程地址可从公网到达，但未配对请求无法进入 DSH；不使用时应关闭远程开关。
 - cpolar 仅在用户确认后下载固定官方版本并校验大小和 SHA-256；不会安装系统服务、写入 PATH 或设置开机启动，插件清理会删除其托管文件。
+- cloudflared 同样仅在用户确认后从官方 GitHub Release 下载固定版本并校验精确大小和 SHA-256，且启动时关闭自动更新，以保证运行的始终是已校验的那份二进制；不需要账号、Token 或 DNS 记录，不写入任何凭据，清理时删除插件托管的全部文件。
 - 自建 FRP 仅在用户确认后从官方 Release 下载固定版本 `frpc`，校验来源、精确大小、SHA-256、压缩包路径和可执行文件版本；共享 Token 不会出现在状态、诊断或日志中。复制服务器模板时 Token 会进入系统剪贴板，请粘贴后及时清除；本机清理只删除插件管理的文件，VPS 需要用面板提供的卸载脚本或一键清理单独清除。自动部署与一键清理前都会展示 SSH 主机指纹，必须到 VPS 控制台核对后才能继续。
 - 配对设备拥有控制电脑端 DeepSeek Harness 的能力，应视为完全可信设备；丢失手机后应在电脑端撤销设备。
 - 移动网关开启时才监听局域网；关闭后 DeepSeek Harness 仍正常在电脑本机运行。

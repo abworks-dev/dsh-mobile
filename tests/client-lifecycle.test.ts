@@ -30,6 +30,7 @@ import {
   registerUniqueDisposable,
   renderDiagnosticPayloadSafely,
   selectMobileControlLocale,
+  parseMobileRemoteProvider,
   startExtensionChangeStream,
   startLifecycleRefreshScheduler,
   validateDiagnosticChecks,
@@ -152,6 +153,54 @@ describe('mobile-control localization', () => {
     expect(Object.keys(LOCALIZED_DIAGNOSTIC_COPY.it).sort()).toEqual(englishReportKeys)
     expect(Object.keys(LOCALIZED_DIAGNOSTIC_COPY.zh).sort()).toEqual(englishReportKeys)
     expect(LOCALIZED_DIAGNOSTIC_COPY.zh.networkAction).toContain('dsh-mobile setup')
+  })
+
+  it('maps every remote provider the host can report, including cloudflared', () => {
+    // The control UI maps the host's provider string onto its own union and
+    // falls back to the built-in provider when the name is unknown. A provider
+    // missing from that mapping would silently render another provider's
+    // wording and state instead of failing, so every supported name is pinned.
+    for (const provider of ['tailscale', 'cpolar', 'cloudflared', 'frp', 'origin'] as const) {
+      expect(parseMobileRemoteProvider(provider)).toBe(provider)
+    }
+    expect(parseMobileRemoteProvider('cloudfare')).toBe('tailscale')
+    expect(parseMobileRemoteProvider('')).toBe('tailscale')
+    expect(parseMobileRemoteProvider(undefined)).toBe('tailscale')
+    expect(parseMobileRemoteProvider(42)).toBe('tailscale')
+  })
+
+  it('localizes cloudflared quick-tunnel setup and states its temporary-address limits', () => {
+    // Keys appended with Object.assign are not part of the inferred catalog type,
+    // so read them through the same cast the existing origin assertions use.
+    const en = MOBILE_CONTROL_MESSAGES.en as Record<string, string>
+    const it = MOBILE_CONTROL_MESSAGES.it as Record<string, string>
+    const zh = MOBILE_CONTROL_MESSAGES.zh as Record<string, string>
+    expect(en.cloudflaredBadge).toBe('No account')
+    expect(en.prepareCloudflared).toBe('Prepare cloudflared')
+    expect(zh.cloudflaredBadge).toBe('无需账号')
+    expect(it.cloudflaredBadge).toBe('Nessun account')
+    // A quick tunnel is temporary, rate-limited, and carries no uptime promise;
+    // the UI must say so rather than implying a production-grade channel.
+    expect(en.cloudflaredQuickNote).toContain('rate-limited')
+    expect(en.cloudflaredQuickNote).toContain('no uptime guarantee')
+    expect(zh.cloudflaredQuickNote).toContain('无可用性保证')
+    expect(it.cloudflaredQuickNote).toContain('nessuna garanzia')
+    expect(en.cloudflaredReady).toContain('temporary')
+    expect(zh.cloudflaredReady).toContain('临时')
+    for (const catalog of [en, it, zh]) {
+      // The badge states the real difference (no account), not a regional claim.
+      expect(catalog.cloudflaredBadge).not.toMatch(/mainland|国内/u)
+      for (const key of [
+        'cloudflaredDescription', 'cloudflaredQuickNote', 'cloudflaredComponentNote',
+        'installConfirmCloudflared', 'purgeCloudflared', 'purgeCloudflaredConfirm',
+        'resetCloudflaredConfirm', 'reconnectingCloudflared',
+        'cloudflaredMissing', 'cloudflaredInvalid', 'cloudflaredPortUnavailable',
+        'cloudflaredLaunchFailed', 'cloudflaredTimeout', 'cloudflaredStopped',
+        'cloudflaredExited', 'cloudflaredOutputInvalid', 'cloudflaredOriginInvalid',
+      ]) {
+        expect(catalog[key]?.length).toBeGreaterThan(0)
+      }
+    }
   })
 
   it('localizes own-proxy setup without equating a listening backend with public readiness', () => {
