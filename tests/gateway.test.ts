@@ -11,7 +11,7 @@ import {
   type ServerResponse,
 } from 'node:http'
 import { request as requestHttps } from 'node:https'
-import { join } from 'node:path'
+import { isAbsolute, join, relative } from 'node:path'
 import { tmpdir } from 'node:os'
 import { connect, type AddressInfo, type Socket } from 'node:net'
 import { gunzipSync } from 'node:zlib'
@@ -547,10 +547,12 @@ describe('HTTP gateway', () => {
     const customCssFile = join(directory, 'mobile.css')
     const customScriptFile = join(directory, 'mobile.js')
     const mobileLayoutFile = join(directory, 'mobile-layout.js')
+    const mobileCompatibilityFile = join(directory, 'mobile-compat.js')
+    await writeFile(mobileCompatibilityFile, 'globalThis.__compatibilityProbe = true;\n', 'utf8')
     await writeFile(customCssFile, ':root { --preview: first; }\n', 'utf8')
     await writeFile(customScriptFile, 'window.dshMobile.register(() => undefined)\n', 'utf8')
     await writeFile(mobileLayoutFile, 'window.__ModuleLoader__.load({ id: "@deepseek-ai/dsh-client-ui-layout" })\n', 'utf8')
-    const instance = await gateway(inner.port, { customCssFile, customScriptFile, mobileLayoutFile })
+    const instance = await gateway(inner.port, { customCssFile, customScriptFile, mobileLayoutFile, mobileCompatibilityFile })
     const paired = await pair(instance)
     const headers = {
       ...browserHeaders(instance),
@@ -581,10 +583,62 @@ describe('HTTP gateway', () => {
     expect(layout.headers['content-type']).toBe('text/javascript; charset=utf-8')
     expect(layout.body).toContain('@deepseek-ai/dsh-client-ui-layout')
 
+    const compatibility = await request(instance.address().port, '/mobile-access/compat.js', { headers })
+    expect(compatibility.status).toBe(200)
+    expect(compatibility.headers['content-type']).toBe('text/javascript; charset=utf-8')
+    expect(compatibility.headers['cache-control']).toBe('no-store')
+    expect(compatibility.headers['x-content-type-options']).toBe('nosniff')
+    expect(compatibility.body).toContain('__compatibilityProbe = true')
+    const cachedCompatibility = await request(instance.address().port, '/mobile-access/compat.js', {
+      headers: { ...headers, 'if-none-match': String(compatibility.headers.etag) },
+    })
+    expect(cachedCompatibility.status).toBe(304)
+    expect(cachedCompatibility.headers['cache-control']).toBe('no-store')
+    expect(cachedCompatibility.body).toBe('')
+    await writeFile(mobileCompatibilityFile, 'globalThis.__compatibilityProbe = "updated";\n', 'utf8')
+    const updatedCompatibility = await request(instance.address().port, '/mobile-access/compat.js', {
+      headers: { ...headers, 'if-none-match': String(compatibility.headers.etag) },
+    })
+    expect(updatedCompatibility.status).toBe(200)
+    expect(updatedCompatibility.headers.etag).not.toBe(compatibility.headers.etag)
+    expect(updatedCompatibility.body).toContain('__compatibilityProbe = "updated"')
+
     await writeFile(customCssFile, ':root { --preview: second; }\n', 'utf8')
     const second = await request(instance.address().port, '/mobile-access/custom.css', { headers })
     expect(second.status).toBe(200)
     expect(second.body).toContain('--preview: second')
+    expect(inner.observations).toHaveLength(0)
+  })
+
+  it('protects compatibility assets and refuses missing, oversized, or non-GET requests', async () => {
+    const inner = await upstream()
+    const directory = await mkdtemp(join(tmpdir(), 'dsh-mobile-compat-route-'))
+    cleanups.push(async () => {
+      const withinTemp = relative(tmpdir(), directory)
+      if (!withinTemp || withinTemp.startsWith('..') || isAbsolute(withinTemp)) throw new Error('unsafe test cleanup path')
+      await rm(directory, { recursive: true, force: true })
+    })
+    const mobileCompatibilityFile = join(directory, 'compat.js')
+    const instance = await gateway(inner.port, { mobileCompatibilityFile })
+    const paired = await pair(instance)
+    const headers = { ...browserHeaders(instance), cookie: `${SESSION_COOKIE}=${paired.session}` }
+
+    const anonymous = await request(instance.address().port, '/mobile-access/compat.js', { headers: browserHeaders(instance) })
+    expect(anonymous.status).toBe(401)
+    const crossOrigin = await request(instance.address().port, '/mobile-access/compat.js', {
+      headers: { ...headers, origin: 'https://untrusted.example', 'sec-fetch-site': 'cross-site' },
+    })
+    expect(crossOrigin.status).toBe(403)
+    const missing = await request(instance.address().port, '/mobile-access/compat.js', { headers })
+    expect(missing.status).toBe(503)
+    expect(JSON.parse(missing.body)).toMatchObject({ error: 'mobile_frontend_unavailable' })
+    await writeFile(mobileCompatibilityFile, 'x'.repeat(256 * 1024 + 1), 'utf8')
+    const oversized = await request(instance.address().port, '/mobile-access/compat.js', { headers })
+    expect(oversized.status).toBe(413)
+    const mutation = await request(instance.address().port, '/mobile-access/compat.js', {
+      method: 'POST', headers: { ...headers, [CSRF_HEADER]: paired.csrf },
+    })
+    expect(mutation.status).toBe(404)
     expect(inner.observations).toHaveLength(0)
   })
 
@@ -603,15 +657,20 @@ describe('HTTP gateway', () => {
     expect(mobile.body).toContain('window.__DSH_MOBILE_FRONTEND__="dedicated"')
     expect(mobile.body).toContain('/mobile-access/mobile-layout.js')
     expect(mobile.body).toContain('/plugins/feature.js')
+    expect(mobile.body).toContain('<script src="/mobile-access/compat.js"></script>')
+    expect(mobile.body.indexOf('/mobile-access/compat.js')).toBeLessThan(mobile.body.indexOf('__DSH_BOOT__'))
 
     const deepLink = await request(instance.address().port, '/sessions/example', { headers })
     expect(deepLink.status).toBe(200)
     expect(deepLink.body).toContain('window.__DSH_MOBILE_FRONTEND__="dedicated"')
+    expect(deepLink.body.indexOf('/mobile-access/compat.js')).toBeGreaterThan(0)
+    expect(deepLink.body.indexOf('/mobile-access/compat.js')).toBeLessThan(deepLink.body.indexOf('__DSH_BOOT__'))
 
     const stock = await request(instance.address().port, '/?frontend=stock', { headers })
     expect(stock.status).toBe(200)
     expect(stock.body).not.toContain('__DSH_MOBILE_FRONTEND__')
     expect(stock.body).toContain('/plugins/layout.js')
+    expect(stock.body).not.toContain('/mobile-access/compat.js')
   })
 
   it('localizes browser pairing and reauthentication pages from Accept-Language', async () => {

@@ -1,5 +1,6 @@
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { Config, parseControlFile, parseGatewayConfig } from '../src/config.js'
 import {
@@ -37,6 +38,15 @@ describe('gateway configuration', () => {
     expect(resolved.allowedCidrs).toHaveLength(2)
     expect(resolved.customCssFile).toBe(join(tmpdir(), 'mobile.css'))
     expect(resolved.customScriptFile).toBe(join(tmpdir(), 'mobile.js'))
+    expect(resolved.mobileCompatibilityFile).toBe(fileURLToPath(new URL('../src/mobile-compat.js', import.meta.url)))
+  })
+
+  it('requires an absolute path for a compatibility bundle override', () => {
+    const mobileCompatibilityFile = join(tmpdir(), 'custom-compat.js')
+    expect(parseGatewayConfig({ stateFile, tls: { mode: 'disabled' }, mobileCompatibilityFile }).mobileCompatibilityFile)
+      .toBe(mobileCompatibilityFile)
+    expect(() => parseGatewayConfig({ stateFile, tls: { mode: 'disabled' }, mobileCompatibilityFile: 'compat.js' }))
+      .toThrow(/mobileCompatibilityFile must be an absolute file path/u)
   })
 
   it('keeps durable device state required at the Loader boundary', () => {

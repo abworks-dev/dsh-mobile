@@ -4,7 +4,7 @@ Notable changes to DSH Mobile are recorded here. GitHub Releases remain the sour
 
 ## Unreleased
 
-No unreleased changes.
+- Load a bundled Iterator compatibility script before DSH boot on the dedicated mobile frontend, preventing `Iterator is not defined` on WebViews without Iterator helpers. The script is served locally behind the existing gateway authentication and uses feature detection to preserve or repair native helpers without weakening CSP or dropping script nonces.
 
 ## 0.4.1 - 2026-09-15
 
