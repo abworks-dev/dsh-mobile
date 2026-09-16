@@ -1043,6 +1043,21 @@ export async function apply(ctx: Context, config: PluginConfig): Promise<void> {
         .filter(provider => provider !== remoteProviders.selected)
         .map(provider => stores[provider].save({ version: 1, enabled: false })))
       for (const provider of REMOTE_PROVIDERS) await remoteControllers[provider].initialize()
+      // Broadcast discovery degrades silently when its UDP port cannot be bound, which
+      // otherwise leaves "the phone cannot find this computer" with no visible cause.
+      const lanDiscovery = lanGateway?.discoveryStatus()
+      if (lanDiscovery !== undefined && !lanDiscovery.broadcast) {
+        logger.warn(
+          'broadcast discovery is unavailable (%s); mDNS is still published, so pair manually or free the UDP port',
+          lanDiscovery.errorCode ?? 'unknown_cause',
+        )
+      }
+      if (lanDiscovery?.mobileAssetsErrorCode !== undefined) {
+        logger.warn(
+          'a bundled mobile asset is missing (%s); the phone frontend will serve without it',
+          lanDiscovery.mobileAssetsErrorCode,
+        )
+      }
     } catch (error) {
       try {
         await settleCleanupSteps([

@@ -45,8 +45,20 @@ describe('self-hosted reverse proxy settings', () => {
     expect(() => parseOriginSettings({ ...input, listenPort })).toThrow('origin_listen_port_invalid')
   })
 
-  it('reserves LAN port 3443 and requires explicit proxy peers for private binds', () => {
+  it('keeps the backend port in the unprivileged range', () => {
+    // Below 1024 the bind needs privileges the plugin does not have, so on Linux and
+    // macOS it would fail with EACCES and surface as a generic start failure.
+    for (const listenPort of [1, 80, 443, 1023]) {
+      expect(() => parseOriginSettings({ ...input, listenPort }), String(listenPort)).toThrow('origin_listen_port_invalid')
+    }
+    expect(parseOriginSettings({ ...input, listenPort: 1024 }).listenPort).toBe(1024)
+  })
+
+  it('reserves LAN port 3443 and DSH port 3080 and requires explicit proxy peers for private binds', () => {
     expect(() => parseOriginSettings({ ...input, listenPort: 3443 })).toThrow('origin_listen_port_reserved')
+    // 3080 is DSH's own WebServer, which the plugin cannot work without.
+    expect(() => parseOriginSettings({ ...input, listenPort: 3080 })).toThrow('origin_listen_port_reserved')
+    expect(parseOriginSettings({ ...input, listenPort: 3081 }).listenPort).toBe(3081)
     expect(() => parseOriginSettings({ ...input, listenHost: '192.168.1.10' })).toThrow('origin_allowed_cidrs_invalid')
     expect(() => parseOriginSettings({ ...input, listenHost: '192.168.1.10', allowedCidrs: ['127.0.0.0/8'] })).toThrow('origin_allowed_cidrs_invalid')
     expect(parseOriginSettings({ ...input, listenHost: '192.168.1.10', allowedCidrs: ['192.168.1.1/32'] }).allowedCidrs).toEqual(['192.168.1.1/32'])

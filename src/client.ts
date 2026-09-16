@@ -399,6 +399,8 @@ const ORIGIN_ERROR_MESSAGE_KEYS: Readonly<Record<string, string>> = {
   origin_settings_invalid: 'originSettingsInvalid',
   origin_config_missing: 'originConfigMissing',
   origin_config_invalid: 'originConfigInvalid',
+  origin_config_target_invalid: 'originConfigTargetInvalid',
+  origin_controller_unavailable: 'originControllerUnavailable',
   origin_listen_port_in_use: 'originPortInUse',
   origin_listen_address_unavailable: 'originAddressUnavailable',
   origin_gateway_start_failed: 'originStartFailed',

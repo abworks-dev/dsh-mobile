@@ -1,6 +1,6 @@
 import { createHash, X509Certificate } from 'node:crypto'
 import { createSocket, type Socket as DatagramSocket } from 'node:dgram'
-import { readFile, stat } from 'node:fs/promises'
+import { lstat, readFile, stat } from 'node:fs/promises'
 import { hostname } from 'node:os'
 import { extname } from 'node:path'
 import {
@@ -785,6 +785,15 @@ export class MobileAccessGateway {
   private server: GatewayServer | undefined
   private discoverySocket: DatagramSocket | undefined
   private discoveryTimer: NodeJS.Timeout | undefined
+  /**
+   * Why broadcast discovery is unavailable, if it is. Windows keeps separate TCP and
+   * UDP port-exclusion tables, so the port the OS handed the TCP listener can be
+   * refused for UDP. That degradation is survivable but must stay observable: without
+   * it, "the phone cannot find this computer" has no diagnosable cause on the host.
+   */
+  private discoveryError: { readonly code: string; readonly message: string } | undefined
+  /** Names of the bundled mobile assets that could not be read, if any. */
+  private mobileAssetError: string | undefined
   private bonjour: Bonjour | undefined
   private pairingCaCertificate: string | undefined
   private listenerPort: number | undefined
@@ -881,6 +890,18 @@ export class MobileAccessGateway {
         }
         this.pairingCaCertificate = certificate.raw.toString('base64')
       }
+      // Both mobile assets are injected into the served index, so a missing one would
+      // otherwise surface only as a 503 subresource: the page still renders and the
+      // compatibility bundle silently never applies. Record it instead of failing, so an
+      // enhancement cannot take the whole listener down, and expose it for diagnosis.
+      const missingAssets: string[] = []
+      for (const [label, file] of [
+        ['compatibility', this.config.mobileCompatibilityFile],
+        ['layout', this.config.mobileLayoutFile],
+      ] as const) {
+        if (!(await lstat(file).catch(() => undefined))?.isFile()) missingAssets.push(label)
+      }
+      this.mobileAssetError = missingAssets.length === 0 ? undefined : `mobile_assets_missing_${missingAssets.join('_')}`
       const handler = (request: IncomingMessage, response: ServerResponse): void => {
         void this.handleExternalRequest(request, response).catch((error: unknown) => {
           const mapped = mapError(error)
@@ -957,8 +978,12 @@ export class MobileAccessGateway {
     // it. Broadcast discovery is a convenience, so a failed bind must not take the whole
     // gateway down — the mDNS publication below still advertises this origin.
     const bound = await new Promise<boolean>(resolve => {
-      const onBindError = (): void => {
+      const onBindError = (error: NodeJS.ErrnoException): void => {
         socket.off('error', onBindError)
+        this.discoveryError = Object.freeze({
+          code: typeof error.code === 'string' ? error.code : 'unknown',
+          message: typeof error.message === 'string' ? error.message : String(error),
+        })
         resolve(false)
       }
       socket.once('error', onBindError)
@@ -1045,6 +1070,29 @@ export class MobileAccessGateway {
     const origin = this.policy.origins.values().next().value as string | undefined
     if (origin === undefined) throw new Error('gateway has no public authority')
     return Object.freeze({ host: this.config.listenHost, port: this.listenerPort, origin })
+  }
+
+  /**
+   * Report which discovery channels this gateway actually owns.
+   *
+   * Broadcast discovery degrades on its own when its UDP port cannot be bound, so
+   * callers need to tell "discovery is off" from "discovery was never attempted".
+   * mDNS is published independently and is unaffected by that failure.
+   */
+  discoveryStatus(): {
+    readonly broadcast: boolean
+    readonly mdns: boolean
+    readonly errorCode?: string
+    readonly mobileAssetsErrorCode?: string
+  } {
+    return Object.freeze({
+      broadcast: this.discoverySocket !== undefined && this.discoveryTimer !== undefined,
+      mdns: this.bonjour !== undefined,
+      ...(this.discoveryError === undefined ? {} : { errorCode: `discovery_broadcast_${this.discoveryError.code}` }),
+      // A bundled asset that is missing would otherwise only show up as a 503 on a
+      // subresource the served page still references.
+      ...(this.mobileAssetError === undefined ? {} : { mobileAssetsErrorCode: this.mobileAssetError }),
+    })
   }
 
   private requirePolicy(): RequestTrustPolicy {
@@ -2355,6 +2403,7 @@ export class MobileAccessGateway {
                 activeRequests: this.activeRequests.size,
                 webSockets: this.activeWebSockets.size,
               },
+              discovery: this.discoveryStatus(),
             }, false)
             return
           }

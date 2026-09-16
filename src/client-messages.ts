@@ -196,8 +196,8 @@ Object.assign(MOBILE_CONTROL_MESSAGES.en, {
   resetOriginConfirm: "Stop this backend and reset remote pairing? All paired remote devices must pair again. Reverse-proxy settings and LAN devices are kept.",
   originPublicOriginInvalid: "Enter a public HTTPS origin only, such as https://phone.example.com:8815; no path, query, credentials, or private address.",
   originListenHostInvalid: "Use an explicit loopback or private IPv4 address on this computer, not 0.0.0.0 or a public address.",
-  originListenPortInvalid: "Use a whole-number port from 1 to 65535.",
-  originListenPortReserved: "Port 3443 is reserved for the existing LAN gateway. Choose another port, such as 3444.",
+  originListenPortInvalid: "Use a whole-number port from 1024 to 65535; lower ports need privileges the plugin does not have.",
+  originListenPortReserved: "Port 3443 belongs to the LAN gateway and port 3080 to DSH itself, so both are always taken. Choose another port, such as 3444 or 3445.",
   originAllowedCidrsInvalid: "Allow 1–16 valid loopback/private IPv4 CIDRs with no host bits. For a LAN listener, include the actual proxy source IPv4/32; public ranges are not accepted.",
   originSettingsInvalid: "The reverse-proxy settings are invalid. Check the four fields and save again.",
   originConfigMissing: "Save the reverse-proxy settings before starting the backend.",
@@ -205,6 +205,8 @@ Object.assign(MOBILE_CONTROL_MESSAGES.en, {
   originPortInUse: "The backend port is already in use. Stop the conflicting listener or choose a different port.",
   originAddressUnavailable: "The listen address is not available on this computer. Choose its current private IPv4.",
   originStartFailed: "The private backend could not start. Check its address, port, permissions, and local logs.",
+  originConfigTargetInvalid: "The saved proxy settings file is not a regular file. Remove it and save the settings again.",
+  originControllerUnavailable: "The reverse-proxy provider is not available in this session. Restart DSH and try again.",
 })
 
 Object.assign(MOBILE_CONTROL_MESSAGES.it, {
@@ -237,8 +239,8 @@ Object.assign(MOBILE_CONTROL_MESSAGES.it, {
   resetOriginConfirm: "Fermare il backend e reimpostare gli abbinamenti remoti? Tutti i dispositivi remoti dovranno essere abbinati di nuovo. Le impostazioni proxy e i dispositivi LAN vengono conservati.",
   originPublicOriginInvalid: "Inserisci solo un’origine HTTPS pubblica, ad esempio https://phone.example.com:8815, senza percorso, query, credenziali o indirizzo privato.",
   originListenHostInvalid: "Usa un IPv4 loopback o privato esplicito di questo computer, non 0.0.0.0 né un indirizzo pubblico.",
-  originListenPortInvalid: "Usa una porta intera da 1 a 65535.",
-  originListenPortReserved: "La porta 3443 è riservata al gateway LAN esistente. Scegli un’altra porta, ad esempio 3444.",
+  originListenPortInvalid: "Usa una porta intera da 1024 a 65535; le porte più basse richiedono privilegi che il plugin non ha.",
+  originListenPortReserved: "La porta 3443 appartiene al gateway LAN e la 3080 a DSH stesso, quindi sono sempre occupate. Scegli un’altra porta, ad esempio 3444 o 3445.",
   originAllowedCidrsInvalid: "Consenti 1–16 CIDR IPv4 loopback/privati validi senza bit host. Per l’ascolto LAN includi l’IPv4 sorgente reale del proxy con /32; le reti pubbliche non sono ammesse.",
   originSettingsInvalid: "Impostazioni reverse proxy non valide. Controlla i quattro campi e salva di nuovo.",
   originConfigMissing: "Salva le impostazioni reverse proxy prima di avviare il backend.",
@@ -246,6 +248,8 @@ Object.assign(MOBILE_CONTROL_MESSAGES.it, {
   originPortInUse: "La porta backend è già occupata. Ferma il processo in conflitto o scegli un’altra porta.",
   originAddressUnavailable: "L’indirizzo di ascolto non è disponibile su questo computer. Scegli il suo IPv4 privato attuale.",
   originStartFailed: "Impossibile avviare il backend privato. Controlla indirizzo, porta, permessi e log locali.",
+  originConfigTargetInvalid: "Il file delle impostazioni proxy salvato non è un file regolare. Rimuovilo e salva di nuovo le impostazioni.",
+  originControllerUnavailable: "Il provider reverse proxy non è disponibile in questa sessione. Riavvia DSH e riprova.",
 })
 
 Object.assign(MOBILE_CONTROL_MESSAGES.zh, {
@@ -278,8 +282,8 @@ Object.assign(MOBILE_CONTROL_MESSAGES.zh, {
   resetOriginConfirm: "停止此后端并重置远程配对？所有已配对的远程设备都需要重新配对；反向代理配置和局域网设备保留。",
   originPublicOriginInvalid: "只填写公网 HTTPS 源地址，例如 https://phone.example.com:8815；不能含路径、查询参数、账号密码或私有地址。",
   originListenHostInvalid: "填写本机明确的回环或私有 IPv4，不能使用 0.0.0.0 或公网地址。",
-  originListenPortInvalid: "端口必须是 1–65535 的整数。",
-  originListenPortReserved: "3443 已留给现有局域网网关，请选择其他端口，例如 3444。",
+  originListenPortInvalid: "端口必须是 1024–65535 的整数；更低的端口需要插件没有的特权。",
+  originListenPortReserved: "3443 属于局域网网关、3080 属于 DSH 自身，两者始终被占用。请换一个端口，例如 3444 或 3445。",
   originAllowedCidrsInvalid: "填写 1–16 个规范的回环/私有 IPv4 CIDR，不能有主机位；局域网监听时须包含代理实际来源 IPv4/32，不接受公网网段。",
   originSettingsInvalid: "反向代理配置无效，请检查四个字段后重新保存。",
   originConfigMissing: "请先保存反向代理配置，再启动后端。",
@@ -287,6 +291,8 @@ Object.assign(MOBILE_CONTROL_MESSAGES.zh, {
   originPortInUse: "后端端口已被占用，请停止冲突进程或改用其他端口。",
   originAddressUnavailable: "本机没有这个监听地址，请选择当前本机的私有 IPv4。",
   originStartFailed: "私有后端启动失败，请检查地址、端口、权限和本地日志。",
+  originConfigTargetInvalid: "已保存的代理配置文件不是普通文件。请移除后重新保存设置。",
+  originControllerUnavailable: "当前会话里反向代理提供方不可用。请重启 DSH 后重试。",
 })
 
 Object.assign(MOBILE_CONTROL_MESSAGES.en, {
