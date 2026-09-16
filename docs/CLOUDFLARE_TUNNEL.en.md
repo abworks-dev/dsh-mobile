@@ -41,6 +41,19 @@ Cloudflare terminates DNS and TLS for the public hostname. The plugin only runs 
 
 Once saved, leaving the token field blank keeps the stored token, and the field never echoes a saved token back. **Remove the saved token** returns the provider to a quick tunnel.
 
+## Connect the phone to a named tunnel
+
+Moving to a fixed hostname means **an already paired phone must pair again**: a DSH Mobile device credential is only ever sent to the exact origin that first received it, which is the design that stops a swapped-in domain from harvesting it. A credential issued for the old address therefore never authenticates at the new one.
+
+1. On the computer, open **Remote** in the panel and choose **Create remote pairing QR code**. That is what opens the pairing window, which is time-limited; while it is closed nothing can pair.
+2. In the app, **open the Remote entry first** (the remote access setup page in the connection center), then scan the code.
+
+> **A named tunnel must be scanned from inside the Remote flow.** The app only recognises platform tunnel suffixes such as `.ts.net`, cpolar and `.trycloudflare.com` as remote on their own. A named tunnel uses a domain you own, which the app cannot classify by itself, so it accepts that host only while the remote flow is active. Scanning from the Local network screen reports **Invalid QR code**, which looks exactly like "cannot connect".
+>
+> Scanning is optional: the full link (`https://your-domain/mobile-access/pair#instance=…&token=…`) can be copied to the phone and pasted, because the app accepts a complete link in its input field.
+
+The old remote entry in the device list will show **Address may have changed** or unreachable; delete it once the new pairing succeeds.
+
 ## Security boundary
 
 - The token is written only into the DSH Mobile private directory (`~/.dsh/mobile-access/remote/cloudflared/tunnel.json`, mode 0600) and is passed to `cloudflared` **only** through the `TUNNEL_TOKEN` environment variable, never on the command line, which any local process can read.
