@@ -19,8 +19,6 @@
 
 ## 面向维护者 / Maintainer notes
 
-| 文档 | 内容 |
-| --- | --- |
-| [自建 FRP 维护说明](HANDOFF_SELF_HOSTED_FRP.md) | 代码地图、错误码、安全边界与真机验证记录 |
+维护者文档面向改代码的人，**不随 npm 包发布**，只在仓库中阅读：
 
-维护者文档面向改代码的人，不随 npm 包发布。
+- `docs/HANDOFF_SELF_HOSTED_FRP.md` —— 自建 FRP 的代码地图、错误码、安全边界与真机验证记录。

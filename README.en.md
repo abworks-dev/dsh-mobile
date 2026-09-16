@@ -312,4 +312,4 @@ npm ci
 npm run verify
 ```
 
-See the [Android guide](apps/mobile/README.md). Licensed under [Apache-2.0](LICENSE).
+See the [Android guide](https://github.com/saya-ch/dsh-mobile/blob/main/apps/mobile/README.md). Licensed under [Apache-2.0](LICENSE).

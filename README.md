@@ -315,6 +315,6 @@ npm ci
 npm run verify
 ```
 
-Android 构建见 [App 文档](apps/mobile/README.zh-CN.md)。
+Android 构建见 [App 文档](https://github.com/saya-ch/dsh-mobile/blob/main/apps/mobile/README.zh-CN.md)。
 
 Apache-2.0，详见 [LICENSE](LICENSE)。
