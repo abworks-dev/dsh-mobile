@@ -8,6 +8,7 @@ Notable changes to DSH Mobile are recorded here. GitHub Releases remain the sour
 - Add an Own reverse proxy provider under Remote → Self-hosted for an existing user-managed HTTPS proxy. It provides a separate authenticated private HTTP origin (default 3444), strict private bind/source-CIDR validation, custom public HTTPS ports, local configuration and safe settings-only purge.
 - Distinguish backend listening from unverified public HTTPS/certificate/WebSocket reachability, with localized setup, errors and diagnostics; retain the existing LAN gateway, remote pairing and Android protocol.
 - Cover the HTTPS proxy → private HTTP origin → DSH path with real loopback pairing, authenticated HTTP and WebSocket tests, including Host/Origin/forwarded-header rejection and LAN independence.
+- Permanently remove revoked devices from durable storage and the desktop list, terminate their active Sessions, and compact legacy `revokedAt` rows on startup. Deleted credentials are rejected as `authentication_failed`; no revocation tombstones are retained.
 
 ## 0.4.1 - 2026-09-15
 
