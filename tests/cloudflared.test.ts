@@ -351,8 +351,8 @@ describe('cloudflared provider lifecycle', () => {
 })
 
 // Shaped like the connector token Cloudflare issues: base64url of a JSON blob.
-const NAMED_TOKEN = 'eyJhIjoiYTJmOWM2MWUxYzZmYTI4MGM5OWFmMjRiZmM4ZTg1OTkiLCJ0IjoiYWEzM2RlZWEtOTZkOC00ZGFhLThiNzQtNmY0MGUwOGYwMWU0In0'
-const NAMED_HOSTNAME = 'dsh.sayalove.me'
+const NAMED_TOKEN = 'eyJhIjoiMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAiLCJ0IjoiMDAwMDAwMDAtMDAwMC0wMDAwLTAwMDAtMDAwMDAwMDAwMDAwIiwicyI6Ik1EQXdNREF3TURBd01EQXdNREF3TURBd01EQXdNREF3TURBd01EQXdNREF3TURBd01EQXdNREEifQ'
+const NAMED_HOSTNAME = 'dsh.example.com'
 
 /**
  * A named tunnel binds one fixed forward port, so the test must claim a port that
@@ -381,7 +381,7 @@ describe('cloudflared named tunnel', () => {
     expect(isCloudflaredRegistration('INF Connection 1f2035b6-c61f-401b-86fc-260e9955f6ae registered connIndex=1')).toBe(true)
     // Everything else in the startup log must not be mistaken for readiness.
     for (const line of [
-      'INF Starting tunnel tunnelID=aa33deea-96d8-4daa-8b74-6f40e08f01e4',
+      'INF Starting tunnel tunnelID=11111111-2222-4333-8444-555555555555',
       'INF Initial protocol quic',
       'INF precheck complete hard_fail=false run_id=2bde4ed7 suggested_protocol=quic',
       'INF Updated to new configuration config="{\\"ingress\\":[...]}"',
@@ -400,7 +400,7 @@ describe('cloudflared named tunnel', () => {
     // A named tunnel prints no banner, so the process starts in `connecting` and
     // only a real registration line may promote it.
     expect(controller.status()).toMatchObject({ enabled: true, state: 'connecting', origin: NAMED_ORIGIN })
-    child.stderr.write('INF Starting tunnel tunnelID=aa33deea-96d8-4daa-8b74-6f40e08f01e4\n')
+    child.stderr.write('INF Starting tunnel tunnelID=11111111-2222-4333-8444-555555555555\n')
     child.stderr.write('INF precheck complete hard_fail=false run_id=2bde4ed7 suggested_protocol=quic\n')
     child.stderr.write(`INF Updated to new configuration config="{\\"ingress\\":[{\\"service\\":\\"http://127.0.0.1:${String(port)}\\"}]}"\n`)
     await new Promise(resolve => setTimeout(resolve, 5))

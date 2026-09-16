@@ -18,8 +18,8 @@ afterEach(async () => {
 })
 
 // Shaped like a real connector token: base64url of a JSON blob.
-const token = 'eyJhIjoiYTFmOWM2MWUxYzZmYTI4MGM5OWFmMjRiZmM4ZTg1OTkiLCJ0IjoiYWEzM2RlZWEtOTZkOC00ZGFhLThiNzQtNmY0MGUwOGYwMWU0IiwicyI6Ik9UQmhPR1UzTlRZdE1UQm1aQzAwWmpRMSJ9'
-const named = { version: 1 as const, mode: 'named' as const, token, hostname: 'dsh.sayalove.me', port: 3444 }
+const token = 'eyJhIjoiMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAiLCJ0IjoiMDAwMDAwMDAtMDAwMC0wMDAwLTAwMDAtMDAwMDAwMDAwMDAwIiwicyI6Ik1EQXdNREF3TURBd01EQXdNREF3TURBd01EQXdNREF3TURBd01EQXdNREF3TURBd01EQXdNREEifQ'
+const named = { version: 1 as const, mode: 'named' as const, token, hostname: 'dsh.example.com', port: 3444 }
 
 async function temporaryDirectory(prefix: string): Promise<string> {
   const directory = await mkdtemp(join(tmpdir(), prefix))
@@ -43,18 +43,18 @@ describe('cloudflared tunnel configuration', () => {
   })
 
   it('requires a routable public hostname that Cloudflare can serve', () => {
-    expect(validateCloudflaredTunnelHostname('dsh.sayalove.me')).toBe('dsh.sayalove.me')
-    expect(validateCloudflaredTunnelHostname('DSH.Sayalove.ME')).toBe('dsh.sayalove.me')
-    expect(validateCloudflaredTunnelHostname('dsh.sayalove.me.')).toBe('dsh.sayalove.me')
+    expect(validateCloudflaredTunnelHostname('dsh.example.com')).toBe('dsh.example.com')
+    expect(validateCloudflaredTunnelHostname('DSH.Example.COM')).toBe('dsh.example.com')
+    expect(validateCloudflaredTunnelHostname('dsh.example.com.')).toBe('dsh.example.com')
     expect(validateCloudflaredTunnelHostname('a-b.c-d.example.com')).toBe('a-b.c-d.example.com')
     // Cloudflare's own control-plane suffixes are never routable player hostnames:
     // one belongs to quick tunnels, the other is the routing target itself.
     for (const host of [
-      'localhost', 'dsh', '', ' dsh.sayalove.me', 'dsh.sayalove.me ',
-      '1.2.3.4', '*.sayalove.me', 'random.trycloudflare.com',
-      'abc123.cfargotunnel.com', '-dsh.sayalove.me', 'dsh-.sayalove.me',
-      'dsh..sayalove.me', `dsh.${'a'.repeat(64)}.me`, `dsh.${'a'.repeat(250)}.me`,
-      'dsh.sayalove.me/path', 'user@dsh.sayalove.me',
+      'localhost', 'dsh', '', ' dsh.example.com', 'dsh.example.com ',
+      '1.2.3.4', '*.example.com', 'random.trycloudflare.com',
+      'abc123.cfargotunnel.com', '-dsh.example.com', 'dsh-.example.com',
+      'dsh..example.com', `dsh.${'a'.repeat(64)}.me`, `dsh.${'a'.repeat(250)}.me`,
+      'dsh.example.com/path', 'user@dsh.example.com',
       // The bare apexes are Cloudflare's own and can never be routed to a customer
       // tunnel, so a suffix-only test would let them through.
       'trycloudflare.com', 'cfargotunnel.com',
@@ -86,10 +86,10 @@ describe('cloudflared tunnel configuration', () => {
 
   it('merges a blank submit with the saved token so the panel never has to resend it', () => {
     const saved = parseCloudflaredTunnelSettings(named)
-    expect(mergeSavedCloudflaredTunnelSettings({ mode: 'named', token: '', hostname: 'other.sayalove.me', port: 4000 }, saved))
-      .toEqual({ ...named, hostname: 'other.sayalove.me', port: 4000 })
+    expect(mergeSavedCloudflaredTunnelSettings({ mode: 'named', token: '', hostname: 'other.example.com', port: 4000 }, saved))
+      .toEqual({ ...named, hostname: 'other.example.com', port: 4000 })
     expect(mergeSavedCloudflaredTunnelSettings({ mode: 'named' }, saved)).toEqual(named)
-    expect(mergeSavedCloudflaredTunnelSettings({ token: 'x'.repeat(32), hostname: 'dsh.sayalove.me', port: 3444 }, saved))
+    expect(mergeSavedCloudflaredTunnelSettings({ token: 'x'.repeat(32), hostname: 'dsh.example.com', port: 3444 }, saved))
       .toMatchObject({ token: 'x'.repeat(32) })
     expect(mergeSavedCloudflaredTunnelSettings({ mode: 'quick' }, saved)).toEqual({ version: 1, mode: 'quick' })
     // The named branch hardcodes its mode, so an unrecognized value must be refused
@@ -103,7 +103,7 @@ describe('cloudflared tunnel configuration', () => {
     // Nothing saved and nothing supplied must report a missing configuration
     // rather than a half-built named tunnel.
     expect(() => mergeSavedCloudflaredTunnelSettings({ mode: 'named' }, undefined)).toThrow('cloudflared_tunnel_config_missing')
-    expect(() => mergeSavedCloudflaredTunnelSettings({ mode: 'named', hostname: 'dsh.sayalove.me', port: 3444 }, undefined))
+    expect(() => mergeSavedCloudflaredTunnelSettings({ mode: 'named', hostname: 'dsh.example.com', port: 3444 }, undefined))
       .toThrow('cloudflared_tunnel_config_missing')
     expect(mergeSavedCloudflaredTunnelSettings({ mode: 'named', token: '', hostname: '', port: '' }, saved)).toEqual(named)
   })
