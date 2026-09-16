@@ -10,7 +10,7 @@ export type DiagnosticReason =
   | 'lan-setup-required' | 'network-unavailable' | 'network-interface' | 'network-fixed'
   | 'lan-ready' | 'lan-off'
   | 'firewall-ready' | 'firewall-missing' | 'firewall-unknown'
-  | 'remote-off' | 'remote-ready' | 'remote-rate-limited' | 'remote-fake-ip' | 'remote-unreachable'
+  | 'remote-off' | 'remote-ready' | 'remote-origin-ready' | 'remote-rate-limited' | 'remote-fake-ip' | 'remote-unreachable'
   | 'remote-needs-login' | 'remote-connecting' | 'remote-controller-error'
   | 'phone-network-unknown'
 
@@ -103,6 +103,11 @@ const REMOTE_ERROR_GUIDANCE: Readonly<Record<string, string>> = Object.freeze({
   cpolar_start_timeout: '检查网络后点击“重新连接”。',
   cpolar_stopped: '点击“重新连接”。',
   cpolar_exited: '点击“重新连接”；仍失败时复制诊断报告。',
+  origin_config_missing: '先保存自有反向代理配置。',
+  origin_config_invalid: '重新保存自有反向代理配置。',
+  origin_listen_port_in_use: '更换 HTTP 后端端口；不要使用局域网的 3443 端口。',
+  origin_listen_address_unavailable: '监听地址不属于当前电脑，请重新选择本机的私网 IPv4 地址。',
+  origin_gateway_start_failed: '检查 HTTP 后端监听地址和端口后重新连接。',
   frp_component_missing: '先安装 FRP 官方组件。',
   frp_component_invalid: '彻底清理 FRP 组件后重新安装。',
   frp_config_missing: '先保存自建 FRP 连接配置。',
@@ -231,7 +236,7 @@ export async function collectConnectionDiagnostics(
   probes: DiagnosticProbes = {},
 ): Promise<ConnectionDiagnostics> {
   const checks: DiagnosticCheck[] = []
-  const remoteProbe = snapshot.remote.running && snapshot.remote.state === 'ready' && snapshot.remote.origin !== undefined
+  const remoteProbe = snapshot.remote.provider !== 'origin' && snapshot.remote.running && snapshot.remote.state === 'ready' && snapshot.remote.origin !== undefined
     ? (probes.remote ?? defaultRemoteProbe)(snapshot.remote.origin)
     : Promise.resolve<RemoteObservation>({ state: 'not-applicable' })
   const [firewall, remoteObservation] = await Promise.all([
@@ -282,6 +287,11 @@ export async function collectConnectionDiagnostics(
 
   if (!snapshot.remote.running || snapshot.remote.state === 'off') {
     checks.push(check('remote', 'info', 'remote-off', '远程通道', '当前未启用。', undefined, { provider: snapshot.remote.provider }))
+  } else if (snapshot.remote.provider === 'origin' && snapshot.remote.state === 'ready') {
+    checks.push(check('remote', 'info', 'remote-origin-ready', '远程通道',
+      '私网 HTTP 后端已就绪；未检测公网 HTTPS、证书或 WebSocket 连通性。',
+      '在手机上经反向代理验证连接；代理须保留原始 Host（含端口）并支持 WebSocket。',
+      { provider: 'origin' }))
   } else if (snapshot.remote.state === 'ready' && snapshot.remote.origin !== undefined) {
     const endpointSuffix = remoteSuffix(snapshot.remote.origin)
     const facts = { provider: snapshot.remote.provider, endpointSuffix, ...(remoteObservation.latencyMs === undefined ? {} : { latencyMs: remoteObservation.latencyMs }) }

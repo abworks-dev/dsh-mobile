@@ -114,7 +114,12 @@ export {
 export type { FrpConfigurationStatus, FrpSettings } from './frp-config.js'
 export { FrpController } from './frp.js'
 export type { FrpControllerOptions, FrpState, FrpStatus } from './frp.js'
-export { configuredRemoteProvider, JsonRemoteProviderStore, parseRemoteProviderState } from './remote.js'
+export { DEFAULT_ORIGIN_LISTEN_PORT, OriginConfigStore, parseOriginSettings, validateOriginPublicOrigin,
+  validateOriginListenHost, validateOriginListenPort, validateOriginAllowedCidrs } from './origin-proxy-config.js'
+export type { OriginSettings, OriginConfigurationStatus } from './origin-proxy-config.js'
+export { OriginController } from './origin-proxy.js'
+export type { OriginControllerOptions, OriginState, OriginStatus } from './origin-proxy.js'
+export { configuredRemoteProvider, JsonRemoteProviderStore, parseRemoteProviderState, REMOTE_PROVIDERS } from './remote.js'
 export type {
   RemoteProvider,
   RemoteProviderController,
@@ -134,4 +139,4 @@ export type {
   TaskEventWatcherOptions,
   TaskTurnEvent,
 } from './task-events.js'
-export { apply, inject, name } from './plugin.js'
+export { apply, inject, name, originGatewayConfig } from './plugin.js'

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { collectConnectionDiagnostics, remoteDiagnosticTimeoutMs, type DiagnosticSnapshot } from '../src/diagnostics.js'
 
 const healthy: DiagnosticSnapshot = {
@@ -57,6 +57,22 @@ describe('connection diagnostics', () => {
     expect(result.report).toContain('endpoint=*.cpolar.cn')
     expect(result.report).not.toContain('192.168.0.101')
     expect(result.report).not.toContain('private-name')
+  })
+
+  it('reports only origin backend readiness and never probes user-managed public ingress', async () => {
+    const remote = vi.fn(async () => ({ state: 'ready' as const, latencyMs: 1 }))
+    const result = await collectConnectionDiagnostics({
+      ...healthy,
+      remote: { provider: 'origin', running: true, state: 'ready', origin: 'https://phone.example.com:8815' },
+    }, { firewall: async () => ({ state: 'ready' }), remote })
+    expect(remote).not.toHaveBeenCalled()
+    expect(result.checks).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'remote', status: 'info', reason: 'remote-origin-ready', facts: { provider: 'origin' } }),
+    ]))
+    const check = result.checks.find(entry => entry.id === 'remote')!
+    expect(check.detail + check.action).toContain('HTTPS')
+    expect(check.detail + check.action).toContain('WebSocket')
+    expect(result.checks.some(entry => entry.reason === 'remote-ready')).toBe(false)
   })
 
   it('turns missing firewall rules and provider errors into shortest recovery actions', async () => {

@@ -2,7 +2,7 @@ import { Context } from '@deepseek-ai/cordis'
 import type { WebRoute, WebServer } from '@deepseek-ai/dsh-host-webserver'
 import type { CommandDefinition } from '@deepseek-ai/dsh-commands'
 import { createServer, request as requestHttp } from 'node:http'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -10,7 +10,8 @@ import { generate } from 'selfsigned'
 import { afterEach, describe, expect, it } from 'vitest'
 import { Config, parseGatewayConfig, type PluginConfig } from '../src/config.js'
 import { parseCidr, RequestTrustPolicy } from '../src/network.js'
-import { apply, inject, remoteGatewayConfig, settleCleanupSteps, upstreamAuthenticatedUrl } from '../src/plugin.js'
+import { apply, inject, originGatewayConfig, remoteGatewayConfig, settleCleanupSteps, upstreamAuthenticatedUrl } from '../src/plugin.js'
+import { parseOriginSettings } from '../src/origin-proxy-config.js'
 import { DSH_MOBILE_VERSION, MINIMUM_ANDROID_APP_VERSION } from '../src/version.js'
 
 const contexts: Context[] = []
@@ -109,6 +110,26 @@ async function mount(
   if (route === undefined) throw new Error('plugin did not register its control route')
   if (command === undefined) throw new Error('plugin did not register its /mobile command')
   return { context, route, command, upstreamBase }
+}
+
+async function unusedOriginPort(): Promise<number> {
+  const server = createServer()
+  await new Promise<void>(resolve => { server.listen(0, '127.0.0.1', resolve) })
+  const port = (server.address() as AddressInfo).port
+  await new Promise<void>(resolve => { server.close(() => resolve()) })
+  return port
+}
+
+async function pairOriginBackend(port: number, token: string): Promise<number> {
+  const body = JSON.stringify({ token, label: 'Origin plugin test' })
+  return new Promise((resolve, reject) => {
+    const request = requestHttp({ host: '127.0.0.1', port, path: '/mobile-access/auth/pair', method: 'POST', headers: {
+      host: 'phone.example.com:8815', origin: 'https://phone.example.com:8815',
+      'sec-fetch-site': 'same-origin', 'content-type': 'application/json', 'content-length': Buffer.byteLength(body),
+    } }, response => { response.resume(); response.once('end', () => { resolve(response.statusCode ?? 0) }) })
+    request.once('error', reject)
+    request.end(body)
+  })
 }
 
 async function managedSetupFile(upstreamOrigin: string): Promise<string> {
@@ -232,6 +253,31 @@ describe('remote Funnel gateway configuration', () => {
 
     expect(config.listenPort).toBe(45_321)
     expect(config.authorities).toEqual([{ hostname: 'example.r8.cpolar.cn', port: 443 }])
+  })
+})
+
+describe('private HTTP origin gateway configuration', () => {
+  it('preserves a non-default public TLS port without inheriting LAN trust or certificates', () => {
+    const template = parseGatewayConfig({
+      listenHost: '127.0.0.1', listenPort: 3443, publicAuthorities: ['127.0.0.1:3443'],
+      allowedCidrs: ['127.0.0.0/8'], stateFile: join(tmpdir(), 'origin-lan-template.json'), tls: { mode: 'disabled' },
+    })
+    const settings = parseOriginSettings({
+      publicOrigin: 'https://phone.example.com:8815', listenHost: '192.168.10.20',
+      allowedCidrs: ['192.168.10.1/32'],
+    })
+    const config = originGatewayConfig({ ...template, pairingCaFile: join(tmpdir(), 'unused-lan-ca.pem') }, settings,
+      join(tmpdir(), 'origin-remote-devices.json'), 'c'.repeat(64))
+    expect(config).toMatchObject({ listenHost: '192.168.10.20', listenPort: 3444, tls: { mode: 'disabled' }, publicTls: true, discovery: false })
+    expect(config.pairingCaFile).toBeUndefined()
+    expect(config.allowedCidrs.map(cidr => cidr.source)).toEqual(['192.168.10.1/32'])
+    const policy = new RequestTrustPolicy(config.authorities, 3444, config.allowedCidrs, config.publicTls)
+    expect([...policy.origins]).toEqual(['https://phone.example.com:8815'])
+    expect(policy.acceptsHost('phone.example.com:8815')).toBe(true)
+    expect(policy.acceptsHost('phone.example.com')).toBe(false)
+    expect(policy.acceptsHost('192.168.10.20:3444')).toBe(false)
+    expect(policy.acceptsOrigin('http://phone.example.com:8815')).toBe(false)
+    expect(template.listenPort).toBe(3443)
   })
 })
 
@@ -376,6 +422,82 @@ describe('stock DSH lifecycle', () => {
     expect(JSON.parse(selected.body)).toMatchObject({ provider: 'cpolar', running: false, state: 'off' })
     const lan = await invoke(mounted.route, 'GET', '/api/mobile-access/lan/control')
     expect(JSON.parse(lan.body)).toEqual({ running: false })
+  })
+
+  it('runs and purges the origin independently of LAN while keeping shared remote pairings', async () => {
+    const mounted = await mount(true)
+    const lanBefore = JSON.parse((await invoke(mounted.route, 'GET', '/api/mobile-access/lan/control')).body)
+    const selected = await invoke(mounted.route, 'POST', '/api/mobile-access/remote/provider', JSON.stringify({ provider: 'origin' }))
+    expect(JSON.parse(selected.body)).toMatchObject({ provider: 'origin', running: false, state: 'off' })
+    const port = await unusedOriginPort()
+    const form = { publicOrigin: 'https://phone.example.com:8815', listenPort: port }
+    const configured = await invoke(mounted.route, 'POST', '/api/mobile-access/remote/origin/configure', JSON.stringify(form))
+    expect(configured.status).toBe(200)
+    const metadata = JSON.parse(configured.body).providers.origin.configuration as { storagePath: string }
+    expect(JSON.parse(configured.body)).toMatchObject({ providers: { origin: { configuration: {
+      configured: true, publicOrigin: form.publicOrigin, listenHost: '127.0.0.1', listenPort: port,
+      allowedCidrs: ['127.0.0.0/8'], backendOrigin: 'http://127.0.0.1:' + String(port),
+    } } } })
+    const started = await invoke(mounted.route, 'POST', '/api/mobile-access/remote/control', JSON.stringify({ running: true }))
+    expect(JSON.parse(started.body)).toMatchObject({ provider: 'origin', running: true, state: 'ready', origin: form.publicOrigin,
+      backendOrigin: 'http://127.0.0.1:' + String(port) })
+    const pairing = await invoke(mounted.route, 'POST', '/api/mobile-access/remote/pairing/open', '{}')
+    expect(pairing.status).toBe(201)
+    const opened = JSON.parse(pairing.body) as { token: string; pairUrl: string; appPairUrl: string }
+    expect(opened.pairUrl).toMatch(/^https:\/\/phone\.example\.com:8815\/mobile-access\/pair#/u)
+    expect(opened.appPairUrl).toBe(opened.pairUrl)
+    expect(await pairOriginBackend(port, opened.token)).toBe(201)
+    const devices = JSON.parse((await invoke(mounted.route, 'GET', '/api/mobile-access/remote/devices')).body).devices
+    expect(devices).toHaveLength(1)
+    const deviceFile = join(metadata.storagePath, '..', '..', 'devices.json')
+    const persistedDevices = JSON.parse(await readFile(deviceFile, 'utf8'))
+    const refused = await invoke(mounted.route, 'POST', '/api/mobile-access/remote/origin/purge', '{}')
+    expect(refused.status).toBe(400)
+    const purged = await invoke(mounted.route, 'POST', '/api/mobile-access/remote/origin/purge', JSON.stringify({ confirm: true }))
+    expect(JSON.parse(purged.body)).toMatchObject({ running: false, state: 'off', providers: { origin: { configuration: { configured: false } } } })
+    expect(JSON.parse(await readFile(deviceFile, 'utf8'))).toEqual(persistedDevices)
+    await expect(readFile(join(metadata.storagePath, 'settings.json'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(pairOriginBackend(port, opened.token)).rejects.toMatchObject({ code: 'ECONNREFUSED' })
+    const lanAfter = JSON.parse((await invoke(mounted.route, 'GET', '/api/mobile-access/lan/control')).body)
+    expect(lanAfter).toEqual(lanBefore)
+    await invoke(mounted.route, 'POST', '/api/mobile-access/remote/origin/configure', JSON.stringify(form))
+    await invoke(mounted.route, 'POST', '/api/mobile-access/remote/control', JSON.stringify({ running: true }))
+    const restored = JSON.parse((await invoke(mounted.route, 'GET', '/api/mobile-access/remote/devices')).body).devices
+    expect(restored).toHaveLength(1)
+  })
+
+  it('reports a real port collision without disturbing the existing LAN listener', async () => {
+    const mounted = await mount(true)
+    const lanBefore = JSON.parse((await invoke(mounted.route, 'GET', '/api/mobile-access/lan/control')).body)
+    await invoke(mounted.route, 'POST', '/api/mobile-access/remote/provider', JSON.stringify({ provider: 'origin' }))
+    const occupiedPort = Number(new URL(lanBefore.origin as string).port)
+    expect(occupiedPort).toBeGreaterThan(0)
+    const configured = await invoke(mounted.route, 'POST', '/api/mobile-access/remote/origin/configure', JSON.stringify({
+      publicOrigin: 'https://phone.example.com:8815', listenPort: occupiedPort,
+    }))
+    expect(configured.status).toBe(200)
+    const started = await invoke(mounted.route, 'POST', '/api/mobile-access/remote/control', JSON.stringify({ running: true }))
+    expect(JSON.parse(started.body)).toMatchObject({ running: true, state: 'error', errorCode: 'origin_listen_port_in_use' })
+    const stopped = await invoke(mounted.route, 'POST', '/api/mobile-access/remote/control', JSON.stringify({ running: false }))
+    expect(JSON.parse(stopped.body)).toMatchObject({ running: false, state: 'off' })
+    expect(JSON.parse((await invoke(mounted.route, 'GET', '/api/mobile-access/lan/control')).body)).toEqual(lanBefore)
+  })
+
+  it.each([
+    [{ publicOrigin: 'http://phone.example.com' }, 'origin_public_origin_invalid'],
+    [{ listenHost: '0.0.0.0' }, 'origin_listen_host_invalid'],
+    [{ listenHost: '8.8.8.8' }, 'origin_listen_host_invalid'],
+    [{ listenPort: 0 }, 'origin_listen_port_invalid'],
+    [{ listenPort: 3443 }, 'origin_listen_port_reserved'],
+    [{ allowedCidrs: ['0.0.0.0/0'] }, 'origin_allowed_cidrs_invalid'],
+    [{ listenHost: '192.168.10.20' }, 'origin_allowed_cidrs_invalid'],
+  ])('rejects unsafe origin settings at the local API: %j', async (override, error) => {
+    const mounted = await mount()
+    const result = await invoke(mounted.route, 'POST', '/api/mobile-access/remote/origin/configure', JSON.stringify({
+      publicOrigin: 'https://phone.example.com:8815', ...override,
+    }))
+    expect(result.status).toBe(400)
+    expect(JSON.parse(result.body)).toEqual({ error })
   })
 
   it('stores restricted FRP settings without returning the token', async () => {

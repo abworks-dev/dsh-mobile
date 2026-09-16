@@ -154,6 +154,51 @@ describe('mobile-control localization', () => {
     expect(LOCALIZED_DIAGNOSTIC_COPY.zh.networkAction).toContain('dsh-mobile setup')
   })
 
+  it('localizes own-proxy setup without equating a listening backend with public readiness', () => {
+    expect(MOBILE_CONTROL_MESSAGES.en).toMatchObject({
+      originName: 'Own reverse proxy', originSaveStart: 'Save and start backend',
+      originBackendReady: 'Backend listening', originCopyBackend: 'Copy backend address',
+    })
+    expect((MOBILE_CONTROL_MESSAGES.en as Record<string, string>).originReady).toContain('have NOT been verified')
+    expect((MOBILE_CONTROL_MESSAGES.it as Record<string, string>).originReady).toContain('NON sono stati verificati')
+    expect((MOBILE_CONTROL_MESSAGES.zh as Record<string, string>).originReady).toContain('不代表公网连接已成功')
+    expect((MOBILE_CONTROL_MESSAGES.en as Record<string, string>).originWarning).toContain('including its port')
+    expect((MOBILE_CONTROL_MESSAGES.zh as Record<string, string>).originWarning).toContain('绝不能直接暴露公网')
+    expect((MOBILE_CONTROL_MESSAGES.en as Record<string, string>).originPurgeConfirm).toContain('Paired remote devices')
+    expect((MOBILE_CONTROL_MESSAGES.zh as Record<string, string>).originPurgeConfirm).toContain('均保留')
+    for (const messages of Object.values(MOBILE_CONTROL_MESSAGES)) {
+      for (const key of ['originPublicOrigin', 'originListenHost', 'originListenPort', 'originAllowedCidrs', 'originBackendSaved']) {
+        expect((messages as Record<string, string>)[key]?.length).toBeGreaterThan(0)
+      }
+    }
+  })
+
+  it('keeps every origin validation and runtime error translated in all locales', () => {
+    const source = readFileSync(new URL('../src/client.ts', import.meta.url), 'utf8')
+    const mapping = source.match(/const ORIGIN_ERROR_MESSAGE_KEYS[^=]*= \{([\s\S]*?)\n\}/u)?.[1] ?? ''
+    const keys = [...mapping.matchAll(/origin_[a-z_]+: '([^']+)'/gu)].map(match => match[1]!)
+    expect(keys.length).toBeGreaterThanOrEqual(11)
+    for (const messages of Object.values(MOBILE_CONTROL_MESSAGES)) {
+      for (const key of keys) expect((messages as Record<string, string>)[key]?.length).toBeGreaterThan(0)
+    }
+  })
+
+  it('wires private-origin controls and protects edited forms from stale poll snapshots', () => {
+    const source = readFileSync(new URL('../src/client.ts', import.meta.url), 'utf8')
+    expect(source).toContain('selfHostedBody.append(frpChoice, originChoice)')
+    expect(source).toContain('/api/mobile-access/remote/origin/configure')
+    expect(source).toContain('/api/mobile-access/remote/origin/purge')
+    expect(source).toContain('if (!originFormDirty && !originFormBusy)')
+    expect(source).toContain('if (remoteLoadInFlight || originFormBusy) return')
+    expect(source).toContain('if (epoch === remoteSnapshotEpoch) renderRemote(data)')
+    expect(source).toContain("originSetup.setAttribute('aria-busy', String(originFormBusy))")
+    expect(source).toContain("input?.setAttribute('aria-invalid', 'true')")
+    expect(source).toContain("originProvider.running === true")
+    expect(source).toContain("window.confirm(t('originPurgeConfirm'))")
+    expect(CONTROL_STYLES).toContain('.dsh-mobile-control__origin-fields')
+    expect(CONTROL_STYLES).toContain('.dsh-mobile-control__origin-fields input[aria-invalid=true]')
+  })
+
   it('creates the restricted FRP VPS template entirely in the loopback client', () => {
     const template = createFrpServerTemplateForClipboard(
       7000,

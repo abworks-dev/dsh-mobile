@@ -373,6 +373,20 @@ export function createFrpServerTemplateForClipboard(serverPort: number, token: s
   return createRestrictedFrpServerTemplate(serverPort, token, publicOrigin)
 }
 
+const ORIGIN_ERROR_MESSAGE_KEYS: Readonly<Record<string, string>> = {
+  origin_public_origin_invalid: 'originPublicOriginInvalid',
+  origin_listen_host_invalid: 'originListenHostInvalid',
+  origin_listen_port_invalid: 'originListenPortInvalid',
+  origin_listen_port_reserved: 'originListenPortReserved',
+  origin_allowed_cidrs_invalid: 'originAllowedCidrsInvalid',
+  origin_settings_invalid: 'originSettingsInvalid',
+  origin_config_missing: 'originConfigMissing',
+  origin_config_invalid: 'originConfigInvalid',
+  origin_listen_port_in_use: 'originPortInUse',
+  origin_listen_address_unavailable: 'originAddressUnavailable',
+  origin_gateway_start_failed: 'originStartFailed',
+}
+
 function installControl(): { remove: () => void; toggle: () => void; isOpen: () => boolean } {
   const locale = selectedMobileControlLocale()
   const localeTag = locale === 'it' ? 'it-IT' : locale === 'zh' ? 'zh-CN' : 'en-US'
@@ -496,7 +510,12 @@ function installControl(): { remove: () => void; toggle: () => void; isOpen: () 
   const frpChoiceName = element('strong'); frpChoiceName.textContent = t('frpName')
   const frpChoiceDescription = element('span', 'dsh-mobile-control__provider-description'); frpChoiceDescription.textContent = t('frpDescription')
   frpChoiceTop.append(frpChoiceName); frpChoice.append(frpChoiceTop, frpChoiceDescription)
-  selfHostedBody.append(frpChoice); selfHosted.append(selfHostedSummary, selfHostedBody)
+  const originChoice = element('button', 'dsh-mobile-control__provider is-origin'); originChoice.type = 'button'; originChoice.setAttribute('aria-pressed', 'false')
+  const originChoiceTop = element('span', 'dsh-mobile-control__provider-top')
+  const originChoiceName = element('strong'); originChoiceName.textContent = t('originName')
+  const originChoiceDescription = element('span', 'dsh-mobile-control__provider-description'); originChoiceDescription.textContent = t('originDescription')
+  originChoiceTop.append(originChoiceName); originChoice.append(originChoiceTop, originChoiceDescription)
+  selfHostedBody.append(frpChoice, originChoice); selfHosted.append(selfHostedSummary, selfHostedBody)
   providerSection.append(providerHeading, providerInfo, providerChoices, selfHosted)
   const frpSetup = element('section', 'dsh-mobile-control__frp-setup'); frpSetup.hidden = true
   const frpSetupTitle = element('h3', 'dsh-mobile-control__section-title'); frpSetupTitle.textContent = t('prepareFrp')
@@ -578,6 +597,35 @@ function installControl(): { remove: () => void; toggle: () => void; isOpen: () 
   const frpVerifySummary = element('summary'); frpVerifySummary.textContent = t('frpStep4Title')
   frpVerifyGroup.append(frpVerifySummary, frpStep4)
   frpSetup.append(frpSetupTitle, frpOverview, frpConnectionGroup, frpVpsGroup, frpComponentGroup, frpVerifyGroup, frpDetails)
+  const originSetup = element('section', 'dsh-mobile-control__origin-setup'); originSetup.hidden = true
+  const originSetupTitle = element('h3', 'dsh-mobile-control__section-title'); originSetupTitle.textContent = t('prepareOrigin')
+  const originHelp = element('p', 'dsh-mobile-control__component-note'); originHelp.id = 'dsh-mobile-origin-help'; originHelp.textContent = t('originHelp')
+  const originWarning = element('p', 'dsh-mobile-control__origin-warning'); originWarning.textContent = t('originWarning')
+  const originFields = element('div', 'dsh-mobile-control__origin-fields')
+  const originPublicLabel = element('label', 'dsh-mobile-control__field'); originPublicLabel.textContent = t('originPublicOrigin')
+  const originPublic = element('input'); originPublic.type = 'url'; originPublic.placeholder = 'https://phone.example.com:8815'; originPublic.maxLength = 512
+  const originHostLabel = element('label', 'dsh-mobile-control__field'); originHostLabel.textContent = t('originListenHost')
+  const originHost = element('input'); originHost.type = 'text'; originHost.value = '127.0.0.1'; originHost.maxLength = 15
+  const originPortLabel = element('label', 'dsh-mobile-control__field'); originPortLabel.textContent = t('originListenPort')
+  const originPort = element('input'); originPort.type = 'number'; originPort.inputMode = 'numeric'; originPort.min = '1'; originPort.max = '65535'; originPort.step = '1'; originPort.value = '3444'
+  const originCidrsLabel = element('label', 'dsh-mobile-control__field'); originCidrsLabel.textContent = t('originAllowedCidrs')
+  const originCidrs = element('input'); originCidrs.type = 'text'; originCidrs.value = '127.0.0.0/8'; originCidrs.maxLength = 1040
+  for (const input of [originPublic, originHost, originPort, originCidrs]) {
+    input.required = true; input.autocomplete = 'off'; input.spellcheck = false
+    input.setAttribute('aria-describedby', 'dsh-mobile-origin-help dsh-mobile-origin-feedback')
+  }
+  originPublicLabel.append(originPublic); originHostLabel.append(originHost); originPortLabel.append(originPort); originCidrsLabel.append(originCidrs)
+  originFields.append(originPublicLabel, originHostLabel, originPortLabel, originCidrsLabel)
+  const originFeedback = element('p', 'dsh-mobile-control__origin-feedback'); originFeedback.id = 'dsh-mobile-origin-feedback'; originFeedback.setAttribute('role', 'status'); originFeedback.setAttribute('aria-live', 'polite'); originFeedback.hidden = true
+  const originConfigure = element('button', 'dsh-mobile-control__primary'); originConfigure.type = 'button'; originConfigure.textContent = t('originSaveStart')
+  const originPurge = element('button', 'dsh-mobile-control__danger'); originPurge.type = 'button'; originPurge.textContent = t('originPurge'); originPurge.hidden = true
+  const originFormActions = element('div', 'dsh-mobile-control__actions'); originFormActions.append(originConfigure, originPurge)
+  const originBackend = element('div', 'dsh-mobile-control__origin-backend'); originBackend.hidden = true
+  const originBackendLabel = element('span', 'dsh-mobile-control__access-label')
+  const originBackendAddress = element('code', 'dsh-mobile-control__storage')
+  const originCopyBackend = element('button', 'dsh-mobile-control__secondary'); originCopyBackend.type = 'button'; originCopyBackend.textContent = t('originCopyBackend')
+  originBackend.append(originBackendLabel, originBackendAddress, originCopyBackend)
+  originSetup.append(originSetupTitle, originHelp, originWarning, originFields, originFeedback, originFormActions, originBackend)
   const tailscaleInfo = element('details', 'dsh-mobile-control__details')
   const tailscaleInfoSummary = element('summary'); tailscaleInfoSummary.textContent = t('tailscaleHelp')
   const tailscaleInfoBody = element('div', 'dsh-mobile-control__details-body')
@@ -590,7 +638,7 @@ function installControl(): { remove: () => void; toggle: () => void; isOpen: () 
   const providerSetupMeta = element('div', 'dsh-mobile-control__stage-meta'); providerSetupMeta.append(providerSetupName, remoteStateBadge)
   providerSetupHeader.append(providerSetupHeading, providerSetupMeta)
   const providerSetupBody = element('div', 'dsh-mobile-control__provider-setup-body')
-  providerSetupBody.append(cpolarSetup, frpSetup, tailscaleInfo)
+  providerSetupBody.append(cpolarSetup, frpSetup, originSetup, tailscaleInfo)
   const remoteAccess = element('div', 'dsh-mobile-control__access'); remoteAccess.hidden = true
   const remoteAccessLabel = element('span', 'dsh-mobile-control__access-label'); remoteAccessLabel.textContent = t('remoteAddress')
   const remoteAccessLink = element('a', 'dsh-mobile-control__access-link'); remoteAccessLink.target = '_blank'; remoteAccessLink.rel = 'noreferrer'; remoteAccess.append(remoteAccessLabel, remoteAccessLink)
@@ -798,7 +846,7 @@ function installControl(): { remove: () => void; toggle: () => void; isOpen: () 
   let lanSetupLoaded = false
   let remoteRunning = false
   let remoteReady = false
-  let remoteProvider: 'tailscale' | 'cpolar' | 'frp' = 'tailscale'
+  let remoteProvider: 'tailscale' | 'cpolar' | 'frp' | 'origin' = 'tailscale'
   let remoteLoginUrl = ''
   let remoteSetupUrl = ''
   let remoteSetupPending = false
@@ -807,6 +855,11 @@ function installControl(): { remove: () => void; toggle: () => void; isOpen: () 
   let remoteProviderBusy = false
   let cpolarInstalled = false
   let cpolarConfigured = false
+  let originConfigured = false
+  let originFormDirty = false
+  let originFormBusy = false
+  let remoteSnapshotEpoch = 0
+  let latestRemoteState: Record<string, unknown> = {}
   let frpInstalled = false
   let frpConfigured = false
   let frpLayoutInitialized = false
@@ -1042,24 +1095,30 @@ function installControl(): { remove: () => void; toggle: () => void; isOpen: () 
       .then(loadDevices, error => { status.textContent = t('requestFailed', { error: String(error) }) })
   })
   const renderRemote = (data: Record<string, unknown>): void => {
+    latestRemoteState = data
     remoteRunning = data.running === true
-    remoteProvider = data.provider === 'cpolar' ? 'cpolar' : data.provider === 'frp' ? 'frp' : 'tailscale'
+    remoteProvider = data.provider === 'cpolar' ? 'cpolar' : data.provider === 'frp' ? 'frp' : data.provider === 'origin' ? 'origin' : 'tailscale'
     const cpolar = remoteProvider === 'cpolar'
     const frp = remoteProvider === 'frp'
+    const origin = remoteProvider === 'origin'
     const tailscale = remoteProvider === 'tailscale'
     tailscaleChoice.classList.toggle('is-selected', tailscale)
     cpolarChoice.classList.toggle('is-selected', cpolar)
     frpChoice.classList.toggle('is-selected', frp)
+    originChoice.classList.toggle('is-selected', origin)
     tailscaleChoice.setAttribute('aria-checked', String(tailscale))
     cpolarChoice.setAttribute('aria-checked', String(cpolar))
     frpChoice.setAttribute('aria-pressed', String(frp))
-    providerSetupName.textContent = cpolar ? 'cpolar' : frp ? t('frpName') : 'Tailscale Funnel'
+    originChoice.setAttribute('aria-pressed', String(origin))
+    providerSetupName.textContent = cpolar ? 'cpolar' : frp ? t('frpName') : origin ? t('originName') : 'Tailscale Funnel'
     tailscaleChoice.disabled = remoteProviderBusy
     cpolarChoice.disabled = remoteProviderBusy
     frpChoice.disabled = remoteProviderBusy
+    originChoice.disabled = remoteProviderBusy
     cpolarSetup.hidden = !cpolar
     frpSetup.hidden = !frp
-    if (frp) selfHosted.open = true
+    originSetup.hidden = !origin
+    if (frp || origin) selfHosted.open = true
     tailscaleInfo.hidden = !tailscale
     remoteReset.textContent = tailscale ? t('resetRemoteLogin') : t('resetRemoteDevices')
     const providers = data.providers !== null && typeof data.providers === 'object' ? data.providers as Record<string, unknown> : {}
@@ -1145,7 +1204,33 @@ function installControl(): { remove: () => void; toggle: () => void; isOpen: () 
       frpVpsGroup.open = !frpConfigured
       frpLayoutInitialized = true
     }
-    selfHostedBadge.textContent = frpConfigured && frpInstalled ? t('ready') : t('advanced')
+    const originProvider = providers.origin !== null && typeof providers.origin === 'object' ? providers.origin as Record<string, unknown> : {}
+    const originConfiguration = originProvider.configuration !== null && typeof originProvider.configuration === 'object'
+      ? originProvider.configuration as Record<string, unknown> : {}
+    originConfigured = originConfiguration.configured === true
+    if (!originFormDirty && !originFormBusy) {
+      originPublic.value = typeof originConfiguration.publicOrigin === 'string' ? originConfiguration.publicOrigin : ''
+      originHost.value = typeof originConfiguration.listenHost === 'string' ? originConfiguration.listenHost : '127.0.0.1'
+      originPort.value = typeof originConfiguration.listenPort === 'number' ? String(originConfiguration.listenPort) : '3444'
+      originCidrs.value = Array.isArray(originConfiguration.allowedCidrs) ? originConfiguration.allowedCidrs.filter(value => typeof value === 'string').join(', ') : '127.0.0.0/8'
+    }
+    originSetup.setAttribute('aria-busy', String(originFormBusy))
+    originConfigure.setAttribute('aria-busy', String(originFormBusy))
+    originConfigure.textContent = originFormBusy ? t('saving') : t('originSaveStart')
+    for (const input of [originPublic, originHost, originPort, originCidrs]) input.disabled = remoteProviderBusy
+    originConfigure.disabled = remoteProviderBusy
+    originPurge.disabled = remoteProviderBusy
+    originPurge.hidden = !originConfigured && originConfiguration.errorCode !== 'origin_config_invalid' && originProvider.running !== true
+    const originListening = origin && originProvider.state === 'ready' && originProvider.running === true
+    const backendOrigin = originListening && typeof data.backendOrigin === 'string' ? data.backendOrigin
+      : typeof originConfiguration.backendOrigin === 'string' ? originConfiguration.backendOrigin : ''
+    originBackend.hidden = backendOrigin === ''
+    originBackendLabel.textContent = originListening ? t('originBackendListening') : t('originBackendSaved')
+    originBackendAddress.textContent = backendOrigin
+    originCopyBackend.disabled = remoteProviderBusy || backendOrigin === ''
+    selfHostedBadge.textContent = origin
+      ? originListening ? t('originBackendReady') : t('advanced')
+      : frpConfigured && frpInstalled ? t('ready') : t('advanced')
     const state = typeof data.state === 'string' ? data.state : 'error'
     const errorCode = typeof data.errorCode === 'string' ? data.errorCode : ''
     const remoteOrigin = typeof data.origin === 'string' ? data.origin : ''
@@ -1163,7 +1248,7 @@ function installControl(): { remove: () => void; toggle: () => void; isOpen: () 
     remoteStateBadge.classList.toggle('is-busy', state === 'starting' || state === 'connecting' || state === 'needs-login')
     remoteStateBadge.classList.toggle('is-attention', state === 'error' || state === 'unavailable')
     remoteStateBadge.textContent = remoteReady
-      ? t('ready')
+      ? origin ? t('originBackendReady') : t('ready')
       : state === 'starting' || state === 'connecting' || state === 'needs-login'
         ? t('remoteStateConnecting')
         : state === 'error' || state === 'unavailable'
@@ -1176,11 +1261,11 @@ function installControl(): { remove: () => void; toggle: () => void; isOpen: () 
     remoteStatus.classList.toggle('is-running', remoteReady)
     const labels: Record<string, string> = {
       off: t('remoteOff'),
-      unavailable: cpolar ? t('remoteUnavailableCpolar') : frp ? t('remoteUnavailableFrp') : t('remoteUnavailableTailscale'),
-      starting: cpolar ? t('remoteStartingCpolar') : frp ? t('remoteStartingFrp') : t('remoteStartingTailscale'),
+      unavailable: cpolar ? t('remoteUnavailableCpolar') : frp ? t('remoteUnavailableFrp') : origin ? t('originUnavailable') : t('remoteUnavailableTailscale'),
+      starting: cpolar ? t('remoteStartingCpolar') : frp ? t('remoteStartingFrp') : origin ? t('originStarting') : t('remoteStartingTailscale'),
       'needs-login': t('remoteNeedsLogin'),
       connecting: cpolar ? t('remoteConnectingCpolar') : frp ? t('remoteConnectingFrp') : t('remoteConnectingTailscale'),
-      ready: t('remoteReady'),
+      ready: origin ? t('originReady') : t('remoteReady'),
       error: t('remoteError'),
     }
     const errorLabels: Record<string, string> = {
@@ -1214,6 +1299,7 @@ function installControl(): { remove: () => void; toggle: () => void; isOpen: () 
       frp_discovery_invalid: t('frpDiscoveryInvalid'),
       frp_stopped: t('frpStopped'),
       frp_exited: t('frpExited'),
+      ...Object.fromEntries(Object.entries(ORIGIN_ERROR_MESSAGE_KEYS).map(([code, key]) => [code, t(key)])),
     }
     remoteStatus.textContent = remoteSetupPending && needsFunnelSetup
       ? t('setupOpened')
@@ -1222,15 +1308,17 @@ function installControl(): { remove: () => void; toggle: () => void; isOpen: () 
     remoteSetup.disabled = remoteSetupUrl === '' || remoteReconnectBusy
     remoteSetupRetry.disabled = remoteReconnectBusy
     remoteToggle.textContent = remoteRunning ? t('disableRemote') : t('enableRemote')
-    const providerPrepared = cpolar ? cpolarInstalled && cpolarConfigured : frp ? frpInstalled && frpConfigured : true
-    remoteToggle.disabled = remoteProviderBusy || !providerPrepared
+    const providerPrepared = cpolar ? cpolarInstalled && cpolarConfigured : frp ? frpInstalled && frpConfigured : origin ? originConfigured : true
+    remoteToggle.disabled = remoteProviderBusy || (!providerPrepared && !(origin && remoteRunning))
     remoteLogin.hidden = !tailscale || state !== 'needs-login' || remoteLoginUrl === ''
     remoteReconnect.hidden = needsFunnelSetup || (state !== 'error' && state !== 'unavailable')
       || !providerPrepared
-    remoteActions.hidden = !providerPrepared
-    remotePair.disabled = !remoteReady
-    remoteCopyLink.disabled = !remoteReady
-    remoteDevices.disabled = !remoteReady
+    remoteActions.hidden = !providerPrepared && !(origin && remoteRunning)
+    remotePair.disabled = !remoteReady || originFormBusy
+    remoteCopyLink.disabled = !remoteReady || originFormBusy
+    remoteDevices.disabled = !remoteReady || originFormBusy
+    if (origin) { remoteReconnect.disabled = remoteProviderBusy || remoteReconnectBusy; remoteReset.disabled = remoteProviderBusy }
+    else remoteReset.disabled = false
     if (!remoteReady) {
       remoteQr.hidden = true
       remotePairLink.hidden = true
@@ -1241,20 +1329,24 @@ function installControl(): { remove: () => void; toggle: () => void; isOpen: () 
   }
   let remoteLoadInFlight = false
   const loadRemote = (): void => {
-    if (remoteLoadInFlight) return
+    if (remoteLoadInFlight || originFormBusy) return
+    const epoch = remoteSnapshotEpoch
     remoteLoadInFlight = true
     void controlRequestJson('/api/mobile-access/remote/control')
-      .then(renderRemote, error => { remoteStatus.textContent = t('requestFailed', { error: String(error) }) })
+      .then(data => { if (epoch === remoteSnapshotEpoch) renderRemote(data) }, error => {
+        if (epoch === remoteSnapshotEpoch) remoteStatus.textContent = t('requestFailed', { error: String(error) })
+      })
       .finally(() => { remoteLoadInFlight = false })
   }
-  const chooseRemoteProvider = (provider: 'tailscale' | 'cpolar' | 'frp'): void => {
+  const chooseRemoteProvider = (provider: 'tailscale' | 'cpolar' | 'frp' | 'origin'): void => {
     if (remoteProviderBusy || provider === remoteProvider) return
     if (remoteRunning && !window.confirm(t('switchProviderConfirm'))) return
     remoteProviderBusy = true
     tailscaleChoice.disabled = true
     cpolarChoice.disabled = true
     frpChoice.disabled = true
-    remoteStatus.textContent = provider === 'cpolar' ? t('switchingCpolar') : provider === 'frp' ? t('switchingFrp') : t('switchingTailscale')
+    originChoice.disabled = true
+    remoteStatus.textContent = provider === 'cpolar' ? t('switchingCpolar') : provider === 'frp' ? t('switchingFrp') : provider === 'origin' ? t('switchingOrigin') : t('switchingTailscale')
     void controlRequestJson('/api/mobile-access/remote/provider', { method: 'POST', body: JSON.stringify({ provider }) })
       .then(renderRemote, error => { remoteStatus.textContent = t('requestFailed', { error: String(error) }) })
       .finally(() => { remoteProviderBusy = false; loadRemote() })
@@ -1262,6 +1354,7 @@ function installControl(): { remove: () => void; toggle: () => void; isOpen: () 
   tailscaleChoice.addEventListener('click', () => { chooseRemoteProvider('tailscale') })
   cpolarChoice.addEventListener('click', () => { chooseRemoteProvider('cpolar') })
   frpChoice.addEventListener('click', () => { chooseRemoteProvider('frp') })
+  originChoice.addEventListener('click', () => { chooseRemoteProvider('origin') })
   cpolarInstall.addEventListener('click', () => {
     if (remoteProviderBusy) return
     const accepted = window.confirm(t('installConfirm'))
@@ -1599,6 +1692,87 @@ function installControl(): { remove: () => void; toggle: () => void; isOpen: () 
       .then(renderRemote, error => { remoteStatus.textContent = t('purgeFailed', { error: String(error) }) })
       .finally(() => { remoteProviderBusy = false; frpPurge.disabled = false; loadRemote() })
   })
+  const clearOriginValidation = (): void => {
+    for (const input of [originPublic, originHost, originPort, originCidrs]) input.removeAttribute('aria-invalid')
+  }
+  const showOriginFeedback = (message: string, error = false): void => {
+    originFeedback.textContent = message
+    originFeedback.hidden = false
+    originFeedback.classList.toggle('is-error', error)
+  }
+  const showOriginError = (error: unknown): void => {
+    const code = error instanceof Error ? error.message : String(error)
+    const key = ORIGIN_ERROR_MESSAGE_KEYS[code]
+    const fields: Record<string, HTMLInputElement> = {
+      origin_public_origin_invalid: originPublic, origin_listen_host_invalid: originHost,
+      origin_listen_address_unavailable: originHost, origin_listen_port_invalid: originPort,
+      origin_listen_port_reserved: originPort, origin_listen_port_in_use: originPort,
+      origin_allowed_cidrs_invalid: originCidrs,
+    }
+    clearOriginValidation()
+    const input = fields[code]
+    input?.setAttribute('aria-invalid', 'true')
+    showOriginFeedback(key === undefined ? t('configureFailed', { error: String(error) }) : t(key), true)
+  }
+  const setOriginFormBusy = (busy: boolean): void => {
+    originFormBusy = busy
+    remoteProviderBusy = busy
+    remoteSnapshotEpoch += 1
+    renderRemote(latestRemoteState)
+  }
+  for (const input of [originPublic, originHost, originPort, originCidrs]) {
+    input.addEventListener('input', () => {
+      originFormDirty = true
+      clearOriginValidation()
+      originFeedback.hidden = true
+    })
+  }
+  originConfigure.addEventListener('click', () => {
+    if (remoteProviderBusy || remoteProvider !== 'origin') return
+    clearOriginValidation()
+    for (const input of [originPublic, originHost, originPort, originCidrs]) {
+      if (!input.reportValidity()) return
+    }
+    const form = {
+      publicOrigin: originPublic.value.trim(), listenHost: originHost.value.trim(),
+      listenPort: Number(originPort.value), allowedCidrs: originCidrs.value.trim().split(/[\s,]+/u).filter(Boolean),
+    }
+    setOriginFormBusy(true)
+    showOriginFeedback(t('originSaving'))
+    void controlRequestJson('/api/mobile-access/remote/origin/configure', { method: 'POST', body: JSON.stringify(form) })
+      .then(() => controlRequestJson('/api/mobile-access/remote/control', { method: 'POST', body: JSON.stringify({ running: true }) }))
+      .then(data => {
+        originFormDirty = false
+        renderRemote(data)
+        if (data.state === 'error') showOriginError(new Error(typeof data.errorCode === 'string' ? data.errorCode : 'origin_gateway_start_failed'))
+        else originFeedback.hidden = true
+      }, showOriginError)
+      .finally(() => {
+        setOriginFormBusy(false)
+        const invalidInput = [originPublic, originHost, originPort, originCidrs].find(input => input.getAttribute('aria-invalid') === 'true')
+        invalidInput?.focus()
+        loadRemote()
+      })
+  })
+  originPurge.addEventListener('click', () => {
+    if (remoteProviderBusy || !window.confirm(t('originPurgeConfirm'))) return
+    setOriginFormBusy(true)
+    showOriginFeedback(t('originPurging'))
+    void controlRequestJson('/api/mobile-access/remote/origin/purge', { method: 'POST', body: JSON.stringify({ confirm: true }) })
+      .then(data => {
+        originFormDirty = false
+        clearOriginValidation()
+        renderRemote(data)
+        showOriginFeedback(t('originPurged'))
+      }, showOriginError)
+      .finally(() => { setOriginFormBusy(false); loadRemote() })
+  })
+  originCopyBackend.addEventListener('click', () => {
+    const address = originBackendAddress.textContent ?? ''
+    if (address === '' || remoteProviderBusy) return
+    void Promise.resolve().then(() => navigator.clipboard.writeText(address))
+      .then(() => { showOriginFeedback(t('originBackendCopied')) }, error => { showOriginFeedback(t('requestFailed', { error: String(error) }), true) })
+  })
   remoteToggle.addEventListener('click', () => {
     remoteToggle.disabled = true
     void controlRequestJson('/api/mobile-access/remote/control', { method: 'POST', body: JSON.stringify({ running: !remoteRunning }) })
@@ -1614,7 +1788,7 @@ function installControl(): { remove: () => void; toggle: () => void; isOpen: () 
     remoteReconnect.disabled = true
     remoteSetup.disabled = true
     remoteSetupRetry.disabled = true
-    remoteStatus.textContent = remoteProvider === 'cpolar' ? t('reconnectingCpolar') : remoteProvider === 'frp' ? t('reconnectingFrp') : t('reconnectingTailscale')
+    remoteStatus.textContent = remoteProvider === 'cpolar' ? t('reconnectingCpolar') : remoteProvider === 'frp' ? t('reconnectingFrp') : remoteProvider === 'origin' ? t('reconnectingOrigin') : t('reconnectingTailscale')
     void controlRequestJson('/api/mobile-access/remote/reconnect', { method: 'POST', body: '{}' })
       .then(renderRemote, error => { remoteStatus.textContent = t('requestFailed', { error: String(error) }) })
       .finally(() => {
@@ -1707,7 +1881,7 @@ function installControl(): { remove: () => void; toggle: () => void; isOpen: () 
   remoteReset.addEventListener('click', () => {
     const prompt = remoteProvider === 'cpolar'
       ? t('resetCpolarConfirm')
-      : remoteProvider === 'frp' ? t('resetFrpConfirm') : t('resetTailscaleConfirm')
+      : remoteProvider === 'frp' ? t('resetFrpConfirm') : remoteProvider === 'origin' ? t('resetOriginConfirm') : t('resetTailscaleConfirm')
     if (!window.confirm(prompt)) return
     void controlRequestJson('/api/mobile-access/remote/reset', { method: 'POST', body: JSON.stringify({ confirm: true }) })
       .then(renderRemote, error => { remoteStatus.textContent = t('requestFailed', { error: String(error) }) })
@@ -1733,7 +1907,7 @@ function installControl(): { remove: () => void; toggle: () => void; isOpen: () 
       if (templates === undefined) return serverCopy
       const facts = entry.facts !== null && typeof entry.facts === 'object' ? entry.facts as Record<string, unknown> : {}
       const values: Record<string, string> = {
-        provider: facts.provider === 'tailscale' || facts.provider === 'cpolar' || facts.provider === 'frp' ? facts.provider : '',
+        provider: facts.provider === 'tailscale' || facts.provider === 'cpolar' || facts.provider === 'frp' || facts.provider === 'origin' ? facts.provider : '',
         latencyMs: typeof facts.latencyMs === 'number' && Number.isFinite(facts.latencyMs) ? new Intl.NumberFormat(localeTag).format(facts.latencyMs) : '',
         interfaceName: typeof facts.interfaceName === 'string' ? facts.interfaceName : '',
         endpointSuffix: typeof facts.endpointSuffix === 'string' ? facts.endpointSuffix : '',
@@ -1750,6 +1924,7 @@ function installControl(): { remove: () => void; toggle: () => void; isOpen: () 
       }
       if (reason === 'remote-controller-error') {
         const controllerActionKeys: Readonly<Record<string, string>> = {
+          ...ORIGIN_ERROR_MESSAGE_KEYS,
           component_missing: 'remoteUnavailableTailscale', funnel_permission_required: 'funnelPermission', funnel_https_required: 'funnelHttps', funnel_start_failed: 'funnelStart', funnel_start_timeout: 'funnelTimeout', tailscale_dns_missing: 'tailscaleDnsMissing',
           sidecar_launch_failed: 'remoteUnavailableTailscale', sidecar_stopped: 'controlChannelFailed', sidecar_exited: 'controlChannelFailed', control_channel_failed: 'controlChannelFailed',
           cpolar_component_missing: 'cpolarMissing', cpolar_component_invalid: 'cpolarInvalid', cpolar_config_missing: 'cpolarConfigMissing', cpolar_config_invalid: 'cpolarConfigInvalid', cpolar_start_timeout: 'cpolarTimeout', cpolar_stopped: 'cpolarStopped', cpolar_exited: 'cpolarExited',
@@ -2976,6 +3151,8 @@ export const CONTROL_STYLES = `
 .dsh-mobile-control__trigger{box-sizing:border-box;flex:1 1 auto;display:flex;align-items:center;gap:8px;width:100%;height:42px;margin:4px 0;padding:0 10px 0 8px;border:0;border-radius:12px;background:transparent;color:var(--dsw-alias-label-primary,#16181d);font-family:inherit;font-size:14px;line-height:22px;cursor:pointer;overflow:hidden}.dsh-mobile-control__trigger:hover{background:var(--dsw-alias-interactive-bg-hover,#f1f3f6)}.dsh-mobile-control__trigger:active,.dsh-mobile-control__trigger[aria-expanded="true"]{background:var(--dsw-alias-interactive-bg-active,#e8ebf0)}.dsh-mobile-control__trigger:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary,currentColor);outline-offset:2px}.dsh-mobile-control__trigger.is-rail{flex:0 0 auto;width:36px;height:36px;margin:8px 0 10px;padding:0;justify-content:center;gap:0;border-radius:50%}.dsh-mobile-control__trigger-icon{display:block;flex:none}.dsh-mobile-control__trigger-label{min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
 .dsh-mobile-control__manage-row{display:flex;justify-content:space-between;gap:8px;margin-top:10px}.dsh-mobile-control__manage{flex:1 1 0;min-width:0;min-height:34px;padding:6px 8px;border:1px solid var(--dsw-alias-border-normal,#cfd5dd);border-radius:10px;background:transparent;color:inherit;font:12px/1.3 system-ui;cursor:pointer}.dsh-mobile-control__devices{margin-top:10px;border:1px solid var(--dsw-alias-border-subtle,#e1e5eb);border-radius:10px;padding:8px;max-height:220px;overflow-y:auto}.dsh-mobile-control__device-empty{color:var(--dsw-alias-label-secondary,#606873);font-size:12px;margin:0}.dsh-mobile-control__device{display:flex;align-items:center;gap:8px;padding:6px 2px}.dsh-mobile-control__device + .dsh-mobile-control__device{border-top:1px solid var(--dsw-alias-border-subtle,#e1e5eb)}.dsh-mobile-control__device-label{flex:1 1 0;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px}.dsh-mobile-control__device-meta{flex:none;color:var(--dsw-alias-label-secondary,#606873);font-size:11px;white-space:nowrap}.dsh-mobile-control__device-revoke{flex:none;min-height:28px;padding:4px 8px;border:1px solid #dc2626;border-radius:8px;background:transparent;color:#dc2626;font:12px/1.2 system-ui;cursor:pointer}.dsh-mobile-control__ws-paths{margin:10px 0 0;padding:12px;border:1px solid var(--dsw-alias-border-subtle,#dbe1e8);border-radius:13px;background:var(--dsw-alias-bg-layer-2,#fff)}.dsh-mobile-control__ws-paths-list{margin:0 0 8px;padding:0;list-style:none}.dsh-mobile-control__ws-paths-empty{color:var(--dsw-alias-label-secondary,#606873);font-size:12px}.dsh-mobile-control__ws-paths-item{display:flex;align-items:center;gap:8px;padding:6px 0}.dsh-mobile-control__ws-paths-item + .dsh-mobile-control__ws-paths-item{border-top:1px solid var(--dsw-alias-border-subtle,#e1e5eb)}.dsh-mobile-control__ws-paths-item code{flex:1 1 0;min-width:0;overflow:hidden;font:11px/1.4 ui-monospace,SFMono-Regular,Consolas,monospace;text-overflow:ellipsis;white-space:nowrap}.dsh-mobile-control__ws-paths-remove{flex:none;min-height:28px;padding:4px 8px;border:1px solid var(--dsw-alias-border-normal,#cfd5dd);border-radius:8px;background:transparent;color:inherit;font:12px/1.2 system-ui;cursor:pointer}.dsh-mobile-control__trigger,.dsh-mobile-control__diagnostic-entry{position:relative}.dsh-mobile-control__ws-dot{position:absolute;top:2px;right:2px;z-index:1;min-width:16px;height:16px;padding:0 4px;border-radius:999px;background:#dc2626;color:#fff;font:650 10px/16px system-ui;text-align:center;cursor:pointer}.dsh-mobile-control__ws-dot::after{content:'';position:absolute;inset:-5px}.dsh-mobile-control__ws-sr-status{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}.dsh-mobile-control__ws-paths-row{display:flex;gap:8px}.dsh-mobile-control__ws-paths-row .dsh-mobile-control__primary{width:auto;flex:none;padding:9px 14px;border-radius:10px}.dsh-mobile-control__ws-paths-group{padding:6px 0}.dsh-mobile-control__ws-paths-group + .dsh-mobile-control__ws-paths-group{border-top:1px solid var(--dsw-alias-border-subtle,#e1e5eb)}.dsh-mobile-control__ws-paths-group-head{display:flex;align-items:center;gap:8px}.dsh-mobile-control__ws-count{flex:none;padding:1px 7px;border-radius:999px;background:#e8f0ff;color:#1d4ed8;font:650 10px/1.6 system-ui}.dsh-mobile-control__ws-paths-item.is-child{padding-left:12px}.dsh-mobile-control__ws-paths-group-head .dsh-mobile-control__primary,.dsh-mobile-control__ws-paths-item .dsh-mobile-control__primary{width:auto;flex:none;min-height:34px;padding:6px 12px;border-radius:10px}.dsh-mobile-control__ws-paths-row input{flex:1 1 0;min-width:0;box-sizing:border-box;min-height:44px;padding:9px 10px;border:1px solid var(--dsw-alias-border-normal,#cfd5dd);border-radius:10px;background:var(--dsw-alias-bg-layer-2,#fff);color:var(--dsw-alias-label-primary,#16181d);font:16px/1.4 system-ui}.dsh-mobile-control__ws-paths-row button{flex:none}.dsh-mobile-control__ws-paths-detected-title{margin:0 0 2px;font:600 12px/1.4 system-ui}.dsh-mobile-control__ws-paths-advanced{margin-top:8px}.dsh-mobile-control__ws-paths-advanced summary{cursor:pointer;color:var(--dsw-alias-label-secondary,#606873);font:12px/1.4 system-ui;user-select:none}.dsh-mobile-control__ws-paths-advanced summary:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary,currentColor);outline-offset:2px;border-radius:4px}.dsh-mobile-control__ws-paths-advanced[open] summary{margin-bottom:6px}.dsh-mobile-control__ws-paths-advanced .dsh-mobile-control__status{margin:6px 0 0}
 @media (max-width:359px){.dsh-mobile-control__provider-choices{grid-template-columns:1fr}.dsh-mobile-control__provider{min-height:68px}}@media (prefers-reduced-motion:reduce){.dsh-mobile-control__provider,.dsh-mobile-control__cpolar-connect{transition:none}.dsh-mobile-control__diagnostic-summary.is-running .dsh-mobile-control__diagnostic-summary-icon::before,.dsh-mobile-control__diagnostic-checks{animation:none}}
+
+.dsh-mobile-control__origin-setup{margin:0;padding:12px;border:1px solid var(--dsw-alias-border-subtle,#dbe1e8);border-radius:13px;background:var(--dsw-alias-bg-layer-2,#fff)}.dsh-mobile-control__origin-setup[hidden],.dsh-mobile-control__origin-backend[hidden],.dsh-mobile-control__origin-feedback[hidden]{display:none}.dsh-mobile-control__origin-fields{display:grid;grid-template-columns:minmax(0,1fr) 110px;gap:12px}.dsh-mobile-control__origin-fields>.dsh-mobile-control__field{font-size:12px}.dsh-mobile-control__origin-fields>.dsh-mobile-control__field:nth-child(1),.dsh-mobile-control__origin-fields>.dsh-mobile-control__field:nth-child(4){grid-column:1/-1}.dsh-mobile-control__origin-fields>.dsh-mobile-control__field:nth-child(2){grid-column:1}.dsh-mobile-control__origin-fields>.dsh-mobile-control__field:nth-child(3){grid-column:2}.dsh-mobile-control__origin-warning{margin:12px 0;padding:10px 12px;border-left:3px solid var(--dsw-alias-warning-normal,#a56810);border-radius:4px;background:var(--dsw-alias-bg-layer-1,#f3f5f8);color:var(--dsw-alias-label-primary,#384152);font-size:12px;line-height:1.6}.dsh-mobile-control__origin-feedback{font-size:12px;line-height:1.6;overflow-wrap:anywhere}.dsh-mobile-control__origin-feedback.is-error{color:var(--dsw-alias-danger-normal,#bc3030)}.dsh-mobile-control__origin-fields input[aria-invalid=true]{border-color:var(--dsw-alias-danger-normal,#bc3030)}.dsh-mobile-control__origin-backend{display:flex;min-width:0;flex-direction:column;align-items:stretch;gap:8px;margin-top:12px;padding-top:12px;border-top:1px solid var(--dsw-alias-border-subtle,#dbe1e8)}.dsh-mobile-control__origin-backend button{align-self:flex-start;min-height:44px}.dsh-mobile-control__self-hosted-body .is-origin{margin-top:8px}
 `
 
 /** Mount the desktop control or mobile feature enhancements. */

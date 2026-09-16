@@ -1,0 +1,112 @@
+# 自有 HTTPS 反向代理 / Own HTTPS reverse proxy
+
+> **Unreleased**：本功能位于当前源码中，基于已发布的 0.4.1；包版本暂保持 `0.4.1`，不代表已发布的 0.4.1 安装包包含此功能。
+
+## 中文
+
+### 适用场景与安全边界
+
+你已有 Lucky、Nginx、Caddy 等 HTTPS 反向代理，不需要 Funnel、cpolar 或 FRP 隧道。进入电脑端 **移动访问 → 远程 → 自建连接 → 自有反向代理**，让插件提供一个独立的、带设备配对认证的私有 HTTP 后端：
+
+```text
+手机 → https://phone.example.com:8815（你的代理终止 TLS）
+     → http://192.168.50.10:3444（本插件的私有 HTTP 后端）
+     → 当前 DSH WebServer（仍由插件内部连接）
+```
+
+- **只有第一段允许暴露公网。HTTP 后端不能做公网端口映射。** HTTP 段仅适用于可信私网；局域网其他设备上的代理也会接触明文流量。
+- 后端不是裸 DSH：仍执行设备配对、认证、精确 Host/Origin 校验、CSRF、Secure Cookie 和 WebSocket 路径策略。没有配对的访问不能直接进入 DSH。
+- 不要把公网反代目标改成 DSH 的 8080（或其他 WebServer 端口），也不要反代现有 LAN HTTPS 3443。新后端默认 3444，明确拒绝占用 3443；DSH 与 LAN 的原有设置不变。
+- 公网 TLS、证书续期、DNS、路由和代理由你管理。插件不会安装隧道组件、部署 VPS、修改代理/防火墙/路由器，也不会为该提供方发起公网探测。
+
+### 填写四项设置
+
+以下均为通用示例，替换成自己的地址。
+
+| 字段 | 代理与 DSH 同机 | 代理在另一台 LAN 设备 |
+| --- | --- | --- |
+| 公网 HTTPS 地址 | `https://phone.example.com:8815` | `https://phone.example.com:8815` |
+| 私有监听 IPv4 | `127.0.0.1` | DSH 电脑的私网地址，如 `192.168.50.10` |
+| HTTP 后端端口 | `3444` | `3444` |
+| 允许的代理来源 CIDR | `127.0.0.0/8` | 代理的实际来源，如 `192.168.50.1/32` |
+
+公网地址只能是 HTTPS Origin，可带非 443 端口；不包含路径、账号密码、查询参数或 fragment。私有/保留 IP、本地域名和 IPv6 字面地址不适用于此提供方。
+
+监听地址必须是**本机已有的明确回环或 RFC1918 私有 IPv4**，不能填 `0.0.0.0`、主机名、公网 IP 或 IPv6。端口为 1–65535 的整数，3443 除外；请使用未被占用的端口。
+
+CIDR 限制针对 TCP 连接的**直接来源地址**，不是手机 IP，也不是 `X-Forwarded-For`、`X-Real-IP` 或 `Forwarded`。Docker、桥接或 NAT 可能改变这个地址，应填写后端实际看到的私网来源。优先用单地址 `/32`，不要为了排错放宽整个局域网。最多 16 项，用空格或逗号分隔；只允许回环/私网网段，网络地址不能带主机位。LAN 监听必须显式列出私网代理来源。
+
+点击 **保存并启动后端**。已经开启时会重新载入配置。面板会分别显示公网 HTTPS 地址与**正在监听的 HTTP 后端**；停止后仍可查看、复制已保存的后端地址。
+
+### 反向代理要求（含 Lucky）
+
+1. 在代理上为公网地址配置可信的 HTTPS 证书，并终止 TLS。不要让手机忽略证书错误。
+2. 代理目标使用面板给出的 **HTTP 后端地址**，而不是手机使用的 HTTPS 地址。
+3. **保留请求的外部 Host，包含非默认端口。** 上例后端必须收到 `Host: phone.example.com:8815`，不能改成 `192.168.50.10:3444`，也不能漏掉 `:8815`。
+4. 透传浏览器的 Origin、Cookie、Set-Cookie，以及认证/CSRF 相关头，不要改写 Cookie 的域或安全属性；不要缓存配对或认证响应。
+5. 透传 WebSocket 升级（HTTP/1.1、Upgrade、Connection）以及双向数据。已有的 WebSocket 路径白名单继续生效；第三方插件需要时仍在现有面板中单独允许其路径。
+
+根据 [Lucky 官方 Web 模块文档](https://lucky666.cn/docs/modules/web)，WebSocket 默认支持，不必寻找单独的开启开关。Host 自定义模式应使用 **“使用请求Host”**，不要选 **“使用目标地址Host”**，并核对非默认端口没有丢失。TLS/证书仍配置在 Lucky，不在这个 HTTP 后端上配置。
+
+若代理在另一台机器上，还需由管理员保证网络可达，并将主机防火墙入站范围限制到代理的实际私网来源；此功能不自动改防火墙。
+
+### 状态与手机验证
+
+**“后端已监听”只证明本地 HTTP 监听成功，不代表公网 HTTPS、证书或 WebSocket 已成功。** 本提供方的连接诊断也只报告本地状态，不自动向公网地址探测。
+
+在电脑端点击 **生成远程配对二维码**，再在 Android App **0.4.0 或更高版本**的 **远程访问** 流程扫码（不要使用 LAN 扫码流程）。现场验证中 0.3.16 会拒绝自有域名配对；现有自有域名逻辑保留 HTTPS 自定义端口，无需为此功能修改 APK。
+
+上线前，必须用手机从目标外网实际检查：
+
+- 公网地址的域名、端口和证书均正确；
+- 扫码配对并登录 DSH 成功；
+- 发起对话或其他实时操作，确认 WebSocket 持续工作；
+- 关闭此后端后远程入口失效，而原有 LAN 访问仍正常。
+
+本仓库的本地集成测试使用真实 HTTPS 代理、HTTP 后端和 WebSocket 回环链路；它不能替代你自己的 Lucky、服务器、外网和手机验收。
+
+### 停止、清除配置与重置设备
+
+| 操作 | 结果 |
+| --- | --- |
+| 关闭远程访问 | 停止此后端，保留配置与配对设备。 |
+| 清除代理配置（需确认） | 停止此后端，只删除它的代理设置；保留远程配对设备、LAN 和其他提供方配置。 |
+| 关闭并清除远程设备（需确认） | 现有通用重置操作；清除共享远程配对，所有远程设备需重新配对；保留代理设置与 LAN 设备。 |
+| 切换提供方 | 现有协调器先停止前一提供方；只允许一个远程提供方运行，不影响 LAN。 |
+
+默认数据根目录为 `$DSH_HOME/mobile-access/`（定制安装以实际路径为准）。新增设置是 `remote/origin/config/settings.json`，开启状态是 `remote/origin/control.json`；沿用 `remote/devices.json` 共享远程设备存储。正常退出后配置保留；再次启动 DSH 时，仅当前选中且已开启的提供方恢复监听。
+
+### 常见问题
+
+- **端口占用**：换一个空闲后端端口并同步修改代理目标；不要挪动现有 LAN 或 DSH 端口。
+- **监听地址不可用**：填写 DSH 本机当前私有 IPv4，不是代理机器的 IP。
+- **被拒绝 / 403**：核对直接来源 CIDR、完整外部 Host 和 HTTPS Origin；伪造转发头不会绕过这些检查。
+- **HTTP 页面可开但实时功能失败**：核对代理 WebSocket 转发、超时及路径白名单，不要通过关闭来源验证来排错。
+- **只有“后端已监听”**：这是预期语义；继续检查公网 DNS、端口映射到 HTTPS 代理、证书及手机实际访问。
+
+## English
+
+This **unreleased** provider appears under **Mobile Access → Remote → Self-hosted connection → Own reverse proxy**. It adds a separate authenticated private HTTP origin for an HTTPS reverse proxy you already own; it does not install a tunnel or manage your proxy, DNS, certificate, firewall, or router. The package version remains 0.4.1 in this worktree, not a claim that the published 0.4.1 package includes the feature.
+
+### Setup
+
+- Public origin: `https://phone.example.com:8815` (HTTPS only, optional custom port, no path/query/fragment/credentials).
+- Same computer: listen on `127.0.0.1:3444`, allow `127.0.0.0/8`.
+- Separate LAN proxy: listen on the DSH computer's private IPv4, e.g. `192.168.50.10:3444`, and allow the proxy's actual direct source, e.g. `192.168.50.1/32`.
+- Only explicit loopback/RFC1918 IPv4 binds are supported. Wildcard, public and IPv6 binds are rejected. Port 3443 stays reserved for the existing LAN gateway. Source CIDRs must be canonical private/loopback networks, at most 16; prefer a single-host /32. Forwarded headers do not determine source authorization.
+
+Select **Save and start backend**, then point the proxy at the displayed HTTP backend. **Never expose/port-forward that HTTP listener publicly**, and never bypass it by proxying to DSH 8080 (or its configured WebServer port) or the LAN 3443 gateway. HTTP between separate devices is suitable only for a trusted private network. Pairing, authentication, exact Host/Origin enforcement, CSRF, Secure cookies and WebSocket path policy remain active.
+
+### Proxy contract
+
+Terminate public TLS with a trusted certificate on your proxy. Preserve the external **Host including the port** (`phone.example.com:8815`), Origin, cookies and authentication/CSRF headers; do not rewrite cookie security attributes or cache authentication responses. Forward WebSocket upgrades and bidirectional traffic.
+
+[Lucky's Web module](https://lucky666.cn/docs/modules/web) supports WebSocket by default. Use **“使用请求Host” (request Host)** rather than **“使用目标地址Host” (target-address Host)**, and verify the external custom port survives. Certificates remain Lucky's responsibility. If the proxy is on another machine, configure routing and a source-restricted private firewall rule yourself; the plugin does not change either.
+
+### Readiness, pairing and persistence
+
+**Backend listening is not public readiness.** The provider and diagnostics make no public probe: check your domain, certificate, public port, pairing and WebSocket from the phone's intended external network. Use the existing Android **Remote access** QR flow on app **0.4.0 or later** for user-owned domains and custom HTTPS ports. App 0.3.16 rejects these pairings; no APK change is required for this provider. Local real-socket HTTPS/HTTP/WebSocket tests are not a substitute for testing your own proxy and phone.
+
+Stopping retains settings and paired devices. **Clear proxy settings** stops only this listener and deletes only its configuration, after confirmation. The separate existing **reset remote devices** action removes shared remote pairings, but keeps proxy settings and LAN devices. Switching providers stops the previous remote provider without affecting LAN.
+
+Under the default `$DSH_HOME/mobile-access/` root, settings live at `remote/origin/config/settings.json`, enabled state at `remote/origin/control.json`, and pairings continue to use `remote/devices.json`. Only the selected, enabled provider resumes on DSH restart. All addresses shown here are examples; supply your own configuration.
