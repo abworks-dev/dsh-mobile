@@ -950,25 +950,38 @@ export class MobileAccessGateway {
         || !addressAllowed(remote.address, this.config.allowedCidrs)) return
       socket.send(announcement, remote.port, remote.address, () => undefined)
     })
-    await new Promise<void>((resolve, reject) => {
-      const failed = (error: Error): void => { reject(error) }
-      socket.once('error', failed)
-      // The UDP socket is IPv4-only; only a literal IPv4 loopback address is bindable, never ::1.
-      const bindHost = isIP(this.config.listenHost) === 4 && isLoopbackAddress(this.config.listenHost) ? this.config.listenHost : '0.0.0.0'
+    // The UDP socket is IPv4-only; only a literal IPv4 loopback address is bindable, never ::1.
+    const bindHost = isIP(this.config.listenHost) === 4 && isLoopbackAddress(this.config.listenHost) ? this.config.listenHost : '0.0.0.0'
+    // Windows keeps separate TCP and UDP port-exclusion tables, so the port the OS handed
+    // the TCP listener can be unavailable for UDP; another process may also already hold
+    // it. Broadcast discovery is a convenience, so a failed bind must not take the whole
+    // gateway down — the mDNS publication below still advertises this origin.
+    const bound = await new Promise<boolean>(resolve => {
+      const onBindError = (): void => {
+        socket.off('error', onBindError)
+        resolve(false)
+      }
+      socket.once('error', onBindError)
       socket.bind(port, bindHost, () => {
-        socket.off('error', failed)
+        socket.off('error', onBindError)
         socket.setBroadcast(true)
-        resolve()
+        resolve(true)
       })
     })
-    const announce = (): void => {
-      for (const target of discoveryBroadcastTargets(this.config.allowedCidrs)) {
-        socket.send(announcement, port, target, () => undefined)
+    if (bound) {
+      const announce = (): void => {
+        for (const target of discoveryBroadcastTargets(this.config.allowedCidrs)) {
+          socket.send(announcement, port, target, () => undefined)
+        }
       }
+      announce()
+      this.discoveryTimer = setInterval(announce, DISCOVERY_INTERVAL_MS)
+      this.discoveryTimer.unref()
+    } else {
+      this.discoverySocket = undefined
+      // A socket whose bind failed was never running, so close() throws synchronously.
+      try { socket.close() } catch { /* the socket never started */ }
     }
-    announce()
-    this.discoveryTimer = setInterval(announce, DISCOVERY_INTERVAL_MS)
-    this.discoveryTimer.unref()
 
     const deviceName = discoveryDeviceName()
     const bonjour = new Bonjour({ disableIPv6: true })

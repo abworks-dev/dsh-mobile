@@ -9,6 +9,7 @@ Notable changes to DSH Mobile are recorded here. GitHub Releases remain the sour
 - Distinguish backend listening from unverified public HTTPS/certificate/WebSocket reachability, with localized setup, errors and diagnostics; retain the existing LAN gateway, remote pairing and Android protocol.
 - Cover the HTTPS proxy → private HTTP origin → DSH path with real loopback pairing, authenticated HTTP and WebSocket tests, including Host/Origin/forwarded-header rejection and LAN independence.
 - Permanently remove revoked devices from durable storage and the desktop list, terminate their active Sessions, and compact legacy `revokedAt` rows on startup. Deleted credentials are rejected as `authentication_failed`; no revocation tombstones are retained.
+- Keep the mobile gateway usable when its broadcast discovery socket cannot bind the UDP port: Windows keeps separate TCP and UDP port-exclusion tables, so the port the operating system handed the TCP listener can be refused for UDP, and another process may already hold it. Discovery now degrades on its own while mDNS, HTTP and WebSocket service continue, instead of failing the whole listener.
 
 ## 0.4.1 - 2026-09-15
 

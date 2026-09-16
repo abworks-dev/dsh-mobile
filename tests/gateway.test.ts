@@ -45,6 +45,8 @@ type BatchedBundleResponder = (
 
 const cleanups: Array<() => Promise<void>> = []
 const TEST_FAILED_START_PORT = 38081
+/** Held by a UDP occupant so the gateway's broadcast discovery socket cannot bind it. */
+const TEST_DISCOVERY_BUSY_PORT = 38099
 const SESSION_HISTORY_PATH = '/api/session.history'
 const COMPRESSIBLE_SCRIPT = 'globalThis.__compressionProbe = true;\n'.repeat(256)
 const UPSTREAM_LAUNCH_TOKEN = 'test-launch-token'
@@ -1069,6 +1071,27 @@ describe('HTTP gateway', () => {
     })
     expect(revokedProbe.status).toBe(401)
     expect(JSON.parse(revokedProbe.body)).toEqual({ error: 'authentication_failed' })
+  })
+
+  it('starts and serves when the discovery port cannot be bound for UDP', async () => {
+    // Windows keeps separate TCP and UDP port-exclusion tables, so the port the OS handed
+    // the TCP listener can be unavailable for the discovery socket, and another process may
+    // already hold it. Broadcast discovery is a convenience: degrading must not fail start.
+    const occupant = createSocket('udp4')
+    await new Promise<void>((resolve, reject) => {
+      occupant.once('error', reject)
+      occupant.bind(TEST_DISCOVERY_BUSY_PORT, '127.0.0.1', () => resolve())
+    })
+    cleanups.push(async () => { occupant.close() })
+
+    const inner = await upstream()
+    const instance = await gateway(inner.port, { listenPort: TEST_DISCOVERY_BUSY_PORT })
+    expect(instance.address().port).toBe(TEST_DISCOVERY_BUSY_PORT)
+    const discovered = await request(instance.address().port, '/mobile-access/discovery', {
+      headers: { host: new URL(instance.address().origin).host },
+    })
+    expect(discovered.status).toBe(200)
+    expect(JSON.parse(discovered.body)).toMatchObject({ port: TEST_DISCOVERY_BUSY_PORT, protocol: 1 })
   })
 
   it('keeps discovery metadata-only and offers the CA on a separate endpoint', async () => {
