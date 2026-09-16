@@ -10,7 +10,11 @@ class RemoteHostPolicyTest {
     fun recognizesSupportedRemoteProvidersCaseInsensitively() {
         assertTrue(RemoteHostPolicy.isSupported("computer.tail1234.ts.net"))
         assertTrue(RemoteHostPolicy.isSupported("EXAMPLE.CPOLAR.CN"))
+        assertTrue(RemoteHostPolicy.isSupported("random-words-1234.trycloudflare.com"))
+        assertTrue(RemoteHostPolicy.isSupported("RANDOM-WORDS-1234.TRYCLOUDFLARE.COM"))
         assertFalse(RemoteHostPolicy.isSupported("192.168.1.20"))
+        assertFalse(RemoteHostPolicy.isSupported("tunnel.example.com"))
+        assertFalse(RemoteHostPolicy.isSupported("trycloudflare.com.evil.test"))
         assertTrue(RemoteHostPolicy.isRemoteCandidate("dsh.example.com"))
         assertTrue(RemoteHostPolicy.isRemoteCandidate("1.2.3.4"))
         assertFalse(RemoteHostPolicy.isRemoteCandidate("192.168.1.20"))

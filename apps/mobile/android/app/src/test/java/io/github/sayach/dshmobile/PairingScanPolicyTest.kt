@@ -26,6 +26,16 @@ class PairingScanPolicyTest {
     }
 
     @Test
+    fun selectsRemoteForCloudflaredQuickTunnelLinks() {
+        // A quick tunnel is a supported provider host, so scanning its link selects remote on its
+        // own; a merely user-owned host would be rejected while no flow has been chosen yet.
+        val target = PairingScanPolicy.parse(pairingLink("random-words-1234.trycloudflare.com"))
+
+        assertEquals(AccessMode.REMOTE, target?.mode)
+        assertEquals("https://random-words-1234.trycloudflare.com", target?.connection?.origin?.serialized)
+    }
+
+    @Test
     fun acceptsAUserOwnedDomainOnlyFromTheRemoteFlow() {
         val remote = PairingScanPolicy.parse(pairingLink("dsh.example.com"), AccessMode.REMOTE)
         val lan = PairingScanPolicy.parse(pairingLink("dsh.example.com"), AccessMode.LAN)

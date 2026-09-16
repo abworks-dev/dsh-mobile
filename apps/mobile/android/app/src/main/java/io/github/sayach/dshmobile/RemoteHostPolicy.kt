@@ -10,9 +10,16 @@ internal object RemoteHostPolicy {
         ".cpolar.top",
         ".cpolar.com",
     )
+    /**
+     * A cloudflared quick tunnel publishes a random host under trycloudflare.com. Named tunnels
+     * use a hostname the operator owns, so those keep flowing through the user-owned path.
+     */
+    private val cloudflaredSuffixes = listOf(
+        ".trycloudflare.com",
+    )
     private val supportedSuffixes = listOf(
         ".ts.net",
-    ) + cpolarSuffixes
+    ) + cpolarSuffixes + cloudflaredSuffixes
 
     /** Returns whether the host belongs to a supported remote tunnel provider. */
     fun isSupported(host: String): Boolean {
