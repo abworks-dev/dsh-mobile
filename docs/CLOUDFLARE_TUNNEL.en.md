@@ -39,7 +39,7 @@ Cloudflare terminates DNS and TLS for the public hostname. The plugin only runs 
    - **Connector token**: the token you copied
 4. Choose **Save and connect**.
 
-Once saved, leaving the token field blank keeps the stored token, and the field never echoes a saved token back. **Remove the saved token** also **stops the cloudflared channel** and returns the provider to a quick tunnel, so the channel has to be switched on again before it reconnects.
+Once saved, leaving the token field blank keeps the stored token, and the field never echoes a saved token back. **Remove the saved token** also **stops the cloudflared channel** and returns the provider to a quick tunnel. Nothing reconnects on its own: switch the channel back on afterwards.
 
 ## Connect the phone to a named tunnel
 
@@ -48,7 +48,7 @@ Moving to a fixed hostname means **an already paired phone must pair again**: a 
 1. On the computer, open **Remote** in the panel and choose **Create remote pairing QR code**. That is what opens the pairing window, which is time-limited; while it is closed nothing can pair.
 2. In the app, **open the Remote entry first** (the remote access setup page in the connection center), then scan the code.
 
-> **A named tunnel must be scanned from inside the Remote flow.** The app only recognises platform tunnel suffixes such as `.ts.net`, cpolar and `.trycloudflare.com` as remote on their own. A named tunnel uses a domain you own, which the app cannot classify by itself, so it accepts that host only while the remote flow is active. Scanning from the Local network screen reports **Invalid QR code**, which looks exactly like "cannot connect".
+> **A named tunnel must be scanned from inside the Remote flow.** The app treats platform suffixes such as `.ts.net`, cpolar and `.trycloudflare.com` as remote without asking. A domain you own is recognised as a remote candidate too, but the Local network flow accepts only non-candidate addresses, so scanning there is rejected as **Invalid QR code** and looks exactly like "cannot connect". Enter the Remote flow first, then scan.
 >
 > Scanning is optional: the full link (`https://your-domain/mobile-access/pair#instance=…&token=…`) can be copied to the phone and pasted, because the app accepts a complete link in its input field.
 
@@ -78,7 +78,15 @@ The old remote entry in the device list will show **Address may have changed** o
 | Component download failed verification | `cloudflared_download_hash_mismatch` / `cloudflared_download_size_mismatch` | The downloaded binary does not match the pinned size or SHA-256. Install again; repeated failures mean something is rewriting the transfer. |
 | Installed component failed verification | `cloudflared_executable_hash_mismatch` | The local cloudflared no longer matches the verified build. Remove it completely and install again. |
 | This build cannot run the component | `cloudflared_component_unsupported` | The platform is outside the supported set (currently Windows x64 only). |
-| Timed out waiting for a public address | `cloudflared_start_timeout` | The connector did not print `Registered tunnel connection` within 60 seconds, usually because it cannot reach a Cloudflare edge. |
+| Timed out waiting for the tunnel | `cloudflared_start_timeout` | The connector did not print `Registered tunnel connection` within 60 seconds, usually because it cannot reach a Cloudflare edge. |
+| Component not installed | `cloudflared_component_missing` | The official component is absent. Complete the preparation steps above. |
+| Component verification failed | `cloudflared_component_invalid` | The local component does not match the verified build. Remove it completely and install again. |
+| Could not allocate a port | `cloudflared_port_unavailable` | Quick mode could not allocate the loopback gateway port. Retry. |
+| Client failed to launch | `cloudflared_launch_failed` | The cloudflared process did not start. Check the local logs. |
+| Connection stopped or exited | `cloudflared_stopped` / `cloudflared_exited` | The channel dropped. Reconnect. |
+| Unrecognized output | `cloudflared_invalid_output` / `cloudflared_invalid_origin` | cloudflared output, or the public address it printed, failed validation. Reconnect and copy the diagnostic report. |
+| Gateway start failed | `gateway_start_failed` | The authentication gateway behind the tunnel did not start; this is not a port conflict. Check the local logs. |
+| Download redirect problem | `cloudflared_download_redirect_missing` / `_invalid` / `_rejected` | The official download page did not redirect to a release asset, or the redirect did not point at a GitHub release asset. Retry later, or install from the official page manually. |
 
 ## Troubleshooting
 

@@ -39,7 +39,7 @@
    - **连接器令牌**：粘贴上一步复制的令牌
 4. 点击 **保存并连接**。
 
-已保存后令牌输入框留空表示不更改；输入框里不会再回显已保存的令牌。「移除已保存的令牌」会**同时停止 cloudflared 通道**并把配置改回快速隧道 —— 之后需要重新打开开关才会再连接。
+已保存后令牌输入框留空表示不更改；输入框里不会再回显已保存的令牌。「移除已保存的令牌」会**同时停止 cloudflared 通道**并把配置改回快速隧道。不会自动重连，之后需要手动重新打开开关。
 
 ## 用手机连上命名隧道
 
@@ -48,7 +48,7 @@
 1. 电脑面板 → **远程** → 点 **生成远程配对二维码**。这一步才会打开配对窗口，窗口有时限；没打开时任何设备都进不来。
 2. 手机 App → **先进入「远程」入口**（连接中心的远程访问设置页）→ 再扫描二维码。
 
-> **命名隧道必须在「远程」入口里扫码。** App 只会把 `.ts.net`、cpolar、`.trycloudflare.com` 这类平台隧道后缀自动判定为远程；命名隧道用的是你自己的域名，App 无法据此推断意图，只有在远程流程下才接受它。如果在「局域网」界面扫码，会直接提示**无效二维码 / Invalid QR code**，看起来就像「连不上」。
+> **命名隧道必须在「远程」入口里扫码。** App 只把 `.ts.net`、cpolar、`.trycloudflare.com` 这类平台后缀当作「无需询问即为远程」；你自己的域名同样会被识别为可远程的候选地址，但「局域网」流程只接受非候选地址，所以在局域网界面扫码会被判为无效并提示**无效二维码 / Invalid QR code**，看起来就像「连不上」。先进入「远程」流程再扫即可。
 >
 > 不想扫码时，完整链接（`https://你的域名/mobile-access/pair#instance=…&token=…`）可以整条复制到手机上粘贴，App 的输入框接受完整链接。
 
@@ -78,7 +78,15 @@
 | 组件下载校验失败 | `cloudflared_download_hash_mismatch` / `cloudflared_download_size_mismatch` | 下载到的二进制与固定版本的大小或 SHA-256 不符。重新安装；若反复失败说明中间链路在改包。 |
 | 已安装组件校验失败 | `cloudflared_executable_hash_mismatch` | 本机那份 cloudflared 与校验过的版本不一致。彻底移除后重新安装。 |
 | 当前构建不支持该组件 | `cloudflared_component_unsupported` | 当前平台不在支持范围内（目前仅 Windows x64）。 |
-| 等待公网地址超时 | `cloudflared_start_timeout` | connector 在 60 秒内没有打印 `Registered tunnel connection`。常见原因是网络到 Cloudflare 边缘不通。 |
+| 等待隧道可用超时 | `cloudflared_start_timeout` | connector 在 60 秒内没有打印 `Registered tunnel connection`。常见原因是网络到 Cloudflare 边缘不通。 |
+| 组件未安装 | `cloudflared_component_missing` | 还没安装官方组件。按上面的准备步骤安装。 |
+| 组件校验失败 | `cloudflared_component_invalid` | 本机组件与校验过的版本不符。彻底移除后重新安装。 |
+| 无法分配端口 | `cloudflared_port_unavailable` | 快速隧道模式下无法分配本机网关端口。重试。 |
+| 客户端启动失败 | `cloudflared_launch_failed` | cloudflared 进程没能启动。检查本地日志。 |
+| 连接已停止 / 意外退出 | `cloudflared_stopped` / `cloudflared_exited` | 通道已断开，点重新连接。 |
+| 返回内容无法识别 | `cloudflared_invalid_output` / `cloudflared_invalid_origin` | cloudflared 输出或公网地址未通过校验。重新连接并复制诊断报告。 |
+| 网关启动失败 | `gateway_start_failed` | 隧道背后的认证网关没能启动（不是端口冲突）。检查本地日志。 |
+| 下载跳转异常 | `cloudflared_download_redirect_missing` / `_invalid` / `_rejected` | 官方下载页没有跳到发布资源，或跳转目标不是 GitHub 发布资源。稍后重试，或按官方页面手动安装。 |
 
 ## 排错
 

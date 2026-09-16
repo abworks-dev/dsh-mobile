@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs'
+import postcss from 'postcss'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   apply,
@@ -277,6 +278,28 @@ describe('mobile-control localization', () => {
         expect(catalog[key]?.length).toBeGreaterThan(0)
       }
     }
+  })
+
+  it('parses as CSS and maps every provider failure code to copy that exists', () => {
+    // A stray brace once sat between a rule and its own declarations: the browser
+    // dropped `font` and `cursor` from every destructive button and the string-based
+    // guards above could not see it. Only a parser catches that class of defect.
+    expect(() => postcss.parse(CONTROL_STYLES)).not.toThrow()
+    // Every code the panel can translate must exist in every locale, otherwise a failed
+    // request falls back to printing the raw server code in all three languages.
+    const source = readFileSync(new URL('../src/client.ts', import.meta.url), 'utf8')
+    const table = /const REMOTE_ERROR_MESSAGE_KEYS[^{]*\{([\s\S]*?)\n  \}/u.exec(source)?.[1] ?? ''
+    const keys = [...table.matchAll(/:\s*'([A-Za-z0-9]+)'/gu)].map((match) => match[1] ?? '')
+    expect(keys.length).toBeGreaterThan(40)
+    for (const [locale, catalog] of Object.entries(MOBILE_CONTROL_MESSAGES)) {
+      for (const key of keys) {
+        expect((catalog as Record<string, string>)[key], `${locale}.${key}`).toBeTruthy()
+      }
+    }
+    // The panel must route provider failures through that table rather than stringifying
+    // the error, which is what leaked `Error: cloudflared_...` to users.
+    expect(source).toContain('remoteFailureTextFor(error, \'installFailed\')')
+    expect(source).toContain('remoteFailureTextFor(error, \'requestFailed\')')
   })
 
   it('localizes own-proxy setup without equating a listening backend with public readiness', () => {
