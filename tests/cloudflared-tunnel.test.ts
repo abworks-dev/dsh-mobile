@@ -55,18 +55,25 @@ describe('cloudflared tunnel configuration', () => {
       'abc123.cfargotunnel.com', '-dsh.sayalove.me', 'dsh-.sayalove.me',
       'dsh..sayalove.me', `dsh.${'a'.repeat(64)}.me`, `dsh.${'a'.repeat(250)}.me`,
       'dsh.sayalove.me/path', 'user@dsh.sayalove.me',
+      // The bare apexes are Cloudflare's own and can never be routed to a customer
+      // tunnel, so a suffix-only test would let them through.
+      'trycloudflare.com', 'cfargotunnel.com',
     ]) {
       expect(() => validateCloudflaredTunnelHostname(host), host).toThrow('cloudflared_tunnel_hostname_invalid')
     }
   })
 
-  it('keeps the forward port out of the privileged range', () => {
+  it('keeps the forward port out of the privileged range and off the LAN gateway', () => {
     expect(validateCloudflaredTunnelPort(3444)).toBe(3444)
     expect(validateCloudflaredTunnelPort(1024)).toBe(1024)
     expect(validateCloudflaredTunnelPort(65_535)).toBe(65_535)
     for (const port of [1023, 443, 80, 0, -1, 65_536, 3444.5, Number.NaN, '3444']) {
       expect(() => validateCloudflaredTunnelPort(port), String(port)).toThrow('cloudflared_tunnel_port_invalid')
     }
+    // 3443 belongs to the LAN gateway for as long as DSH runs, so it is not a
+    // transient conflict: it must be named as reserved, not reported busy.
+    expect(() => validateCloudflaredTunnelPort(3443)).toThrow('cloudflared_tunnel_port_reserved')
+    expect(() => parseCloudflaredTunnelSettings({ ...named, port: 3443 })).toThrow('cloudflared_tunnel_port_reserved')
   })
 
   it('accepts only a credential-shaped connector token', () => {
@@ -85,6 +92,14 @@ describe('cloudflared tunnel configuration', () => {
     expect(mergeSavedCloudflaredTunnelSettings({ token: 'x'.repeat(32), hostname: 'dsh.sayalove.me', port: 3444 }, saved))
       .toMatchObject({ token: 'x'.repeat(32) })
     expect(mergeSavedCloudflaredTunnelSettings({ mode: 'quick' }, saved)).toEqual({ version: 1, mode: 'quick' })
+    // The named branch hardcodes its mode, so an unrecognized value must be refused
+    // here rather than silently rewritten into a named tunnel. `null` is not in the
+    // list: like the other fields, it means "not supplied" and keeps the saved mode.
+    for (const bogus of ['bogus', 'named ', 'NAMED', '', 1, true]) {
+      expect(() => mergeSavedCloudflaredTunnelSettings({ mode: bogus, hostname: 'x.example.com' }, saved), String(bogus))
+        .toThrow('cloudflared_tunnel_settings_invalid')
+    }
+    expect(mergeSavedCloudflaredTunnelSettings({ mode: null }, saved)).toEqual(named)
     // Nothing saved and nothing supplied must report a missing configuration
     // rather than a half-built named tunnel.
     expect(() => mergeSavedCloudflaredTunnelSettings({ mode: 'named' }, undefined)).toThrow('cloudflared_tunnel_config_missing')

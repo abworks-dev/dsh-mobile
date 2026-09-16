@@ -230,29 +230,44 @@ describe('mobile-control localization', () => {
     expect(parseMobileRemoteProvider(42)).toBe('tailscale')
   })
 
-  it('localizes cloudflared quick-tunnel setup and states its temporary-address limits', () => {
+  it('localizes both cloudflared tunnel modes without implying either is the only one', () => {
     // Keys appended with Object.assign are not part of the inferred catalog type,
     // so read them through the same cast the existing origin assertions use.
     const en = MOBILE_CONTROL_MESSAGES.en as Record<string, string>
     const it = MOBILE_CONTROL_MESSAGES.it as Record<string, string>
     const zh = MOBILE_CONTROL_MESSAGES.zh as Record<string, string>
-    expect(en.cloudflaredBadge).toBe('No account')
+    // The provider now runs a quick tunnel *or* a named tunnel, so the badge and
+    // description must not claim an account is never needed.
+    expect(en.cloudflaredBadge).toBe('Account optional')
+    expect(zh.cloudflaredBadge).toBe('账号可选')
+    expect(it.cloudflaredBadge).toBe('Account facoltativo')
     expect(en.prepareCloudflared).toBe('Prepare cloudflared')
-    expect(zh.cloudflaredBadge).toBe('无需账号')
-    expect(it.cloudflaredBadge).toBe('Nessun account')
+    for (const [catalog, label] of [[en, 'en'], [it, 'it'], [zh, 'zh']] as const) {
+      expect(catalog.cloudflaredDescription, label).toMatch(/quick|快速|rapido/iu)
+      expect(catalog.cloudflaredDescription, label).toMatch(/named|命名|con nome/iu)
+    }
     // A quick tunnel is temporary, rate-limited, and carries no uptime promise;
     // the UI must say so rather than implying a production-grade channel.
     expect(en.cloudflaredQuickNote).toContain('rate-limited')
     expect(en.cloudflaredQuickNote).toContain('no uptime guarantee')
     expect(zh.cloudflaredQuickNote).toContain('无可用性保证')
-    expect(it.cloudflaredQuickNote).toContain('nessuna garanzia')
-    expect(en.cloudflaredReady).toContain('temporary')
-    expect(zh.cloudflaredReady).toContain('临时')
+    expect(it.cloudflaredQuickNote).toContain('senza garanzia')
+    // The named-tunnel note must state the token's real handling, because that is
+    // the part a user cannot verify from the UI.
+    expect(en.cloudflaredNamedNote).toContain('environment')
+    expect(zh.cloudflaredNamedNote).toContain('环境变量')
+    expect(it.cloudflaredNamedNote).toContain('ambiente')
+    // The component-readiness line no longer describes only a quick tunnel: the
+    // mode-specific note carries that, and a stale claim here would contradict it.
+    for (const [catalog, label] of [[en, 'en'], [it, 'it'], [zh, 'zh']] as const) {
+      expect(catalog.cloudflaredReady, label).not.toMatch(/temporary|临时|temporaneo/iu)
+      expect(catalog.remoteStartingCloudflared, label).not.toMatch(/temporary|临时|temporaneo/iu)
+    }
     for (const catalog of [en, it, zh]) {
-      // The badge states the real difference (no account), not a regional claim.
+      // The badge states the real difference (account optional), not a regional claim.
       expect(catalog.cloudflaredBadge).not.toMatch(/mainland|国内/u)
       for (const key of [
-        'cloudflaredDescription', 'cloudflaredQuickNote', 'cloudflaredComponentNote',
+        'cloudflaredDescription', 'cloudflaredQuickNote', 'cloudflaredNamedNote', 'cloudflaredComponentNote',
         'installConfirmCloudflared', 'purgeCloudflared', 'purgeCloudflaredConfirm',
         'resetCloudflaredConfirm', 'reconnectingCloudflared',
         'cloudflaredMissing', 'cloudflaredInvalid', 'cloudflaredPortUnavailable',

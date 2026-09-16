@@ -39,7 +39,7 @@
    - **连接器令牌**：粘贴上一步复制的令牌
 4. 点击 **保存并连接**。
 
-已保存后令牌输入框留空表示不更改；输入框里不会再回显已保存的令牌。「移除已保存的令牌」会把配置改回快速隧道。
+已保存后令牌输入框留空表示不更改；输入框里不会再回显已保存的令牌。「移除已保存的令牌」会**同时停止 cloudflared 通道**并把配置改回快速隧道 —— 之后需要重新打开开关才会再连接。
 
 ## 用手机连上命名隧道
 
@@ -68,10 +68,16 @@
 | 本机转发端口不可用 | `cloudflared_tunnel_port_unavailable` | 配置的端口已被占用。命名隧道不能改用其他端口（Cloudflare 固定转发到该端口），请释放端口或换一个端口并同步修改 Cloudflare 的 Service。 |
 | 公网域名无效 | `cloudflared_tunnel_hostname_invalid` | 必须是本账号下域名的真实主机名；不接受 IP、通配符、`.trycloudflare.com` 与 `.cfargotunnel.com`。 |
 | 转发端口无效 | `cloudflared_tunnel_port_invalid` | 端口需在 1024–65535 之间。 |
+| 转发端口被保留 | `cloudflared_tunnel_port_reserved` | 不能填 **3443**：那是 DSH Mobile 局域网网关的 HTTPS 端口，只要 DSH 在运行就一直被占用，不是"临时被别的程序占了"。请换 3444 或 3445。 |
 | 令牌无效 | `cloudflared_tunnel_token_invalid` | 令牌需从控制台完整复制，不能有空格或换行。 |
 | 设置未通过校验 | `cloudflared_tunnel_settings_invalid` | 请求里带了不该有的字段（例如快速隧道模式下携带端口）。 |
 | 需要同时填写令牌、域名和端口 | `cloudflared_tunnel_config_missing` | 首次配置命名隧道时三项都必填。 |
 | 已保存配置无法读取 | `cloudflared_tunnel_config_invalid` | 配置文件损坏或不符合格式；插件会退回快速隧道，重新保存即可。 |
+| 已保存配置不是普通文件 | `cloudflared_tunnel_target_invalid` | `tunnel.json` 变成了符号链接或非常规文件。移除它并重新保存设置。 |
+| 无法预留本机端口 | `cloudflared_port_reservation_failed` | 本机端口预留本身失败（不是端口被占）。重试；若持续出现请检查系统资源。 |
+| 组件下载校验失败 | `cloudflared_download_hash_mismatch` / `cloudflared_download_size_mismatch` | 下载到的二进制与固定版本的大小或 SHA-256 不符。重新安装；若反复失败说明中间链路在改包。 |
+| 已安装组件校验失败 | `cloudflared_executable_hash_mismatch` | 本机那份 cloudflared 与校验过的版本不一致。彻底移除后重新安装。 |
+| 当前构建不支持该组件 | `cloudflared_component_unsupported` | 当前平台不在支持范围内（目前仅 Windows x64）。 |
 | 等待公网地址超时 | `cloudflared_start_timeout` | connector 在 60 秒内没有打印 `Registered tunnel connection`。常见原因是网络到 Cloudflare 边缘不通。 |
 
 ## 排错
@@ -79,5 +85,21 @@
 - **连接一直停在「正在连接」**：命名隧道没有横幅，只有 connector 真正注册后才算就绪。查看 DSH 日志里 cloudflared 的输出；预检表（`CONNECTIVITY PRE-CHECKS`）会指出是 DNS、UDP/QUIC 还是 TCP 不通。
 - **公网访问返回 1033**：Cloudflare 认为该主机名没有健康的 connector。确认隧道在 Zero Trust 里显示 Healthy，且 ingress 指向的端口与面板一致。
 - **`cloudflared` 报 `Unauthorized` 或隧道 ID 不存在**：令牌与控制台里的隧道不匹配（例如隧道被删除后重建）。重新复制令牌。
-- **本机开着 TUN/透明代理（如 Clash、Mihomo）时连接不稳**：`cloudflared` 走 QUIC/UDP，fake-IP 和透明代理容易让长连接被重置。建议对 `*.argotunnel.com`、`*.trycloudflare.com`、`api.cloudflare.com` 走直连。
+- **本机开着 TUN/透明代理（Clash、Mihomo、Clash Verge 等）：手机端会卡在「正在加载插件」并反复重试。** 这是实测到过的一类真实故障，症状很容易被误判成配对或插件问题：
+  - `cloudflared` 到 `region*.v2.argotunnel.com` 的连接没有任何专属规则，于是落到兜底的 `Match`/`MATCH` 规则，被送进代理节点。用内核 API 看得很清楚：
+    ```
+    cloudflared.exe -> region2.v2.argotunnel.com
+      rule=Match   chains=["<某个机场节点>","漏网之鱼"]   up/down = 103 MB / 2.1 MB
+    ```
+  - 结果下行被压到 **8–100 KB/s**。而手机端 DSH 启动要一次拉 **4.5 MB**（压缩后）的 boot bundle，加载器等不到就报 `bundle script failed to load`，App 表现为「加载 → 失败 → 重试」。
+  - 同一份文件在局域网网关上是 **0.2 秒**，加上直连规则后走隧道是 **9.9 秒 / 454 KB/s** —— 差了两个数量级。
+  - 修法：让 cloudflared 与其边缘域名走直连。Clash Verge 的**全局扩展配置**（`profiles/Merge.yaml`，订阅更新不会覆盖）：
+    ```yaml
+    prepend-rules:
+      - PROCESS-NAME,cloudflared.exe,DIRECT
+      - DOMAIN-SUFFIX,argotunnel.com,DIRECT
+      - DOMAIN-SUFFIX,trycloudflare.com,DIRECT
+    ```
+    改完要让 cloudflared **重连**才会换路由：内核热重载不会迁移已建立的长连接（面板里点重连，或开关一次提供方）。
+  - 判断方法：如果手机端一直卡在加载插件，先在**本机**用同一份会话拉一次 boot bundle 看速率。若本机也很慢，就不是手机或配对的问题。
 - **域名解析还是旧地址**：改完 NS 后 Cloudflare 需要把 zone 从 Pending 变为 Active；A/CNAME 在 zone 激活前不会对外生效。

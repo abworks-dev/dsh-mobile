@@ -2,7 +2,7 @@
 
 [中文指南](SELF_HOSTED_ORIGIN.md)
 
-> **Unreleased**: this provider lives in the current source on top of the published 0.4.1. The package version stays `0.4.1`, which is not a claim that the published 0.4.1 package includes it.
+> This provider ships with the package from **0.4.2** on.
 
 This provider appears under **Mobile Access → Remote → Self-hosted connection → Own reverse proxy**. It adds a separate authenticated private HTTP origin for an HTTPS reverse proxy you already own; it does not install a tunnel or manage your proxy, DNS, certificate, firewall, or router.
 

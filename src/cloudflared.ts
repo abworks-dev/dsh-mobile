@@ -286,11 +286,18 @@ export class CloudflaredController implements RemoteProviderController {
     this.namedOrigin = named === undefined ? undefined : `https://${named.hostname}`
 
     let reservation: PortReservation
-    try { reservation = await reserveLoopbackPort(named?.port) } catch {
+    try {
+      reservation = await reserveLoopbackPort(named?.port)
+    } catch (error) {
+      // A bind conflict is the user's to resolve; anything else is an internal
+      // reservation failure and must not be reported as a busy port.
+      const conflict = (error as NodeJS.ErrnoException | undefined)?.code === 'EADDRINUSE'
       this.publish({
         enabled: true,
         state: 'error',
-        errorCode: named === undefined ? 'cloudflared_port_unavailable' : 'cloudflared_tunnel_port_unavailable',
+        errorCode: conflict
+          ? (named === undefined ? 'cloudflared_port_unavailable' : 'cloudflared_tunnel_port_unavailable')
+          : 'cloudflared_port_reservation_failed',
       })
       return
     }
@@ -307,8 +314,17 @@ export class CloudflaredController implements RemoteProviderController {
       await reservation.release()
       if (this.reservation === reservation) this.reservation = undefined
       let gateway: MobileAccessGateway
-      try { gateway = await this.options.createGateway(origin, reservation.port) } catch {
-        this.publish({ enabled: true, state: 'error', errorCode: 'cloudflared_tunnel_port_unavailable' })
+      try {
+        gateway = await this.options.createGateway(origin, reservation.port)
+      } catch (error) {
+        // Only a real bind conflict is a port problem; anything else (certificate,
+        // configuration, permissions) must not send the user chasing the port.
+        const conflict = (error as NodeJS.ErrnoException | undefined)?.code === 'EADDRINUSE'
+        this.publish({
+          enabled: true,
+          state: 'error',
+          errorCode: conflict ? 'cloudflared_tunnel_port_unavailable' : 'gateway_start_failed',
+        })
         return
       }
       if (generation !== this.generation || !this.enabled || this.disposed) {

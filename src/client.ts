@@ -562,7 +562,10 @@ function installControl(): { remove: () => void; toggle: () => void; isOpen: () 
   const cloudflaredTunnelHint = element('p', 'dsh-mobile-control__component-status'); cloudflaredTunnelHint.textContent = t('cloudflaredTunnelHint', { port: '3444' })
   const cloudflaredTunnelSave = element('button', 'dsh-mobile-control__primary dsh-mobile-control__frp-action'); cloudflaredTunnelSave.type = 'button'; cloudflaredTunnelSave.textContent = t('cloudflaredTunnelSave')
   const cloudflaredTunnelForget = element('button', 'dsh-mobile-control__danger dsh-mobile-control__frp-action'); cloudflaredTunnelForget.type = 'button'; cloudflaredTunnelForget.textContent = t('cloudflaredTunnelForget'); cloudflaredTunnelForget.hidden = true
-  cloudflaredTunnel.append(cloudflaredTunnelFields, cloudflaredTunnelStatus, cloudflaredTunnelHint, cloudflaredTunnelSave, cloudflaredTunnelForget)
+  // Only the named-tunnel inputs live in this container. Save and Forget stay
+  // outside it: Save is also how a quick tunnel is committed, so hiding the
+  // container must never take the only way to submit the form with it.
+  cloudflaredTunnel.append(cloudflaredTunnelFields, cloudflaredTunnelStatus, cloudflaredTunnelHint)
   const cloudflaredComponentStatus = element('p', 'dsh-mobile-control__component-status'); cloudflaredComponentStatus.textContent = t('checkingComponent')
   const cloudflaredInstall = element('button', 'dsh-mobile-control__primary'); cloudflaredInstall.type = 'button'; cloudflaredInstall.textContent = t('installOfficial')
   const cloudflaredNote = element('p', 'dsh-mobile-control__origin-warning'); cloudflaredNote.textContent = t('cloudflaredQuickNote')
@@ -575,7 +578,7 @@ function installControl(): { remove: () => void; toggle: () => void; isOpen: () 
   const cloudflaredTerms = element('a', 'dsh-mobile-control__text-link'); cloudflaredTerms.href = 'https://www.cloudflare.com/website-terms/'; cloudflaredTerms.target = '_blank'; cloudflaredTerms.rel = 'noopener noreferrer'; cloudflaredTerms.textContent = t('terms')
   const cloudflaredPurge = element('button', 'dsh-mobile-control__danger'); cloudflaredPurge.type = 'button'; cloudflaredPurge.textContent = t('purgeCloudflared')
   cloudflaredDetailsBody.append(cloudflaredDetailsText, cloudflaredStorage, cloudflaredOfficial, cloudflaredTerms, cloudflaredPurge); cloudflaredDetails.append(cloudflaredDetailsSummary, cloudflaredDetailsBody)
-  cloudflaredSetup.append(cloudflaredSetupTitle, cloudflaredTunnelTitle, cloudflaredMode, cloudflaredModeHint, cloudflaredTunnel, cloudflaredComponentStatus, cloudflaredInstall, cloudflaredNote, cloudflaredDetails)
+  cloudflaredSetup.append(cloudflaredSetupTitle, cloudflaredTunnelTitle, cloudflaredMode, cloudflaredModeHint, cloudflaredTunnel, cloudflaredTunnelSave, cloudflaredTunnelForget, cloudflaredComponentStatus, cloudflaredInstall, cloudflaredNote, cloudflaredDetails)
   const selfHosted = element('details', 'dsh-mobile-control__self-hosted')
   const selfHostedSummary = element('summary', 'dsh-mobile-control__self-hosted-summary')
   const selfHostedSummaryText = element('span')
@@ -945,6 +948,10 @@ function installControl(): { remove: () => void; toggle: () => void; isOpen: () 
   let cloudflaredTunnelConfigured = false
   let configuredCloudflaredHostname = ''
   let configuredCloudflaredPort = 3444
+  // Once the user types in a field, polls must stop writing to it, or a stale
+  // value the user is mid-edit would be silently replaced by the saved one.
+  let cloudflaredHostnameDirty = false
+  let cloudflaredPortDirty = false
   let originConfigured = false
   let originFormDirty = false
   let originFormBusy = false
@@ -1255,6 +1262,7 @@ function installControl(): { remove: () => void; toggle: () => void; isOpen: () 
       : {}
     cloudflaredInstalled = cloudflaredComponent.installed === true
     const cloudflaredSupported = cloudflaredComponent.supported !== false
+    const cloudflaredComponentError = typeof cloudflaredComponent.errorCode === 'string' ? cloudflaredComponent.errorCode : ''
     const cloudflaredVersion = typeof cloudflaredComponent.version === 'string' ? cloudflaredComponent.version : ''
     const cloudflaredDownloadBytes = typeof cloudflaredComponent.downloadBytes === 'number' ? cloudflaredComponent.downloadBytes : 0
     if (cloudflaredDownloadBytes > 0) cloudflaredDownloadSize = formatMegabytes(cloudflaredDownloadBytes)
@@ -1274,7 +1282,9 @@ function installControl(): { remove: () => void; toggle: () => void; isOpen: () 
     cloudflaredComponentStatus.textContent = !cloudflaredSupported
       ? t('cloudflaredUnsupported')
       : !cloudflaredInstalled
-        ? t('cloudflaredNotInstalled')
+        // A component that exists but failed verification must not be reported as
+        // absent: that sends the user to reinstall something already installed.
+        ? (cloudflaredComponentError === 'cloudflared_component_invalid' ? t('cloudflaredInvalid') : t('cloudflaredNotInstalled'))
         : t('cloudflaredReady', { version: cloudflaredVersion })
     const cloudflaredTunnelConfiguration = cloudflaredProvider.configuration !== null
       && typeof cloudflaredProvider.configuration === 'object'
@@ -1295,15 +1305,21 @@ function installControl(): { remove: () => void; toggle: () => void; isOpen: () 
     cloudflaredModeQuick.disabled = remoteProviderBusy
     cloudflaredModeNamed.disabled = remoteProviderBusy
     cloudflaredModeHint.textContent = cloudflaredShownMode === 'named' ? t('cloudflaredTunnelNamedHint') : t('cloudflaredTunnelQuickHint')
+    // The component note describes whichever tunnel is about to run, so a
+    // quick-tunnel warning never sits next to named-tunnel settings.
+    cloudflaredNote.textContent = cloudflaredShownMode === 'named' ? t('cloudflaredNamedNote') : t('cloudflaredQuickNote')
     cloudflaredTunnel.hidden = cloudflaredShownMode !== 'named'
-    // Saved values seed the form once; a field the user is editing is never
-    // overwritten by a poll.
-    if (cloudflaredHostname.value === '' && configuredCloudflaredHostname !== '') cloudflaredHostname.value = configuredCloudflaredHostname
-    if (cloudflaredTunnelConfigured && cloudflaredPort.value === '3444' && configuredCloudflaredPort !== 3444) {
-      cloudflaredPort.value = String(configuredCloudflaredPort)
-    }
+    // Untouched fields always mirror the saved configuration, so a field can never
+    // keep showing a value that is no longer in effect.
+    if (!cloudflaredHostnameDirty) cloudflaredHostname.value = configuredCloudflaredHostname
+    if (!cloudflaredPortDirty) cloudflaredPort.value = String(configuredCloudflaredPort)
     cloudflaredToken.placeholder = cloudflaredTunnelConfigured ? t('cloudflaredTunnelTokenSaved') : t('cloudflaredTunnelTokenPlaceholder')
-    cloudflaredTunnelHint.textContent = t('cloudflaredTunnelHint', { port: String(configuredCloudflaredPort) })
+    // The hint must describe the port Cloudflare will actually be pointed at, which
+    // is the one in the field, not the last saved value.
+    const cloudflaredFieldPort = String(cloudflaredPort.value ?? '').trim()
+    cloudflaredTunnelHint.textContent = t('cloudflaredTunnelHint', {
+      port: cloudflaredFieldPort === '' ? String(configuredCloudflaredPort) : cloudflaredFieldPort,
+    })
     cloudflaredTunnelStatus.textContent = cloudflaredTunnelError !== ''
       ? t('cloudflaredTunnelInvalid')
       : cloudflaredTunnelConfigured
@@ -1466,10 +1482,17 @@ function installControl(): { remove: () => void; toggle: () => void; isOpen: () 
       cloudflared_tunnel_port_unavailable: t('cloudflaredTunnelPortUnavailable'),
       cloudflared_tunnel_hostname_invalid: t('cloudflaredTunnelHostnameInvalid'),
       cloudflared_tunnel_port_invalid: t('cloudflaredTunnelPortInvalid'),
+      cloudflared_tunnel_port_reserved: t('cloudflaredTunnelPortReserved'),
       cloudflared_tunnel_token_invalid: t('cloudflaredTunnelTokenInvalid'),
       cloudflared_tunnel_settings_invalid: t('cloudflaredTunnelSettingsInvalid'),
       cloudflared_tunnel_config_missing: t('cloudflaredTunnelConfigMissing'),
       cloudflared_tunnel_config_invalid: t('cloudflaredTunnelInvalid'),
+      cloudflared_tunnel_target_invalid: t('cloudflaredTunnelTargetInvalid'),
+      cloudflared_component_unsupported: t('cloudflaredComponentUnsupported'),
+      cloudflared_download_hash_mismatch: t('cloudflaredDownloadHashMismatch'),
+      cloudflared_download_size_mismatch: t('cloudflaredDownloadSizeMismatch'),
+      cloudflared_executable_hash_mismatch: t('cloudflaredExecutableHashMismatch'),
+      cloudflared_port_reservation_failed: t('cloudflaredPortReservationFailed'),
       frp_component_missing: t('frpMissing'),
       frp_component_invalid: t('frpInvalid'),
       frp_config_missing: t('frpConfigMissing'),
@@ -1584,6 +1607,8 @@ function installControl(): { remove: () => void; toggle: () => void; isOpen: () 
   }
   cloudflaredModeQuick.addEventListener('click', () => { if (!remoteProviderBusy) showCloudflaredMode('quick') })
   cloudflaredModeNamed.addEventListener('click', () => { if (!remoteProviderBusy) showCloudflaredMode('named') })
+  cloudflaredHostname.addEventListener('input', () => { cloudflaredHostnameDirty = true })
+  cloudflaredPort.addEventListener('input', () => { cloudflaredPortDirty = true })
   cloudflaredTunnelSave.addEventListener('click', () => {
     if (remoteProviderBusy) return
     const mode = cloudflaredModeDraft ?? cloudflaredTunnelMode
@@ -1599,6 +1624,9 @@ function installControl(): { remove: () => void; toggle: () => void; isOpen: () 
         remoteStatus.textContent = t('cloudflaredTunnelPortInvalid')
         return
       }
+      // The LAN gateway owns 3443 for as long as DSH runs, so this is not a
+      // transient conflict worth a round trip.
+      if (port === 3443) { remoteStatus.textContent = t('cloudflaredTunnelPortReserved'); return }
       if (token === '' && !cloudflaredTunnelConfigured) { remoteStatus.textContent = t('cloudflaredTunnelConfigMissing'); return }
       if (token !== '' && (token.length < 32 || !/^[A-Za-z0-9_=+/-]+$/u.test(token))) {
         remoteStatus.textContent = t('cloudflaredTunnelTokenInvalid')
@@ -1617,6 +1645,9 @@ function installControl(): { remove: () => void; toggle: () => void; isOpen: () 
         // The token is write-only: never keep a copy in the DOM after saving.
         cloudflaredToken.value = ''
         cloudflaredModeDraft = null
+        // The saved values are now authoritative, so let the next poll restore them.
+        cloudflaredHostnameDirty = false
+        cloudflaredPortDirty = false
         remoteFailureText = ''
         renderRemote(data)
       }, error => { remoteFailureText = t('requestFailed', { error: String(error) }); remoteStatus.textContent = remoteFailureText })
@@ -1639,6 +1670,8 @@ function installControl(): { remove: () => void; toggle: () => void; isOpen: () 
         cloudflaredHostname.value = ''
         cloudflaredPort.value = '3444'
         cloudflaredModeDraft = null
+        cloudflaredHostnameDirty = false
+        cloudflaredPortDirty = false
         remoteFailureText = ''
         renderRemote(data)
       }, error => { remoteFailureText = t('requestFailed', { error: String(error) }); remoteStatus.textContent = remoteFailureText })
@@ -2221,7 +2254,7 @@ function installControl(): { remove: () => void; toggle: () => void; isOpen: () 
           component_missing: 'remoteUnavailableTailscale', funnel_permission_required: 'funnelPermission', funnel_https_required: 'funnelHttps', funnel_start_failed: 'funnelStart', funnel_start_timeout: 'funnelTimeout', tailscale_dns_missing: 'tailscaleDnsMissing',
           sidecar_launch_failed: 'remoteUnavailableTailscale', sidecar_stopped: 'controlChannelFailed', sidecar_exited: 'controlChannelFailed', control_channel_failed: 'controlChannelFailed',
           cpolar_component_missing: 'cpolarMissing', cpolar_component_invalid: 'cpolarInvalid', cpolar_config_missing: 'cpolarConfigMissing', cpolar_config_invalid: 'cpolarConfigInvalid', cpolar_start_timeout: 'cpolarTimeout', cpolar_stopped: 'cpolarStopped', cpolar_exited: 'cpolarExited',
-          cloudflared_component_missing: 'cloudflaredMissing', cloudflared_component_invalid: 'cloudflaredInvalid', cloudflared_port_unavailable: 'cloudflaredPortUnavailable', cloudflared_launch_failed: 'cloudflaredLaunchFailed', cloudflared_start_timeout: 'cloudflaredTimeout', cloudflared_stopped: 'cloudflaredStopped', cloudflared_exited: 'cloudflaredExited', cloudflared_invalid_origin: 'cloudflaredOriginInvalid', cloudflared_tunnel_port_unavailable: 'cloudflaredTunnelPortUnavailable', cloudflared_tunnel_config_invalid: 'cloudflaredTunnelInvalid',
+          cloudflared_component_missing: 'cloudflaredMissing', cloudflared_component_invalid: 'cloudflaredInvalid', cloudflared_component_unsupported: 'cloudflaredComponentUnsupported', cloudflared_port_unavailable: 'cloudflaredPortUnavailable', cloudflared_port_reservation_failed: 'cloudflaredPortReservationFailed', cloudflared_launch_failed: 'cloudflaredLaunchFailed', cloudflared_start_timeout: 'cloudflaredTimeout', cloudflared_stopped: 'cloudflaredStopped', cloudflared_exited: 'cloudflaredExited', cloudflared_invalid_origin: 'cloudflaredOriginInvalid', cloudflared_tunnel_port_unavailable: 'cloudflaredTunnelPortUnavailable', cloudflared_tunnel_config_invalid: 'cloudflaredTunnelInvalid', cloudflared_tunnel_target_invalid: 'cloudflaredTunnelTargetInvalid', cloudflared_download_hash_mismatch: 'cloudflaredDownloadHashMismatch', cloudflared_download_size_mismatch: 'cloudflaredDownloadSizeMismatch', cloudflared_executable_hash_mismatch: 'cloudflaredExecutableHashMismatch',
           frp_component_missing: 'frpMissing', frp_component_invalid: 'frpInvalid', frp_config_missing: 'frpConfigMissing', frp_config_verify_failed: 'frpConfigVerifyFailed', frp_vhost_publicly_reachable: 'frpVhostPublic', frp_vhost_probe_failed: 'frpVhostProbeFailed', frp_launch_failed: 'frpLaunchFailed', frp_start_timeout: 'frpTimeout', frp_discovery_mismatch: 'frpDiscoveryMismatch', frp_discovery_invalid: 'frpDiscoveryInvalid', frp_stopped: 'frpStopped', frp_exited: 'frpExited', gateway_start_failed: 'gatewayStartFailed',
         }
         const actionKey = controllerActionKeys[values.controllerCode ?? '']

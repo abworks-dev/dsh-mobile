@@ -1,5 +1,6 @@
 import { EventEmitter } from 'node:events'
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
+import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { PassThrough } from 'node:stream'
@@ -350,14 +351,29 @@ describe('cloudflared provider lifecycle', () => {
 })
 
 // Shaped like the connector token Cloudflare issues: base64url of a JSON blob.
-const NAMED_TOKEN = 'eyJhIjoiYTFmOWM2MWUxYzZmYTI4MGM5OWFmMjRiZmM4ZTg1OTkiLCJ0IjoiYWEzM2RlZWEtOTZkOC00ZGFhLThiNzQtNmY0MGUwOGYwMWU0In0'
-const NAMED: CloudflaredTunnelSettings = {
-  version: 1,
-  mode: 'named',
-  token: NAMED_TOKEN,
-  hostname: 'dsh.sayalove.me',
-  port: 3444,
+const NAMED_TOKEN = 'eyJhIjoiYTJmOWM2MWUxYzZmYTI4MGM5OWFmMjRiZmM4ZTg1OTkiLCJ0IjoiYWEzM2RlZWEtOTZkOC00ZGFhLThiNzQtNmY0MGUwOGYwMWU0In0'
+const NAMED_HOSTNAME = 'dsh.sayalove.me'
+
+/**
+ * A named tunnel binds one fixed forward port, so the test must claim a port that
+ * is actually free. Hardcoding the product default (3444) makes the suite fail
+ * whenever the developer is running the real tunnel on it.
+ */
+async function freeLoopbackPort(): Promise<number> {
+  const server = createServer()
+  await new Promise<void>(resolve => { server.listen(0, '127.0.0.1', () => { resolve() }) })
+  const address = server.address()
+  if (address === null || typeof address === 'string') throw new Error('no loopback port was assigned')
+  const port = address.port
+  await new Promise<void>(resolve => { server.close(() => { resolve() }) })
+  return port
 }
+
+function namedSettings(port: number): CloudflaredTunnelSettings {
+  return { version: 1, mode: 'named', token: NAMED_TOKEN, hostname: NAMED_HOSTNAME, port }
+}
+
+const NAMED_ORIGIN = `https://${NAMED_HOSTNAME}`
 
 describe('cloudflared named tunnel', () => {
   it('recognizes the registration line real cloudflared prints', () => {
@@ -374,37 +390,39 @@ describe('cloudflared named tunnel', () => {
   })
 
   it('runs the connector with the token in the environment and a stable port', async () => {
+    const port = await freeLoopbackPort()
     const seen: Array<{ origin: string; port: number }> = []
-    const { child, controller, journal, args, environment } = await fixture(async (origin, port) => {
-      seen.push({ origin, port })
-      return gateway(origin, port)
-    }, NAMED)
+    const { child, controller, journal, args, environment } = await fixture(async (origin, listenPort) => {
+      seen.push({ origin, port: listenPort })
+      return gateway(origin, listenPort)
+    }, namedSettings(port))
 
     // A named tunnel prints no banner, so the process starts in `connecting` and
     // only a real registration line may promote it.
-    expect(controller.status()).toMatchObject({ enabled: true, state: 'connecting', origin: 'https://dsh.sayalove.me' })
+    expect(controller.status()).toMatchObject({ enabled: true, state: 'connecting', origin: NAMED_ORIGIN })
     child.stderr.write('INF Starting tunnel tunnelID=aa33deea-96d8-4daa-8b74-6f40e08f01e4\n')
     child.stderr.write('INF precheck complete hard_fail=false run_id=2bde4ed7 suggested_protocol=quic\n')
-    child.stderr.write('INF Updated to new configuration config="{\\"ingress\\":[{\\"service\\":\\"http://127.0.0.1:3444\\"}]}"\n')
+    child.stderr.write(`INF Updated to new configuration config="{\\"ingress\\":[{\\"service\\":\\"http://127.0.0.1:${String(port)}\\"}]}"\n`)
     await new Promise(resolve => setTimeout(resolve, 5))
     expect(controller.status().state).toBe('connecting')
 
     child.stderr.write('2026-09-16T11:18:10Z INF Registered tunnel connection connIndex=0 connection=645e1fe2-9ac7-4a17-bc65-4cc7be9d7d67 location=sin08 protocol=quic\n')
     const ready = await journal.waitFor(status => status.state === 'ready')
-    expect(ready).toEqual({ enabled: true, state: 'ready', origin: 'https://dsh.sayalove.me' })
+    expect(ready).toEqual({ enabled: true, state: 'ready', origin: NAMED_ORIGIN })
 
     // Cloudflare's ingress already points at this exact port, so it is bound as
     // configured rather than allocated.
-    expect(seen).toEqual([{ origin: 'https://dsh.sayalove.me', port: 3444 }])
+    expect(seen).toEqual([{ origin: NAMED_ORIGIN, port }])
     // `cloudflared tunnel run` reads TUNNEL_TOKEN; the credential must not appear
     // in the command line, where any local process could read it.
     expect(args()).toEqual(['tunnel', '--no-autoupdate', 'run'])
     expect(args().join(' ')).not.toContain(NAMED_TOKEN)
     expect(environment().TUNNEL_TOKEN).toBe(NAMED_TOKEN)
-    expect(controller.gateway()?.address()).toMatchObject({ origin: 'https://dsh.sayalove.me', port: 3444 })
+    expect(controller.gateway()?.address()).toMatchObject({ origin: NAMED_ORIGIN, port })
   })
 
   it('requires a fresh registration after the connector restarts', async () => {
+    const port = await freeLoopbackPort()
     const directory = await mkdtemp(join(tmpdir(), 'dsh-mobile-cloudflared-named-restart-'))
     temporaryDirectories.push(directory)
     const executable = join(directory, 'component', 'cloudflared.exe')
@@ -415,8 +433,8 @@ describe('cloudflared named tunnel', () => {
     const controller = new CloudflaredController({
       store: new MemoryControlStore(),
       executable,
-      createGateway: async (origin, port) => gateway(origin, port),
-      tunnel: { settings: () => NAMED },
+      createGateway: async (origin, listenPort) => gateway(origin, listenPort),
+      tunnel: { settings: () => namedSettings(port) },
       onStatus: journal.publish,
       spawnProcess: () => {
         const child = new FakeChild()
@@ -438,22 +456,37 @@ describe('cloudflared named tunnel', () => {
 
     children[1]!.stderr.write('INF Registered tunnel connection connIndex=0 connection=1f2035b6-c61f-401b-86fc-260e9955f6ae\n')
     const ready = await journal.waitFor(status => status.state === 'ready')
-    expect(ready).toMatchObject({ state: 'ready', origin: 'https://dsh.sayalove.me' })
+    expect(ready).toMatchObject({ state: 'ready', origin: NAMED_ORIGIN })
   })
 
   it('fails the generation when the configured port cannot be bound', async () => {
     // A named tunnel cannot fall back to another port: the edge routes the public
     // hostname to exactly one local port, so a taken port is a hard failure.
+    const port = await freeLoopbackPort()
+    const conflict = Object.assign(new Error('listen EADDRINUSE: address already in use'), { code: 'EADDRINUSE' })
     const { controller, journal, args } = await fixture(async () => {
-      throw new Error('listen EADDRINUSE')
-    }, NAMED)
+      throw conflict
+    }, namedSettings(port))
     const failed = await journal.waitFor(status => status.state === 'error')
     expect(failed).toEqual({ enabled: true, state: 'error', errorCode: 'cloudflared_tunnel_port_unavailable' })
     expect(controller.gateway()).toBeUndefined()
     expect(args()).toEqual([])
   })
 
+  it('does not blame the port when the gateway fails for another reason', async () => {
+    // A certificate, configuration, or permission failure reported as "port
+    // unavailable" would send the user hunting for a conflict that does not exist.
+    const port = await freeLoopbackPort()
+    const { controller, journal } = await fixture(async () => {
+      throw new Error('mobile_frontend_unavailable')
+    }, namedSettings(port))
+    const failed = await journal.waitFor(status => status.state === 'error')
+    expect(failed).toEqual({ enabled: true, state: 'error', errorCode: 'gateway_start_failed' })
+    expect(controller.gateway()).toBeUndefined()
+  })
+
   it('does not report ready when the connector never registers', async () => {
+    const port = await freeLoopbackPort()
     const directory = await mkdtemp(join(tmpdir(), 'dsh-mobile-cloudflared-named-timeout-'))
     temporaryDirectories.push(directory)
     const executable = join(directory, 'component', 'cloudflared.exe')
@@ -464,8 +497,8 @@ describe('cloudflared named tunnel', () => {
     const controller = new CloudflaredController({
       store: new MemoryControlStore(),
       executable,
-      createGateway: async (origin, port) => gateway(origin, port),
-      tunnel: { settings: () => NAMED },
+      createGateway: async (origin, listenPort) => gateway(origin, listenPort),
+      tunnel: { settings: () => namedSettings(port) },
       onStatus: journal.publish,
       startupTimeoutMs: 20,
       spawnProcess: () => child as unknown as ChildProcessWithoutNullStreams,

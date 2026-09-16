@@ -39,7 +39,7 @@ Cloudflare terminates DNS and TLS for the public hostname. The plugin only runs 
    - **Connector token**: the token you copied
 4. Choose **Save and connect**.
 
-Once saved, leaving the token field blank keeps the stored token, and the field never echoes a saved token back. **Remove the saved token** returns the provider to a quick tunnel.
+Once saved, leaving the token field blank keeps the stored token, and the field never echoes a saved token back. **Remove the saved token** also **stops the cloudflared channel** and returns the provider to a quick tunnel, so the channel has to be switched on again before it reconnects.
 
 ## Connect the phone to a named tunnel
 
@@ -68,10 +68,16 @@ The old remote entry in the device list will show **Address may have changed** o
 | Local forward port unavailable | `cloudflared_tunnel_port_unavailable` | The configured port is taken. A named tunnel cannot move to another port, because Cloudflare routes to that exact one: free the port, or pick another and update the Service in Cloudflare to match. |
 | Invalid public hostname | `cloudflared_tunnel_hostname_invalid` | Must be a real hostname under a domain on this account. IP literals, wildcards, `.trycloudflare.com` and `.cfargotunnel.com` are refused. |
 | Invalid forward port | `cloudflared_tunnel_port_invalid` | The port must be between 1024 and 65535. |
+| Reserved forward port | `cloudflared_tunnel_port_reserved` | **3443** cannot be used: it is the DSH Mobile LAN gateway's HTTPS port, held for as long as DSH runs. It is not a transient conflict, so pick 3444 or 3445. |
 | Invalid token | `cloudflared_tunnel_token_invalid` | Copy the whole token from the dashboard, with no spaces or newlines. |
 | Settings rejected | `cloudflared_tunnel_settings_invalid` | The request carried a field that does not belong to the mode, such as a port in quick mode. |
 | Token, hostname and port are all required | `cloudflared_tunnel_config_missing` | First-time named-tunnel setup needs all three. |
 | Saved configuration is unreadable | `cloudflared_tunnel_config_invalid` | The stored file is corrupt or malformed. The provider falls back to a quick tunnel; save the settings again. |
+| Saved configuration is not a regular file | `cloudflared_tunnel_target_invalid` | `tunnel.json` became a symlink or a non-regular file. Remove it and save the settings again. |
+| Could not reserve a local port | `cloudflared_port_reservation_failed` | Reserving the loopback port failed for a reason other than the port being busy. Retry, and check system resources if it persists. |
+| Component download failed verification | `cloudflared_download_hash_mismatch` / `cloudflared_download_size_mismatch` | The downloaded binary does not match the pinned size or SHA-256. Install again; repeated failures mean something is rewriting the transfer. |
+| Installed component failed verification | `cloudflared_executable_hash_mismatch` | The local cloudflared no longer matches the verified build. Remove it completely and install again. |
+| This build cannot run the component | `cloudflared_component_unsupported` | The platform is outside the supported set (currently Windows x64 only). |
 | Timed out waiting for a public address | `cloudflared_start_timeout` | The connector did not print `Registered tunnel connection` within 60 seconds, usually because it cannot reach a Cloudflare edge. |
 
 ## Troubleshooting
@@ -79,5 +85,21 @@ The old remote entry in the device list will show **Address may have changed** o
 - **Stuck on "connecting"**: a named tunnel prints no banner, so it only becomes ready once the connector registers. Read the cloudflared output in the DSH log; the `CONNECTIVITY PRE-CHECKS` table says whether DNS, UDP/QUIC or TCP is the problem.
 - **Public access returns 1033**: Cloudflare believes no connector is healthy for that hostname. Check the tunnel shows Healthy in Zero Trust, and that its ingress port matches the panel.
 - **`cloudflared` reports `Unauthorized`, or the tunnel id does not exist**: the token belongs to a different tunnel, for example one that was deleted and recreated. Copy the token again.
-- **Unstable connections with a TUN or transparent proxy running (Clash, Mihomo)**: `cloudflared` uses QUIC over UDP, and fake-IP plus transparent proxying resets long-lived connections easily. Route `*.argotunnel.com`, `*.trycloudflare.com` and `api.cloudflare.com` directly.
+- **With a TUN or transparent proxy running (Clash, Mihomo, Clash Verge), the phone sticks on "Loading plugins" and retries forever.** This is a real failure that was measured, and it is easy to misread as a pairing or plugin problem:
+  - `cloudflared`'s connection to `region*.v2.argotunnel.com` has no dedicated rule, so it falls through to the catch-all `Match`/`MATCH` rule and is sent into a proxy node. The core's own API shows it plainly:
+    ```
+    cloudflared.exe -> region2.v2.argotunnel.com
+      rule=Match   chains=["<some airport node>","漏网之鱼"]   up/down = 103 MB / 2.1 MB
+    ```
+  - Downstream throughput then collapses to **8–100 KB/s**. The phone's DSH boot pulls a **4.5 MB** (compressed) boot bundle in one shot, the loader gives up, and the app shows "load, fail, retry".
+  - The same file took **0.2 s** on the LAN gateway, and **9.9 s / 454 KB/s** through the tunnel once routing was fixed — two orders of magnitude apart.
+  - Fix: route cloudflared and its edge domains directly. In Clash Verge's **global merge profile** (`profiles/Merge.yaml`, which subscription updates do not overwrite):
+    ```yaml
+    prepend-rules:
+      - PROCESS-NAME,cloudflared.exe,DIRECT
+      - DOMAIN-SUFFIX,argotunnel.com,DIRECT
+      - DOMAIN-SUFFIX,trycloudflare.com,DIRECT
+    ```
+    Then make cloudflared **reconnect**: hot-reloading the core does not migrate long-lived connections (use the panel's reconnect action, or toggle the provider off and on).
+  - To confirm it is this and not the phone: fetch the boot bundle from the computer with the same session and watch the rate. If the computer is just as slow, the phone and pairing are innocent.
 - **The domain still resolves to the old address**: after the nameserver change Cloudflare must move the zone from Pending to Active, and records in a pending zone are not served publicly.

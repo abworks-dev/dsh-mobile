@@ -8,9 +8,24 @@ const MAX_CONFIG_BYTES = 8 * 1024
 const QUICK_TUNNEL_SUFFIX = '.trycloudflare.com'
 /** Cloudflare's own tunnel-routing domain; it can never be a public hostname. */
 const TUNNEL_ROUTING_SUFFIX = '.cfargotunnel.com'
+/**
+ * The bare registrable names behind those suffixes. A suffix test alone accepts
+ * them, yet Cloudflare owns both apexes outright, so neither can ever be routed to
+ * a customer tunnel.
+ */
+const RESERVED_APEX_NAMES: readonly string[] = Object.freeze([
+  QUICK_TUNNEL_SUFFIX.slice(1),
+  TUNNEL_ROUTING_SUFFIX.slice(1),
+])
 /** Ports below this need privileges on every supported platform. */
 const MIN_PORT = 1024
 const MAX_PORT = 65_535
+/**
+ * The LAN gateway's HTTPS port, held by the plugin for as long as DSH runs. It is
+ * never available to a tunnel, so a configuration naming it must be refused up
+ * front rather than failing later as a generic "port in use".
+ */
+const RESERVED_LAN_GATEWAY_PORT = 3443
 const MAX_TOKEN_LENGTH = 4096
 
 /** Which tunnel flavour the cloudflared provider runs. */
@@ -66,6 +81,7 @@ export function validateCloudflaredTunnelHostname(value: unknown): string {
   // An IPv4 literal is dot-separated digits and would otherwise satisfy the label
   // grammar, but Cloudflare never routes a tunnel hostname to an address.
   if (isIP(normalized) !== 0 || !hostname(normalized) || normalized.includes('*')
+    || RESERVED_APEX_NAMES.includes(normalized)
     || normalized.endsWith(QUICK_TUNNEL_SUFFIX) || normalized.endsWith(TUNNEL_ROUTING_SUFFIX)) {
     throw new Error('cloudflared_tunnel_hostname_invalid')
   }
@@ -77,6 +93,9 @@ export function validateCloudflaredTunnelPort(value: unknown): number {
   if (!Number.isSafeInteger(value) || Number(value) < MIN_PORT || Number(value) > MAX_PORT) {
     throw new Error('cloudflared_tunnel_port_invalid')
   }
+  // The LAN gateway always owns 3443, so this is not a transient conflict and the
+  // user must be told which port to avoid instead of "the port is busy".
+  if (value === RESERVED_LAN_GATEWAY_PORT) throw new Error('cloudflared_tunnel_port_reserved')
   return Number(value)
 }
 
@@ -135,8 +154,14 @@ export function mergeSavedCloudflaredTunnelSettings(
   partial: Readonly<Record<string, unknown>>,
   saved: CloudflaredTunnelSettings | undefined,
 ): CloudflaredTunnelSettings {
-  const mode = partial.mode ?? saved?.mode ?? 'quick'
-  if (mode === 'quick') return parseCloudflaredTunnelSettings({ version: 1, mode: 'quick' })
+  const requested = partial.mode ?? saved?.mode ?? 'quick'
+  // The named branch below hardcodes its mode, so an unrecognized value would be
+  // silently rewritten into a named tunnel. Validate here as strictly as the
+  // parser does, rather than letting this layer launder it.
+  if (requested !== 'quick' && requested !== 'named') {
+    throw new Error('cloudflared_tunnel_settings_invalid')
+  }
+  if (requested === 'quick') return parseCloudflaredTunnelSettings({ version: 1, mode: 'quick' })
   const previous = saved?.mode === 'named' ? saved : undefined
   const token = partial.token === '' || partial.token === undefined ? previous?.token : partial.token
   const hostname = partial.hostname === '' || partial.hostname === undefined ? previous?.hostname : partial.hostname
