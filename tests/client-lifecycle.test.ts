@@ -57,7 +57,7 @@ describe('mobile-control localization', () => {
     expect(CONTROL_STYLES).toContain('background:var(--dsw-alias-interactive-bg-active')
     expect(CONTROL_STYLES).toContain('dsh-mobile-control__cpolar-setup')
     expect(CONTROL_STYLES).toContain('dsh-mobile-control__token')
-    expect(CONTROL_STYLES).toContain('grid-template-columns:repeat(2,minmax(0,1fr))')
+    expect(CONTROL_STYLES).toContain('.dsh-mobile-control__provider-choices{display:grid;grid-template-columns:1fr;gap:8px}')
     expect(CONTROL_STYLES).toContain('dsh-mobile-control__remote-workspace')
     expect(CONTROL_STYLES).toContain('dsh-mobile-control__http-frame-warning')
     expect(CONTROL_STYLES).toContain('dsh-mobile-control__stage-value')
@@ -66,6 +66,27 @@ describe('mobile-control localization', () => {
     expect(CONTROL_STYLES).toContain('min-height:44px')
     expect(CONTROL_STYLES).toContain('dsh-mobile-control__actions[hidden],.dsh-mobile-control__manage-row[hidden]{display:none}')
     expect(CONTROL_STYLES).toContain('dsh-mobile-control__qr img{border-radius:12px;background:#fff')
+  })
+
+  it('keeps the provider list single-column with legible copy and non-trivial targets', () => {
+    // Verified against the panel rendered at its real 380 px width. Three providers in a
+    // two-column grid left the last card orphaned in half a row, the description that decides
+    // the choice was the smallest text in the panel, and the two destructive inline actions
+    // were the smallest targets in it.
+    const declaration = (selector: string, property: string): number => {
+      const start = CONTROL_STYLES.indexOf(`${selector}{`)
+      expect(start, `${selector} is missing from CONTROL_STYLES`).toBeGreaterThanOrEqual(0)
+      const block = CONTROL_STYLES.slice(start, CONTROL_STYLES.indexOf('}', start))
+      const match = new RegExp(`${property}:(\\d+)px`).exec(block)
+      expect(match, `${property} is missing from ${selector}`).not.toBeNull()
+      return match === null ? 0 : Number(match[1])
+    }
+
+    // One column, so every provider card spans the panel and a fourth provider cannot orphan a row.
+    expect(CONTROL_STYLES).toContain('.dsh-mobile-control__provider-choices{display:grid;grid-template-columns:1fr;gap:8px}')
+    expect(declaration('.dsh-mobile-control__provider-description', 'font-size')).toBeGreaterThanOrEqual(12)
+    expect(declaration('.dsh-mobile-control__device-revoke', 'min-height')).toBeGreaterThanOrEqual(36)
+    expect(declaration('.dsh-mobile-control__ws-paths-remove', 'min-height')).toBeGreaterThanOrEqual(36)
   })
 
   it('renders only validated release versions and the official Android download', () => {
