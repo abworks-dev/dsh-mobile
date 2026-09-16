@@ -7,6 +7,16 @@ import { restrictPrivateFile } from './private-file.js'
 
 export const DEFAULT_ORIGIN_LISTEN_PORT = 3444
 const MAX_SETTINGS_BYTES = 8 * 1024
+/**
+ * Ports a user-space listener can actually hold on every supported platform. Below
+ * this the bind needs privileges on Linux and macOS and fails with EACCES, which
+ * surfaces as a generic start failure rather than a rejected choice.
+ */
+const MIN_ORIGIN_LISTEN_PORT = 1024
+/** The LAN gateway's HTTPS port, held for as long as DSH runs. */
+const RESERVED_LAN_GATEWAY_PORT = 3443
+/** DSH's own WebServer port; the plugin cannot function while it is taken. */
+const RESERVED_DSH_WEB_PORT = 3080
 const PRIVATE_NETWORKS = ['10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16'].map(parseCidr)
 const TRUSTED_NETWORKS = [...PRIVATE_NETWORKS, parseCidr('127.0.0.0/8')]
 
@@ -62,10 +72,14 @@ export function validateOriginListenHost(value: unknown): string {
 }
 
 export function validateOriginListenPort(value: unknown): number {
-  if (!Number.isSafeInteger(value) || Number(value) < 1 || Number(value) > 65_535) {
+  if (!Number.isSafeInteger(value) || Number(value) < MIN_ORIGIN_LISTEN_PORT || Number(value) > 65_535) {
     throw new Error('origin_listen_port_invalid')
   }
-  if (value === 3443) throw new Error('origin_listen_port_reserved')
+  // 3443 is the LAN gateway and 3080 is DSH's own WebServer. Neither is a transient
+  // conflict, so both are refused as choices rather than left to fail on bind.
+  if (value === RESERVED_LAN_GATEWAY_PORT || value === RESERVED_DSH_WEB_PORT) {
+    throw new Error('origin_listen_port_reserved')
+  }
   return Number(value)
 }
 

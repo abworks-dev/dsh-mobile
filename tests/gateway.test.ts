@@ -1077,7 +1077,9 @@ describe('HTTP gateway', () => {
     // Windows keeps separate TCP and UDP port-exclusion tables, so the port the OS handed
     // the TCP listener can be unavailable for the discovery socket, and another process may
     // already hold it. Broadcast discovery is a convenience: degrading must not fail start.
-    const occupant = createSocket('udp4')
+    // reuseAddr is pinned off so the occupant really blocks the bind rather than relying on
+    // the helper's loopback listenHost to make the two addresses collide.
+    const occupant = createSocket({ type: 'udp4', reuseAddr: false })
     await new Promise<void>((resolve, reject) => {
       occupant.once('error', reject)
       occupant.bind(TEST_DISCOVERY_BUSY_PORT, '127.0.0.1', () => resolve())
@@ -1092,6 +1094,42 @@ describe('HTTP gateway', () => {
     })
     expect(discovered.status).toBe(200)
     expect(JSON.parse(discovered.body)).toMatchObject({ port: TEST_DISCOVERY_BUSY_PORT, protocol: 1 })
+    // Assert the degraded state itself. Checking only that the page still serves would keep
+    // passing if the bind silently started succeeding, and the whole point of the
+    // degradation is that it stays observable. The status route lives on the loopback
+    // admin surface, not the public listener.
+    const route = instance.localAdminRoute()
+    const adminServer = createServer((incoming, response) => { void route.handler(incoming, response) })
+    const adminPort = await listen(adminServer)
+    cleanups.push(() => closeServer(adminServer))
+    const status = await request(adminPort, '/api/mobile-access/status', {
+      headers: { host: `127.0.0.1:${String(adminPort)}` },
+    })
+    expect(status.status).toBe(200)
+    expect(JSON.parse(status.body)).toMatchObject({
+      discovery: { broadcast: false, mdns: true, errorCode: 'discovery_broadcast_EADDRINUSE' },
+    })
+  })
+
+  it('reports a missing bundled mobile asset instead of leaving a silent 503 subresource', async () => {
+    // The served index references the compatibility bundle, so a missing file would
+    // otherwise only show up as a failed subresource while the page itself looks fine.
+    const inner = await upstream()
+    const instance = await gateway(inner.port, {
+      mobileCompatibilityFile: join(tmpdir(), `dsh-mobile-absent-${crypto.randomUUID()}.js`),
+    })
+    const route = instance.localAdminRoute()
+    const adminServer = createServer((incoming, response) => { void route.handler(incoming, response) })
+    const adminPort = await listen(adminServer)
+    cleanups.push(() => closeServer(adminServer))
+    const status = await request(adminPort, '/api/mobile-access/status', {
+      headers: { host: `127.0.0.1:${String(adminPort)}` },
+    })
+    // Assert containment rather than an exact value: the layout asset resolves
+    // differently under the test runner than in the built package.
+    const reported = (JSON.parse(status.body) as { discovery?: { mobileAssetsErrorCode?: string } }).discovery?.mobileAssetsErrorCode
+    expect(reported).toContain('mobile_assets_missing_')
+    expect(reported).toContain('compatibility')
   })
 
   it('keeps discovery metadata-only and offers the CA on a separate endpoint', async () => {

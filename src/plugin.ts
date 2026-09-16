@@ -38,6 +38,11 @@ import { CpolarController } from './cpolar.js'
 import { CpolarComponentManager, type CpolarComponentStatus } from './cpolar-component.js'
 import { CloudflaredComponentManager, type CloudflaredComponentStatus } from './cloudflared-component.js'
 import { CloudflaredController } from './cloudflared.js'
+import {
+  CloudflaredTunnelStore,
+  mergeSavedCloudflaredTunnelSettings,
+  type CloudflaredTunnelStatus,
+} from './cloudflared-tunnel.js'
 import { FrpComponentManager, type FrpComponentStatus } from './frp-component.js'
 import { FrpConfigStore, mergeSavedFrpSettings, mergeSavedFrpTarget, type FrpConfigurationStatus } from './frp-config.js'
 import { FrpController } from './frp.js'
@@ -319,6 +324,7 @@ function remoteControlPayload(
   providerStatuses: Readonly<Record<RemoteProvider, RemoteProviderStatus>>,
   cpolarComponent: CpolarComponentStatus,
   cloudflaredComponent: CloudflaredComponentStatus,
+  cloudflaredConfiguration: CloudflaredTunnelStatus,
   frpComponent: FrpComponentStatus,
   frpConfiguration: FrpConfigurationStatus,
   originConfiguration: OriginConfigurationStatus,
@@ -346,6 +352,7 @@ function remoteControlPayload(
         running: providerStatuses.cloudflared.enabled,
         state: providerStatuses.cloudflared.state,
         component: cloudflaredComponent,
+        configuration: cloudflaredConfiguration,
       },
       frp: {
         bundled: false,
@@ -406,6 +413,8 @@ export async function apply(ctx: Context, config: PluginConfig): Promise<void> {
   await frpConfig.initialize()
   const originConfig = new OriginConfigStore(join(remoteDirectory, 'origin', 'config'))
   await originConfig.initialize()
+  const cloudflaredTunnel = new CloudflaredTunnelStore(join(remoteDirectory, 'cloudflared'))
+  await cloudflaredTunnel.initialize()
   const unregisterBuiltin = mobileAccess.registerExtension({
     schemaVersion: 1,
     id: 'computer-images',
@@ -550,6 +559,7 @@ export async function apply(ctx: Context, config: PluginConfig): Promise<void> {
     cloudflared: new CloudflaredController({
       store: cloudflaredStore,
       executable: cloudflaredComponent.executable,
+      tunnel: cloudflaredTunnel,
       createGateway: createRemoteGateway,
     }),
     frp: new FrpController({
@@ -582,6 +592,7 @@ export async function apply(ctx: Context, config: PluginConfig): Promise<void> {
     },
     cpolarComponent.status(),
     cloudflaredComponent.status(),
+    cloudflaredTunnel.status(),
     frpComponent.status(),
     frpConfig.status(),
     originConfig.status(),
@@ -785,6 +796,27 @@ export async function apply(ctx: Context, config: PluginConfig): Promise<void> {
           await remoteProviders.mutate(async () => {
             await remoteControllers.cloudflared.setEnabled(false)
             await cloudflaredComponent.purge()
+          })
+          sendJson(response, 200, remotePayload(), false)
+          return
+        }
+        if (request.method === 'POST' && target.decodedPathname === `${LOCAL_ADMIN_PREFIX}/remote/cloudflared/tunnel`) {
+          const body = await readJsonObject(request, 8192)
+          await remoteProviders.mutate(async () => {
+            await cloudflaredTunnel.configure(mergeSavedCloudflaredTunnelSettings(body, cloudflaredTunnel.settings()))
+            // A live connector is bound to the previous hostname, port and token, so
+            // the new configuration only takes effect through a restart.
+            if (remoteControllers.cloudflared.status().enabled) await remoteControllers.cloudflared.reconnect()
+          })
+          sendJson(response, 200, remotePayload(), false)
+          return
+        }
+        if (request.method === 'POST' && target.decodedPathname === `${LOCAL_ADMIN_PREFIX}/remote/cloudflared/tunnel/purge`) {
+          const body = await readJsonObject(request, 4096)
+          if (body.confirm !== true) throw new HttpError(400, 'bad_request')
+          await remoteProviders.mutate(async () => {
+            await remoteControllers.cloudflared.setEnabled(false)
+            await cloudflaredTunnel.purge()
           })
           sendJson(response, 200, remotePayload(), false)
           return
@@ -1011,6 +1043,21 @@ export async function apply(ctx: Context, config: PluginConfig): Promise<void> {
         .filter(provider => provider !== remoteProviders.selected)
         .map(provider => stores[provider].save({ version: 1, enabled: false })))
       for (const provider of REMOTE_PROVIDERS) await remoteControllers[provider].initialize()
+      // Broadcast discovery degrades silently when its UDP port cannot be bound, which
+      // otherwise leaves "the phone cannot find this computer" with no visible cause.
+      const lanDiscovery = lanGateway?.discoveryStatus()
+      if (lanDiscovery !== undefined && !lanDiscovery.broadcast) {
+        logger.warn(
+          'broadcast discovery is unavailable (%s); mDNS is still published, so pair manually or free the UDP port',
+          lanDiscovery.errorCode ?? 'unknown_cause',
+        )
+      }
+      if (lanDiscovery?.mobileAssetsErrorCode !== undefined) {
+        logger.warn(
+          'a bundled mobile asset is missing (%s); the phone frontend will serve without it',
+          lanDiscovery.mobileAssetsErrorCode,
+        )
+      }
     } catch (error) {
       try {
         await settleCleanupSteps([

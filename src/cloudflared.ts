@@ -2,6 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { lstat } from 'node:fs/promises'
 import { createServer, type Server } from 'node:net'
 import { isAbsolute } from 'node:path'
+import type { CloudflaredTunnelMode, CloudflaredTunnelSettings } from './cloudflared-tunnel.js'
 import type { MobileAccessControlStore } from './control.js'
 import type { MobileAccessGateway } from './gateway.js'
 import { settleRemoteResources, terminateRemoteProcess, type RemoteProviderController } from './remote.js'
@@ -42,6 +43,8 @@ export interface CloudflaredStatus {
 export interface CloudflaredControllerOptions {
   readonly store: MobileAccessControlStore
   readonly executable: string
+  /** Named-tunnel configuration; quick tunnels are used when it reports quick mode. */
+  readonly tunnel: { settings(): CloudflaredTunnelSettings }
   readonly createGateway: (origin: string, listenPort: number) => Promise<MobileAccessGateway>
   readonly onStatus?: (status: CloudflaredStatus) => void
   /** Liveness bound for one quick-tunnel allocation; defaults to the product timeout. */
@@ -103,11 +106,24 @@ export function parseCloudflaredOrigin(line: string): string | undefined {
   return url.origin
 }
 
-async function reserveLoopbackPort(): Promise<PortReservation> {
+/**
+ * Whether one cloudflared log line reports an established edge connection.
+ *
+ * A named tunnel prints no banner, so registration is the only signal that the
+ * connector reached Cloudflare and the public hostname can serve traffic. Both
+ * the current and the older wording are accepted; anything else is ignored so a
+ * chatty log line cannot be mistaken for readiness.
+ */
+export function isCloudflaredRegistration(line: string): boolean {
+  return /registered tunnel connection/iu.test(line)
+    || /connection\s+[0-9a-f][0-9a-f-]{7,}\s+registered/iu.test(line)
+}
+
+async function reserveLoopbackPort(requestedPort?: number): Promise<PortReservation> {
   const server: Server = createServer(socket => { socket.destroy() })
   await new Promise<void>((resolveListen, reject) => {
     server.once('error', reject)
-    server.listen(0, '127.0.0.1', () => {
+    server.listen(requestedPort ?? 0, '127.0.0.1', () => {
       server.off('error', reject)
       resolveListen()
     })
@@ -149,8 +165,10 @@ function withoutProxyEnvironment(environment: NodeJS.ProcessEnv): NodeJS.Process
 /**
  * Owns an installed cloudflared client and a provider-specific DSH remote gateway.
  *
- * Only quick tunnels are supported: no account, token, DNS record, or named
- * tunnel configuration exists anywhere in this controller.
+ * Quick tunnels allocate a random hostname and a random forward port on every
+ * start. Named tunnels instead read an account token and a stable public
+ * hostname from the tunnel store, forward to the configured loopback port, and
+ * learn readiness from the connector's registration line rather than a banner.
  */
 export class CloudflaredController implements RemoteProviderController {
   private enabled = false
@@ -161,6 +179,8 @@ export class CloudflaredController implements RemoteProviderController {
   private reservation: PortReservation | undefined
   private generation = 0
   private buffer = ''
+  private mode: CloudflaredTunnelMode = 'quick'
+  private namedOrigin: string | undefined
   private latest: CloudflaredStatus = publicStatus({ enabled: false, state: 'off' })
   private queue: Promise<void> = Promise.resolve()
   private startupTimer: NodeJS.Timeout | undefined
@@ -260,26 +280,72 @@ export class CloudflaredController implements RemoteProviderController {
       return
     }
 
+    const settings = this.options.tunnel.settings()
+    const named = settings.mode === 'named' ? settings : undefined
+    this.mode = settings.mode
+    this.namedOrigin = named === undefined ? undefined : `https://${named.hostname}`
+
     let reservation: PortReservation
-    try { reservation = await reserveLoopbackPort() } catch {
-      this.publish({ enabled: true, state: 'error', errorCode: 'cloudflared_port_unavailable' })
+    try {
+      reservation = await reserveLoopbackPort(named?.port)
+    } catch (error) {
+      // A bind conflict is the user's to resolve; anything else is an internal
+      // reservation failure and must not be reported as a busy port.
+      const conflict = (error as NodeJS.ErrnoException | undefined)?.code === 'EADDRINUSE'
+      this.publish({
+        enabled: true,
+        state: 'error',
+        errorCode: conflict
+          ? (named === undefined ? 'cloudflared_port_unavailable' : 'cloudflared_tunnel_port_unavailable')
+          : 'cloudflared_port_reservation_failed',
+      })
       return
     }
     this.reservation = reservation
     this.buffer = ''
     this.publish({ enabled: true, state: 'starting' })
-    // A quick tunnel needs only the local origin. The DSH remote gateway behind
-    // it speaks plain HTTP, so no origin TLS override is required here.
-    const args = [
-      'tunnel',
-      '--url',
-      `http://127.0.0.1:${String(reservation.port)}`,
-      '--no-autoupdate',
-    ]
+
+    if (named !== undefined) {
+      // Cloudflare already routes the public hostname to this exact port, so the
+      // gateway must be listening before the connector registers; the port has to
+      // survive restarts, which is why it is configuration rather than a choice.
+      const origin = this.namedOrigin as string
+      this.publish({ enabled: true, state: 'connecting', origin })
+      await reservation.release()
+      if (this.reservation === reservation) this.reservation = undefined
+      let gateway: MobileAccessGateway
+      try {
+        gateway = await this.options.createGateway(origin, reservation.port)
+      } catch (error) {
+        // Only a real bind conflict is a port problem; anything else (certificate,
+        // configuration, permissions) must not send the user chasing the port.
+        const conflict = (error as NodeJS.ErrnoException | undefined)?.code === 'EADDRINUSE'
+        this.publish({
+          enabled: true,
+          state: 'error',
+          errorCode: conflict ? 'cloudflared_tunnel_port_unavailable' : 'gateway_start_failed',
+        })
+        return
+      }
+      if (generation !== this.generation || !this.enabled || this.disposed) {
+        await gateway.close()
+        return
+      }
+      this.gatewayValue = gateway
+    }
+
+    // The local DSH remote gateway speaks plain HTTP, so neither flavour needs an
+    // origin TLS override. A named tunnel takes its token from the environment so
+    // the credential never appears in the process command line.
+    const args = named === undefined
+      ? ['tunnel', '--url', `http://127.0.0.1:${String(reservation.port)}`, '--no-autoupdate']
+      : ['tunnel', '--no-autoupdate', 'run']
+    const environment = withoutProxyEnvironment(process.env)
+    if (named !== undefined) environment.TUNNEL_TOKEN = named.token
     const child = (this.options.spawnProcess ?? spawnCloudflaredProcess)(
       this.options.executable,
       args,
-      withoutProxyEnvironment(process.env),
+      environment,
     )
     this.child = child
     child.stdout.setEncoding('utf8')
@@ -310,6 +376,12 @@ export class CloudflaredController implements RemoteProviderController {
       if (newline < 0) return
       const line = this.buffer.slice(0, newline).replace(/\r$/u, '')
       this.buffer = this.buffer.slice(newline + 1)
+      if (this.mode === 'named') {
+        // The public origin is configuration here, so the log is only read for the
+        // registration that proves the connector reached Cloudflare.
+        if (isCloudflaredRegistration(line)) void this.enqueue(() => this.confirmNamedReady(generation))
+        continue
+      }
       let origin: string | undefined
       try { origin = parseCloudflaredOrigin(line) } catch {
         void this.enqueue(() => this.failGeneration(generation, 'cloudflared_invalid_origin'))
@@ -317,6 +389,15 @@ export class CloudflaredController implements RemoteProviderController {
       }
       if (origin !== undefined) void this.enqueue(() => this.attachGateway(generation, origin))
     }
+  }
+
+  /** Mark a named tunnel ready once the connector has registered with the edge. */
+  private async confirmNamedReady(generation: number): Promise<void> {
+    if (generation !== this.generation || !this.enabled || this.disposed) return
+    if (this.gatewayValue === undefined || this.latest.state === 'ready') return
+    if (this.startupTimer !== undefined) clearTimeout(this.startupTimer)
+    this.startupTimer = undefined
+    this.publish({ enabled: true, state: 'ready', ...(this.namedOrigin === undefined ? {} : { origin: this.namedOrigin }) })
   }
 
   private async attachGateway(generation: number, origin: string): Promise<void> {

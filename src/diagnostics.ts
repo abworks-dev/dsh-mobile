@@ -114,7 +114,7 @@ const REMOTE_ERROR_GUIDANCE: Readonly<Record<string, string>> = Object.freeze({
   cloudflared_invalid_origin: 'cloudflared 返回的公网地址未通过校验。',
   origin_config_missing: '先保存自有反向代理配置。',
   origin_config_invalid: '重新保存自有反向代理配置。',
-  origin_listen_port_in_use: '更换 HTTP 后端端口；不要使用局域网的 3443 端口。',
+  origin_listen_port_in_use: '更换 HTTP 后端端口；不要使用局域网的 3443、DSH 自身的 3080，或已被 cloudflared 隧道占用的 3444。',
   origin_listen_address_unavailable: '监听地址不属于当前电脑，请重新选择本机的私网 IPv4 地址。',
   origin_gateway_start_failed: '检查 HTTP 后端监听地址和端口后重新连接。',
   frp_component_missing: '先安装 FRP 官方组件。',

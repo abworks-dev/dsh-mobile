@@ -1,4 +1,5 @@
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
+import postcss from 'postcss'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   apply,
@@ -66,6 +67,23 @@ describe('mobile-control localization', () => {
     expect(CONTROL_STYLES).toContain('min-height:44px')
     expect(CONTROL_STYLES).toContain('dsh-mobile-control__actions[hidden],.dsh-mobile-control__manage-row[hidden]{display:none}')
     expect(CONTROL_STYLES).toContain('dsh-mobile-control__qr img{border-radius:12px;background:#fff')
+  })
+
+  it('keeps the named-tunnel form behind an explicit mode choice and never persists the token in the DOM', () => {
+    const source = readFileSync(new URL('../src/client.ts', import.meta.url), 'utf8')
+    // The mode selector stages a choice; only Save reaches the provider, so clicking
+    // between the two can never silently discard a saved token.
+    expect(source).toContain("cloudflaredModeQuick.addEventListener('click'")
+    expect(source).toContain("cloudflaredModeNamed.addEventListener('click'")
+    expect(source).toContain('const cloudflaredShownMode = cloudflaredModeDraft ?? cloudflaredTunnelMode')
+    // The connector token is a credential: a masked input, posted once, cleared after.
+    expect(source).toContain("cloudflaredToken.type = 'password'")
+    expect(source).toContain('/remote/cloudflared/tunnel')
+    expect(source).toContain('/remote/cloudflared/tunnel/purge')
+    expect(source).toContain('cloudflaredToken.value = \'\'')
+    // Quick tunnels allocate their own address, so the named fields stay hidden.
+    expect(source).toContain('cloudflaredTunnel.hidden = cloudflaredShownMode !== \'named\'')
+    expect(CONTROL_STYLES).toContain('.dsh-mobile-control__tunnel[hidden]{display:none}')
   })
 
   it('keeps the provider list single-column with legible copy and non-trivial targets', () => {
@@ -213,29 +231,44 @@ describe('mobile-control localization', () => {
     expect(parseMobileRemoteProvider(42)).toBe('tailscale')
   })
 
-  it('localizes cloudflared quick-tunnel setup and states its temporary-address limits', () => {
+  it('localizes both cloudflared tunnel modes without implying either is the only one', () => {
     // Keys appended with Object.assign are not part of the inferred catalog type,
     // so read them through the same cast the existing origin assertions use.
     const en = MOBILE_CONTROL_MESSAGES.en as Record<string, string>
     const it = MOBILE_CONTROL_MESSAGES.it as Record<string, string>
     const zh = MOBILE_CONTROL_MESSAGES.zh as Record<string, string>
-    expect(en.cloudflaredBadge).toBe('No account')
+    // The provider now runs a quick tunnel *or* a named tunnel, so the badge and
+    // description must not claim an account is never needed.
+    expect(en.cloudflaredBadge).toBe('Account optional')
+    expect(zh.cloudflaredBadge).toBe('账号可选')
+    expect(it.cloudflaredBadge).toBe('Account facoltativo')
     expect(en.prepareCloudflared).toBe('Prepare cloudflared')
-    expect(zh.cloudflaredBadge).toBe('无需账号')
-    expect(it.cloudflaredBadge).toBe('Nessun account')
+    for (const [catalog, label] of [[en, 'en'], [it, 'it'], [zh, 'zh']] as const) {
+      expect(catalog.cloudflaredDescription, label).toMatch(/quick|快速|rapido/iu)
+      expect(catalog.cloudflaredDescription, label).toMatch(/named|命名|con nome/iu)
+    }
     // A quick tunnel is temporary, rate-limited, and carries no uptime promise;
     // the UI must say so rather than implying a production-grade channel.
     expect(en.cloudflaredQuickNote).toContain('rate-limited')
     expect(en.cloudflaredQuickNote).toContain('no uptime guarantee')
     expect(zh.cloudflaredQuickNote).toContain('无可用性保证')
-    expect(it.cloudflaredQuickNote).toContain('nessuna garanzia')
-    expect(en.cloudflaredReady).toContain('temporary')
-    expect(zh.cloudflaredReady).toContain('临时')
+    expect(it.cloudflaredQuickNote).toContain('senza garanzia')
+    // The named-tunnel note must state the token's real handling, because that is
+    // the part a user cannot verify from the UI.
+    expect(en.cloudflaredNamedNote).toContain('environment')
+    expect(zh.cloudflaredNamedNote).toContain('环境变量')
+    expect(it.cloudflaredNamedNote).toContain('ambiente')
+    // The component-readiness line no longer describes only a quick tunnel: the
+    // mode-specific note carries that, and a stale claim here would contradict it.
+    for (const [catalog, label] of [[en, 'en'], [it, 'it'], [zh, 'zh']] as const) {
+      expect(catalog.cloudflaredReady, label).not.toMatch(/temporary|临时|temporaneo/iu)
+      expect(catalog.remoteStartingCloudflared, label).not.toMatch(/temporary|临时|temporaneo/iu)
+    }
     for (const catalog of [en, it, zh]) {
-      // The badge states the real difference (no account), not a regional claim.
+      // The badge states the real difference (account optional), not a regional claim.
       expect(catalog.cloudflaredBadge).not.toMatch(/mainland|国内/u)
       for (const key of [
-        'cloudflaredDescription', 'cloudflaredQuickNote', 'cloudflaredComponentNote',
+        'cloudflaredDescription', 'cloudflaredQuickNote', 'cloudflaredNamedNote', 'cloudflaredComponentNote',
         'installConfirmCloudflared', 'purgeCloudflared', 'purgeCloudflaredConfirm',
         'resetCloudflaredConfirm', 'reconnectingCloudflared',
         'cloudflaredMissing', 'cloudflaredInvalid', 'cloudflaredPortUnavailable',
@@ -245,6 +278,60 @@ describe('mobile-control localization', () => {
         expect(catalog[key]?.length).toBeGreaterThan(0)
       }
     }
+  })
+
+  it('parses as CSS and maps every provider failure code to copy that exists', () => {
+    // A stray brace once sat between a rule and its own declarations: the browser
+    // dropped `font` and `cursor` from every destructive button and the string-based
+    // guards above could not see it. Only a parser catches that class of defect.
+    expect(() => postcss.parse(CONTROL_STYLES)).not.toThrow()
+    // Every code the panel can translate must exist in every locale, otherwise a failed
+    // request falls back to printing the raw server code in all three languages.
+    const source = readFileSync(new URL('../src/client.ts', import.meta.url), 'utf8')
+    const table = /const REMOTE_ERROR_MESSAGE_KEYS[^{]*\{([\s\S]*?)\n  \}/u.exec(source)?.[1] ?? ''
+    const keys = [...table.matchAll(/:\s*'([A-Za-z0-9]+)'/gu)].map((match) => match[1] ?? '')
+    expect(keys.length).toBeGreaterThan(40)
+    for (const [locale, catalog] of Object.entries(MOBILE_CONTROL_MESSAGES)) {
+      for (const key of keys) {
+        expect((catalog as Record<string, string>)[key], `${locale}.${key}`).toBeTruthy()
+      }
+    }
+    // The panel must route provider failures through that table rather than stringifying
+    // the error, which is what leaked `Error: cloudflared_...` to users.
+    expect(source).toContain('remoteFailureTextFor(error, \'installFailed\')')
+    expect(source).toContain('remoteFailureTextFor(error, \'requestFailed\')')
+  })
+
+  it('references only DSH tokens that exist, so no var() falls back to a light literal', () => {
+    // Four names used here once did not exist in DSH (`border-subtle`, `border-normal`,
+    // `danger-normal`, `warning-normal`) plus three in the native layout (`bg`,
+    // `interactive-border-focus`, another `border-subtle`). Every `var()` therefore took
+    // its light fallback and the dark theme never adapted. The DSH checkout is not
+    // available in CI, so the set the plugin may use is recorded here: adding a token is
+    // then a deliberate edit rather than a silent typo.
+    const allowed = new Set([
+      '--dsw-alias-bg-base', '--dsw-alias-bg-layer-1', '--dsw-alias-bg-layer-2', '--dsw-alias-bg-layer-3',
+      '--dsw-alias-bg-module-platform',
+      '--dsw-alias-border-l2', '--dsw-alias-border-l3', '--dsw-alias-border-l4',
+      '--dsw-alias-interactive-bg-active', '--dsw-alias-interactive-bg-hover',
+      '--dsw-alias-interactive-bg-hover-danger', '--dsw-alias-interactive-bg-hover-solid',
+      '--dsw-alias-label-primary', '--dsw-alias-label-primary-bluish',
+      '--dsw-alias-label-secondary', '--dsw-alias-label-tertiary',
+      '--dsw-alias-state-business-primary', '--dsw-alias-state-business-tertiary',
+      '--dsw-alias-state-error-primary', '--dsw-alias-state-error-secondary',
+      '--dsw-alias-state-success-primary', '--dsw-alias-state-success-tertiary',
+      '--dsw-alias-state-warn-label', '--dsw-alias-state-warn-primary', '--dsw-alias-state-warn-tertiary',
+    ])
+    const unknown = new Map()
+    for (const file of readdirSync(new URL('../src', import.meta.url))) {
+      if (!file.endsWith('.ts')) continue
+      const source = readFileSync(new URL(`../src/${file}`, import.meta.url), 'utf8')
+      for (const match of source.matchAll(/var\((--dsw-[a-z0-9-]+)/gu)) {
+        const token = match[1] ?? ''
+        if (!allowed.has(token)) unknown.set(`${file} ${token}`, true)
+      }
+    }
+    expect([...unknown.keys()]).toEqual([])
   })
 
   it('localizes own-proxy setup without equating a listening backend with public readiness', () => {

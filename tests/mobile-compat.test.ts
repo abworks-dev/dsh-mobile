@@ -100,8 +100,38 @@ describe('early WebView Iterator compatibility', () => {
     expect(runInContext('bootResult', page)).toBe('1,2')
   })
 
-  it('accepts a single-quoted nonce and refuses an index without a script', () => {
-    expect(ensureMobileCompatibility("<script nonce='test'>boot()</script>")).toContain("nonce='test'></script><script")
-    expect(() => ensureMobileCompatibility('<html><head></head></html>')).toThrow('no script')
+  it('accepts a single-quoted nonce and leaves an index with no script usable', () => {
+    expect(ensureMobileCompatibility("<script nonce='test'>boot()</script>")).toContain('nonce="test"></script><script')
+    // The bundle is an enhancement: a document it cannot be placed in must still be
+    // served, because throwing here took the whole mobile frontend down with a 502.
+    const headless = '<html><head><title>no scripts</title></head></html>'
+    expect(ensureMobileCompatibility(headless)).toBe(headless)
+  })
+
+  it('never anchors to markup that an HTML comment made inert', () => {
+    // Injecting into the comment would place the bundle in text that never runs, so
+    // the fix would silently not apply while the page still looked fine.
+    const commented = '<!-- <script src="/a.js"></script> --><html><body></body></html>'
+    expect(ensureMobileCompatibility(commented)).toBe(commented)
+    // With a live script later in the document, that one becomes the anchor instead.
+    const mixed = '<!-- <script src="/a.js"></script> --><script src="/b.js"></script>'
+    const output = ensureMobileCompatibility(mixed)
+    expect(output).toContain(`<script src="/b.js"></script>`)
+    expect(output.indexOf(MOBILE_COMPAT_PATH)).toBeGreaterThan(output.indexOf('-->'))
+  })
+
+  it('treats an already-injected bundle as present whatever quoting the document uses', () => {
+    const single = `<html><script src='${MOBILE_COMPAT_PATH}'></script></html>`
+    expect(ensureMobileCompatibility(single)).toBe(single)
+    const spaced = `<html><script  src = "${MOBILE_COMPAT_PATH}" ></script></html>`
+    expect(ensureMobileCompatibility(spaced)).toBe(spaced)
+  })
+
+  it('reads the real nonce instead of text that merely resembles one', () => {
+    // A value that contains the attribute text must not be mistaken for the attribute.
+    const decoy = `<script title='say nonce="fake"' nonce="real"></script>`
+    expect(ensureMobileCompatibility(decoy)).toContain(`<script src="${MOBILE_COMPAT_PATH}" nonce="real"></script>`)
+    const after = `<script nonce="real" data-nonce="decoy"></script>`
+    expect(ensureMobileCompatibility(after)).toContain(`nonce="real"`)
   })
 })

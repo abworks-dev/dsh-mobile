@@ -2,7 +2,7 @@
 
 [中文指南](SELF_HOSTED_ORIGIN.md)
 
-> **Unreleased**: this provider lives in the current source on top of the published 0.4.1. The package version stays `0.4.1`, which is not a claim that the published 0.4.1 package includes it.
+> This provider ships with the package from **0.4.2** on.
 
 This provider appears under **Mobile Access → Remote → Self-hosted connection → Own reverse proxy**. It adds a separate authenticated private HTTP origin for an HTTPS reverse proxy you already own; it does not install a tunnel or manage your proxy, DNS, certificate, firewall, or router.
 
@@ -11,9 +11,9 @@ This provider appears under **Mobile Access → Remote → Self-hosted connectio
 - Public origin: `https://phone.example.com:8815` (HTTPS only, optional custom port, no path/query/fragment/credentials).
 - Same computer: listen on `127.0.0.1:3444`, allow `127.0.0.0/8`.
 - Separate LAN proxy: listen on the DSH computer's private IPv4, e.g. `192.168.50.10:3444`, and allow the proxy's actual direct source, e.g. `192.168.50.1/32`.
-- Only explicit loopback/RFC1918 IPv4 binds are supported. Wildcard, public and IPv6 binds are rejected. Port 3443 stays reserved for the existing LAN gateway. Source CIDRs must be canonical private/loopback networks, at most 16; prefer a single-host /32. Forwarded headers do not determine source authorization.
+- Only explicit loopback/RFC1918 IPv4 binds are supported. Wildcard, public and IPv6 binds are rejected. The port must be 1024–65535 and may not be 3443 (the LAN gateway) or 3080 (DSH's own WebServer); note that 3444 is also the cloudflared named tunnel's default forward port. Source CIDRs must be canonical private/loopback networks, at most 16; prefer a single-host /32. Forwarded headers do not determine source authorization.
 
-Select **Save and start backend**, then point the proxy at the displayed HTTP backend. **Never expose/port-forward that HTTP listener publicly**, and never bypass it by proxying to DSH 8080 (or its configured WebServer port) or the LAN 3443 gateway. HTTP between separate devices is suitable only for a trusted private network. Pairing, authentication, exact Host/Origin enforcement, CSRF, Secure cookies and WebSocket path policy remain active.
+Select **Save and start backend**, then point the proxy at the displayed HTTP backend. **Never expose/port-forward that HTTP listener publicly**, and never bypass it by proxying to DSH 8080 (or its configured WebServer port) or the LAN 3443 gateway. HTTP between separate devices is suitable only for a trusted private network. Pairing, authentication, normalized-exact Host/Origin enforcement, CSRF, Secure cookies and WebSocket path policy remain active. Do not open the plain HTTP backend in a browser to verify it: cookies are marked `Secure`, so a browser discards them over `http://` and login or CSRF will fail with no visible reason.
 
 ## Proxy contract
 
