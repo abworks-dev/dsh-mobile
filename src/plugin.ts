@@ -137,6 +137,11 @@ function mapAdminError(error: unknown): HttpError {
   if (error instanceof Error && error.message.startsWith('cpolar_')) {
     return new HttpError(409, error.message)
   }
+  // Component download and hash failures carry their own stable code, so the panel can show why an
+  // install failed instead of a generic server error.
+  if (error instanceof Error && error.message.startsWith('cloudflared_')) {
+    return new HttpError(409, error.message)
+  }
   if (error instanceof Error && [
     'frp_server_address_invalid',
     'frp_server_port_invalid',

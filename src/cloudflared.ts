@@ -16,6 +16,17 @@ const MAX_LOG_BUFFER_BYTES = 64 * 1024
 const START_TIMEOUT_MS = 60_000
 const CLOUDFLARED_HOST_SUFFIX = '.trycloudflare.com'
 
+/**
+ * Subdomains Cloudflare reserves for its own control plane.
+ *
+ * The quick-tunnel banner prints `https://api.trycloudflare.com` (the registration API) before it
+ * prints the tunnel's own hostname, and that address satisfies a bare suffix check. Adopting it
+ * would put the API host in the pairing QR code, where the phone gets `{"code":10005","message":
+ * "Method Not Allowed"}` instead of DSH. A quick tunnel is always one random label under the
+ * suffix, so the reserved single labels are refused outright.
+ */
+const RESERVED_CLOUDFLARED_LABELS: readonly string[] = Object.freeze(['api', 'www', 'update', 'login'])
+
 /** Product-facing states for the optional cloudflared remote transport. */
 export type CloudflaredState = 'off' | 'unavailable' | 'starting' | 'connecting' | 'ready' | 'error'
 
@@ -56,10 +67,15 @@ function publicStatus(status: CloudflaredStatus): CloudflaredStatus {
   })
 }
 
-/** A quick tunnel hostname must be a real label under the provider's own suffix. */
+/**
+ * Whether a hostname is a quick-tunnel host: exactly one random label under the provider suffix,
+ * never one of the reserved control-plane labels.
+ */
 function isCloudflaredHost(hostname: string): boolean {
   const lower = hostname.toLowerCase()
-  return lower.endsWith(CLOUDFLARED_HOST_SUFFIX) && lower.length > CLOUDFLARED_HOST_SUFFIX.length
+  if (!lower.endsWith(CLOUDFLARED_HOST_SUFFIX)) return false
+  const label = lower.slice(0, -CLOUDFLARED_HOST_SUFFIX.length)
+  return label !== '' && !label.includes('.') && !RESERVED_CLOUDFLARED_LABELS.includes(label)
 }
 
 /**

@@ -157,6 +157,19 @@ describe('cloudflared log protocol', () => {
     expect(() => parseCloudflaredOrigin('https://x.trycloudflare.com/path')).toThrow('invalid_cloudflared_origin')
     expect(() => parseCloudflaredOrigin('https://x.trycloudflare.com:8443')).toThrow('invalid_cloudflared_origin')
   })
+
+  it('never adopts a reserved control-plane host the banner prints first', () => {
+    // Some versions print https://api.trycloudflare.com (the registration API) before the tunnel's
+    // own hostname. Adopting it would put the API host in the pairing QR code, where the phone gets
+    // {"code":10005,"message":"Method Not Allowed"} instead of DSH.
+    for (const reserved of ['api', 'www', 'update', 'login']) {
+      expect(() => parseCloudflaredOrigin(`|  https://${reserved}.trycloudflare.com  |`)).toThrow('invalid_cloudflared_origin')
+    }
+    expect(() => parseCloudflaredOrigin('https://a.api.trycloudflare.com')).toThrow('invalid_cloudflared_origin')
+    // The real quick-tunnel hostname on a later line is still accepted.
+    expect(parseCloudflaredOrigin('|  https://random-words-here.trycloudflare.com  |'))
+      .toBe('https://random-words-here.trycloudflare.com')
+  })
 })
 
 describe('cloudflared provider lifecycle', () => {

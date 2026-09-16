@@ -11,6 +11,7 @@ import {
   writeFile,
 } from 'node:fs/promises'
 import { isAbsolute, join, relative, resolve } from 'node:path'
+import { downloadPinnedArtifact } from './component-download.js'
 
 /**
  * Pinned cloudflared Windows component fetched only after an explicit user action.
@@ -77,17 +78,12 @@ async function regularFile(file: string, expectedBytes?: number): Promise<boolea
 }
 
 async function defaultFetchArtifact(url: string, signal: AbortSignal): Promise<Uint8Array> {
-  const response = await fetch(url, { redirect: 'error', signal })
-  if (!response.ok) throw new Error(`cloudflared_download_http_${String(response.status)}`)
-  const length = Number(response.headers.get('content-length'))
-  if (Number.isFinite(length) && length !== CLOUDFLARED_COMPONENT_RELEASE.downloadBytes) {
-    throw new Error('cloudflared_download_size_mismatch')
-  }
-  const bytes = new Uint8Array(await response.arrayBuffer())
-  if (bytes.byteLength !== CLOUDFLARED_COMPONENT_RELEASE.downloadBytes) {
-    throw new Error('cloudflared_download_size_mismatch')
-  }
-  return bytes
+  return downloadPinnedArtifact({
+    url,
+    expectedBytes: CLOUDFLARED_COMPONENT_RELEASE.downloadBytes,
+    errorPrefix: 'cloudflared',
+    signal,
+  })
 }
 
 /** Owns the optional cloudflared binary inside DSH Mobile state. */

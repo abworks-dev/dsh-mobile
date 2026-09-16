@@ -909,6 +909,10 @@ function installControl(): { remove: () => void; toggle: () => void; isOpen: () 
   let remoteSetupOpenedAt = 0
   let remoteReconnectBusy = false
   let remoteProviderBusy = false
+  // A failed control action stores its message here so the repaint that loadRemote() runs in the
+  // action's finally cannot replace it before the user reads it. The repaint that would have
+  // erased it consumes the value instead, so it never lingers over a later state.
+  let remoteFailureText: string | undefined
   let cpolarInstalled = false
   let cpolarConfigured = false
   let cloudflaredInstalled = false
@@ -1413,6 +1417,11 @@ function installControl(): { remove: () => void; toggle: () => void; isOpen: () 
     remoteStatus.textContent = remoteSetupPending && needsFunnelSetup
       ? t('setupOpened')
       : (state === 'error' ? (errorLabels[errorCode] ?? labels.error!) : (labels[state] ?? labels.error!))
+    // Keep a just-failed action's message for this one repaint, then release it.
+    if (remoteFailureText !== undefined) {
+      remoteStatus.textContent = remoteFailureText
+      remoteFailureText = undefined
+    }
     remoteGuide.hidden = !needsFunnelSetup
     remoteSetup.disabled = remoteSetupUrl === '' || remoteReconnectBusy
     remoteSetupRetry.disabled = remoteReconnectBusy
@@ -1462,7 +1471,7 @@ function installControl(): { remove: () => void; toggle: () => void; isOpen: () 
       : provider === 'cloudflared' ? t('switchingCloudflared')
         : provider === 'frp' ? t('switchingFrp') : provider === 'origin' ? t('switchingOrigin') : t('switchingTailscale')
     void controlRequestJson('/api/mobile-access/remote/provider', { method: 'POST', body: JSON.stringify({ provider }) })
-      .then(renderRemote, error => { remoteStatus.textContent = t('requestFailed', { error: String(error) }) })
+      .then(renderRemote, error => { remoteFailureText = t('requestFailed', { error: String(error) }); remoteStatus.textContent = remoteFailureText })
       .finally(() => { remoteProviderBusy = false; loadRemote() })
   }
   tailscaleChoice.addEventListener('click', () => { chooseRemoteProvider('tailscale') })
@@ -1479,7 +1488,7 @@ function installControl(): { remove: () => void; toggle: () => void; isOpen: () 
     cloudflaredInstall.textContent = t('downloading')
     remoteStatus.textContent = t('installingCloudflared')
     void controlRequestJson('/api/mobile-access/remote/cloudflared/component/install', { method: 'POST', body: JSON.stringify({ confirm: true }) }, LONG_CONTROL_REQUEST_TIMEOUT_MS)
-      .then(renderRemote, error => { remoteStatus.textContent = t('installFailed', { error: String(error) }) })
+      .then(renderRemote, error => { remoteFailureText = t('installFailed', { error: String(error) }); remoteStatus.textContent = remoteFailureText })
       .finally(() => { remoteProviderBusy = false; loadRemote() })
   })
   cloudflaredPurge.addEventListener('click', () => {
@@ -1489,7 +1498,7 @@ function installControl(): { remove: () => void; toggle: () => void; isOpen: () 
     cloudflaredPurge.disabled = true
     remoteStatus.textContent = t('purgingCloudflared')
     void controlRequestJson('/api/mobile-access/remote/cloudflared/component/purge', { method: 'POST', body: JSON.stringify({ confirm: true }) }, LONG_CONTROL_REQUEST_TIMEOUT_MS)
-      .then(renderRemote, error => { remoteStatus.textContent = t('purgeFailed', { error: String(error) }) })
+      .then(renderRemote, error => { remoteFailureText = t('purgeFailed', { error: String(error) }); remoteStatus.textContent = remoteFailureText })
       .finally(() => { remoteProviderBusy = false; cloudflaredPurge.disabled = false; loadRemote() })
   })
   cpolarInstall.addEventListener('click', () => {
@@ -1501,7 +1510,7 @@ function installControl(): { remove: () => void; toggle: () => void; isOpen: () 
     cpolarInstall.textContent = t('downloading')
     remoteStatus.textContent = t('installingCpolar')
     void controlRequestJson('/api/mobile-access/remote/cpolar/component/install', { method: 'POST', body: JSON.stringify({ confirm: true }) }, LONG_CONTROL_REQUEST_TIMEOUT_MS)
-      .then(renderRemote, error => { remoteStatus.textContent = t('installFailed', { error: String(error) }) })
+      .then(renderRemote, error => { remoteFailureText = t('installFailed', { error: String(error) }); remoteStatus.textContent = remoteFailureText })
       .finally(() => { remoteProviderBusy = false; loadRemote() })
   })
   cpolarConfigure.addEventListener('click', () => {
@@ -1522,7 +1531,7 @@ function installControl(): { remove: () => void; toggle: () => void; isOpen: () 
         remoteStatus.textContent = t('configuredConnecting')
         return controlRequestJson('/api/mobile-access/remote/control', { method: 'POST', body: JSON.stringify({ running: true }) })
       })
-      .then(renderRemote, error => { remoteStatus.textContent = t('configureFailed', { error: String(error) }) })
+      .then(renderRemote, error => { remoteFailureText = t('configureFailed', { error: String(error) }); remoteStatus.textContent = remoteFailureText })
       .finally(() => { remoteProviderBusy = false; cpolarConfigure.setAttribute('aria-busy', 'false'); cpolarConfigure.textContent = t('saveConnect'); loadRemote() })
   })
   cpolarPurge.addEventListener('click', () => {
@@ -1532,7 +1541,7 @@ function installControl(): { remove: () => void; toggle: () => void; isOpen: () 
     cpolarPurge.disabled = true
     remoteStatus.textContent = t('purging')
     void controlRequestJson('/api/mobile-access/remote/cpolar/component/purge', { method: 'POST', body: JSON.stringify({ confirm: true }) }, LONG_CONTROL_REQUEST_TIMEOUT_MS)
-      .then(renderRemote, error => { remoteStatus.textContent = t('purgeFailed', { error: String(error) }) })
+      .then(renderRemote, error => { remoteFailureText = t('purgeFailed', { error: String(error) }); remoteStatus.textContent = remoteFailureText })
       .finally(() => { remoteProviderBusy = false; cpolarPurge.disabled = false; loadRemote() })
   })
   const validFrpServer = (value: string): boolean => value === value.trim() && value.length > 0 && value.length <= 253
@@ -1789,7 +1798,7 @@ function installControl(): { remove: () => void; toggle: () => void; isOpen: () 
     frpInstall.textContent = t('downloading')
     remoteStatus.textContent = t('installingFrp')
     void controlRequestJson('/api/mobile-access/remote/frp/component/install', { method: 'POST', body: JSON.stringify({ confirm: true }) }, LONG_CONTROL_REQUEST_TIMEOUT_MS)
-      .then(renderRemote, error => { remoteStatus.textContent = t('installFailed', { error: String(error) }) })
+      .then(renderRemote, error => { remoteFailureText = t('installFailed', { error: String(error) }); remoteStatus.textContent = remoteFailureText })
       .finally(() => { remoteProviderBusy = false; loadRemote() })
   })
   frpConfigure.addEventListener('click', () => {
@@ -1812,7 +1821,7 @@ function installControl(): { remove: () => void; toggle: () => void; isOpen: () 
       frpToken.value = ''
       remoteStatus.textContent = t('frpSavingConnecting')
       return controlRequestJson('/api/mobile-access/remote/control', { method: 'POST', body: JSON.stringify({ running: true }) })
-    }).then(renderRemote, error => { remoteStatus.textContent = t('configureFailed', { error: String(error) }) })
+    }).then(renderRemote, error => { remoteFailureText = t('configureFailed', { error: String(error) }); remoteStatus.textContent = remoteFailureText })
       .finally(() => {
         remoteProviderBusy = false
         frpConfigure.setAttribute('aria-busy', 'false')
@@ -1826,7 +1835,7 @@ function installControl(): { remove: () => void; toggle: () => void; isOpen: () 
     frpPurge.disabled = true
     remoteStatus.textContent = t('purgingFrp')
     void controlRequestJson('/api/mobile-access/remote/frp/component/purge', { method: 'POST', body: JSON.stringify({ confirm: true }) }, LONG_CONTROL_REQUEST_TIMEOUT_MS)
-      .then(renderRemote, error => { remoteStatus.textContent = t('purgeFailed', { error: String(error) }) })
+      .then(renderRemote, error => { remoteFailureText = t('purgeFailed', { error: String(error) }); remoteStatus.textContent = remoteFailureText })
       .finally(() => { remoteProviderBusy = false; frpPurge.disabled = false; loadRemote() })
   })
   const clearOriginValidation = (): void => {
@@ -1913,7 +1922,7 @@ function installControl(): { remove: () => void; toggle: () => void; isOpen: () 
   remoteToggle.addEventListener('click', () => {
     remoteToggle.disabled = true
     void controlRequestJson('/api/mobile-access/remote/control', { method: 'POST', body: JSON.stringify({ running: !remoteRunning }) })
-      .then(renderRemote, error => { remoteStatus.textContent = t('requestFailed', { error: String(error) }) })
+      .then(renderRemote, error => { remoteFailureText = t('requestFailed', { error: String(error) }); remoteStatus.textContent = remoteFailureText })
       .finally(loadRemote)
   })
   remoteLogin.addEventListener('click', () => {
@@ -1929,7 +1938,7 @@ function installControl(): { remove: () => void; toggle: () => void; isOpen: () 
       : remoteProvider === 'cloudflared' ? t('reconnectingCloudflared')
         : remoteProvider === 'frp' ? t('reconnectingFrp') : remoteProvider === 'origin' ? t('reconnectingOrigin') : t('reconnectingTailscale')
     void controlRequestJson('/api/mobile-access/remote/reconnect', { method: 'POST', body: '{}' })
-      .then(renderRemote, error => { remoteStatus.textContent = t('requestFailed', { error: String(error) }) })
+      .then(renderRemote, error => { remoteFailureText = t('requestFailed', { error: String(error) }); remoteStatus.textContent = remoteFailureText })
       .finally(() => {
         remoteReconnectBusy = false
         remoteReconnect.disabled = false
@@ -1978,7 +1987,7 @@ function installControl(): { remove: () => void; toggle: () => void; isOpen: () 
   remotePair.addEventListener('click', () => {
     remotePair.disabled = true
     void openRemotePairing()
-      .catch(error => { remoteStatus.textContent = t('requestFailed', { error: String(error) }) })
+      .catch(error => { remoteFailureText = t('requestFailed', { error: String(error) }); remoteStatus.textContent = remoteFailureText })
       .finally(() => { remotePair.disabled = !remoteReady })
   })
   remoteCopyLink.addEventListener('click', () => {
@@ -1987,7 +1996,7 @@ function installControl(): { remove: () => void; toggle: () => void; isOpen: () 
       ? copyRemotePairUrl()
       : openRemotePairing()
     void operation
-      .catch(error => { remoteStatus.textContent = t('requestFailed', { error: String(error) }) })
+      .catch(error => { remoteFailureText = t('requestFailed', { error: String(error) }); remoteStatus.textContent = remoteFailureText })
       .finally(() => { remoteCopyLink.disabled = !remoteReady })
   })
   const renderRemoteDevices = (data: Record<string, unknown>): void => {
@@ -2004,13 +2013,13 @@ function installControl(): { remove: () => void; toggle: () => void; isOpen: () 
       const id = typeof device.id === 'string' ? device.id : ''
       revoke.addEventListener('click', () => {
         void controlRequestJson('/api/mobile-access/remote/devices/revoke', { method: 'POST', body: JSON.stringify({ deviceId: id }) })
-          .then(loadRemoteDevices, error => { remoteStatus.textContent = t('requestFailed', { error: String(error) }) })
+          .then(loadRemoteDevices, error => { remoteFailureText = t('requestFailed', { error: String(error) }); remoteStatus.textContent = remoteFailureText })
       })
       row.append(label, meta, revoke); remoteDevicePanel.append(row)
     }
   }
   const loadRemoteDevices = (): void => {
-    void controlRequestJson('/api/mobile-access/remote/devices').then(renderRemoteDevices, error => { remoteStatus.textContent = t('requestFailed', { error: String(error) }) })
+    void controlRequestJson('/api/mobile-access/remote/devices').then(renderRemoteDevices, error => { remoteFailureText = t('requestFailed', { error: String(error) }); remoteStatus.textContent = remoteFailureText })
   }
   remoteDevices.addEventListener('click', () => {
     const show = remoteDevicePanel.hidden
@@ -2024,7 +2033,7 @@ function installControl(): { remove: () => void; toggle: () => void; isOpen: () 
         : remoteProvider === 'frp' ? t('resetFrpConfirm') : remoteProvider === 'origin' ? t('resetOriginConfirm') : t('resetTailscaleConfirm')
     if (!window.confirm(prompt)) return
     void controlRequestJson('/api/mobile-access/remote/reset', { method: 'POST', body: JSON.stringify({ confirm: true }) })
-      .then(renderRemote, error => { remoteStatus.textContent = t('requestFailed', { error: String(error) }) })
+      .then(renderRemote, error => { remoteFailureText = t('requestFailed', { error: String(error) }); remoteStatus.textContent = remoteFailureText })
   })
   const renderDiagnostics = (data: Record<string, unknown>): void => {
     const entries = [...diagnosticEntriesForRender(data)]

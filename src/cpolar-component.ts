@@ -13,6 +13,7 @@ import {
   writeFile,
 } from 'node:fs/promises'
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
+import { downloadPinnedArtifact } from './component-download.js'
 import { restrictPrivateFile } from './private-file.js'
 
 /** Pinned cpolar Windows component fetched only after an explicit user action. */
@@ -85,17 +86,12 @@ async function run(file: string, args: readonly string[]): Promise<void> {
 }
 
 async function defaultFetchArtifact(url: string, signal: AbortSignal): Promise<Uint8Array> {
-  const response = await fetch(url, { redirect: 'error', signal })
-  if (!response.ok) throw new Error(`cpolar_download_http_${String(response.status)}`)
-  const length = Number(response.headers.get('content-length'))
-  if (Number.isFinite(length) && length !== CPOLAR_COMPONENT_RELEASE.downloadBytes) {
-    throw new Error('cpolar_download_size_mismatch')
-  }
-  const bytes = new Uint8Array(await response.arrayBuffer())
-  if (bytes.byteLength !== CPOLAR_COMPONENT_RELEASE.downloadBytes) {
-    throw new Error('cpolar_download_size_mismatch')
-  }
-  return bytes
+  return downloadPinnedArtifact({
+    url,
+    expectedBytes: CPOLAR_COMPONENT_RELEASE.downloadBytes,
+    errorPrefix: 'cpolar',
+    signal,
+  })
 }
 
 async function defaultExtractArtifact(archive: string, destination: string): Promise<void> {
