@@ -1,5 +1,7 @@
 # Self-hosted FRP guide
 
+[中文指南](SELF_HOSTED_FRP.md)
+
 Self-hosted FRP is for users who already operate a VPS and want to avoid the bandwidth limits of public tunnels. The phone reaches Caddy on the VPS over HTTPS, crosses the encrypted FRP tunnel, and then reaches DSH on the computer. FRP only transports the request; DSH pairing is still required.
 
 ```text
