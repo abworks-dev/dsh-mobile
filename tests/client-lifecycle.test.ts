@@ -68,6 +68,23 @@ describe('mobile-control localization', () => {
     expect(CONTROL_STYLES).toContain('dsh-mobile-control__qr img{border-radius:12px;background:#fff')
   })
 
+  it('keeps the named-tunnel form behind an explicit mode choice and never persists the token in the DOM', () => {
+    const source = readFileSync(new URL('../src/client.ts', import.meta.url), 'utf8')
+    // The mode selector stages a choice; only Save reaches the provider, so clicking
+    // between the two can never silently discard a saved token.
+    expect(source).toContain("cloudflaredModeQuick.addEventListener('click'")
+    expect(source).toContain("cloudflaredModeNamed.addEventListener('click'")
+    expect(source).toContain('const cloudflaredShownMode = cloudflaredModeDraft ?? cloudflaredTunnelMode')
+    // The connector token is a credential: a masked input, posted once, cleared after.
+    expect(source).toContain("cloudflaredToken.type = 'password'")
+    expect(source).toContain('/remote/cloudflared/tunnel')
+    expect(source).toContain('/remote/cloudflared/tunnel/purge')
+    expect(source).toContain('cloudflaredToken.value = \'\'')
+    // Quick tunnels allocate their own address, so the named fields stay hidden.
+    expect(source).toContain('cloudflaredTunnel.hidden = cloudflaredShownMode !== \'named\'')
+    expect(CONTROL_STYLES).toContain('.dsh-mobile-control__tunnel[hidden]{display:none}')
+  })
+
   it('keeps the provider list single-column with legible copy and non-trivial targets', () => {
     // Verified against the panel rendered at its real 380 px width. Three providers in a
     // two-column grid left the last card orphaned in half a row, the description that decides

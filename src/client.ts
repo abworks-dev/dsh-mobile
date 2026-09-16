@@ -540,6 +540,29 @@ function installControl(): { remove: () => void; toggle: () => void; isOpen: () 
   // component source/cleanup disclosure remain.
   const cloudflaredSetup = element('section', 'dsh-mobile-control__cpolar-setup dsh-mobile-control__cloudflared-setup'); cloudflaredSetup.hidden = true
   const cloudflaredSetupTitle = element('h3', 'dsh-mobile-control__section-title'); cloudflaredSetupTitle.textContent = t('prepareCloudflared')
+  // Tunnel type comes first: it decides whether an account token is needed at all,
+  // while the component below is required either way.
+  const cloudflaredTunnelTitle = element('h3', 'dsh-mobile-control__section-title'); cloudflaredTunnelTitle.textContent = t('cloudflaredTunnelTitle')
+  const cloudflaredMode = element('div', 'dsh-mobile-control__switcher')
+  const cloudflaredModeQuick = element('button', 'dsh-mobile-control__tab is-active'); cloudflaredModeQuick.type = 'button'; cloudflaredModeQuick.textContent = t('cloudflaredTunnelQuick')
+  const cloudflaredModeNamed = element('button', 'dsh-mobile-control__tab'); cloudflaredModeNamed.type = 'button'; cloudflaredModeNamed.textContent = t('cloudflaredTunnelNamed')
+  cloudflaredMode.append(cloudflaredModeQuick, cloudflaredModeNamed)
+  const cloudflaredModeHint = element('p', 'dsh-mobile-control__component-status'); cloudflaredModeHint.textContent = t('cloudflaredTunnelQuickHint')
+  const cloudflaredTunnel = element('div', 'dsh-mobile-control__tunnel'); cloudflaredTunnel.hidden = true
+  const cloudflaredTunnelFields = element('div', 'dsh-mobile-control__frp-fields')
+  const cloudflaredHostnameLabel = element('label', 'dsh-mobile-control__field'); cloudflaredHostnameLabel.textContent = t('cloudflaredTunnelHostname')
+  const cloudflaredHostname = element('input'); cloudflaredHostname.type = 'text'; cloudflaredHostname.autocomplete = 'off'; cloudflaredHostname.spellcheck = false; cloudflaredHostname.placeholder = t('cloudflaredTunnelHostnamePlaceholder')
+  const cloudflaredPortLabel = element('label', 'dsh-mobile-control__field'); cloudflaredPortLabel.textContent = t('cloudflaredTunnelPort')
+  const cloudflaredPort = element('input'); cloudflaredPort.type = 'number'; cloudflaredPort.inputMode = 'numeric'; cloudflaredPort.min = '1024'; cloudflaredPort.max = '65535'; cloudflaredPort.value = '3444'
+  const cloudflaredTokenLabel = element('label', 'dsh-mobile-control__field'); cloudflaredTokenLabel.textContent = t('cloudflaredTunnelToken')
+  const cloudflaredToken = element('input'); cloudflaredToken.type = 'password'; cloudflaredToken.autocomplete = 'off'; cloudflaredToken.spellcheck = false; cloudflaredToken.placeholder = t('cloudflaredTunnelTokenPlaceholder')
+  cloudflaredHostnameLabel.append(cloudflaredHostname); cloudflaredPortLabel.append(cloudflaredPort); cloudflaredTokenLabel.append(cloudflaredToken)
+  cloudflaredTunnelFields.append(cloudflaredHostnameLabel, cloudflaredPortLabel, cloudflaredTokenLabel)
+  const cloudflaredTunnelStatus = element('p', 'dsh-mobile-control__component-status'); cloudflaredTunnelStatus.textContent = t('cloudflaredTunnelMissing')
+  const cloudflaredTunnelHint = element('p', 'dsh-mobile-control__component-status'); cloudflaredTunnelHint.textContent = t('cloudflaredTunnelHint', { port: '3444' })
+  const cloudflaredTunnelSave = element('button', 'dsh-mobile-control__primary dsh-mobile-control__frp-action'); cloudflaredTunnelSave.type = 'button'; cloudflaredTunnelSave.textContent = t('cloudflaredTunnelSave')
+  const cloudflaredTunnelForget = element('button', 'dsh-mobile-control__danger dsh-mobile-control__frp-action'); cloudflaredTunnelForget.type = 'button'; cloudflaredTunnelForget.textContent = t('cloudflaredTunnelForget'); cloudflaredTunnelForget.hidden = true
+  cloudflaredTunnel.append(cloudflaredTunnelFields, cloudflaredTunnelStatus, cloudflaredTunnelHint, cloudflaredTunnelSave, cloudflaredTunnelForget)
   const cloudflaredComponentStatus = element('p', 'dsh-mobile-control__component-status'); cloudflaredComponentStatus.textContent = t('checkingComponent')
   const cloudflaredInstall = element('button', 'dsh-mobile-control__primary'); cloudflaredInstall.type = 'button'; cloudflaredInstall.textContent = t('installOfficial')
   const cloudflaredNote = element('p', 'dsh-mobile-control__origin-warning'); cloudflaredNote.textContent = t('cloudflaredQuickNote')
@@ -552,7 +575,7 @@ function installControl(): { remove: () => void; toggle: () => void; isOpen: () 
   const cloudflaredTerms = element('a', 'dsh-mobile-control__text-link'); cloudflaredTerms.href = 'https://www.cloudflare.com/website-terms/'; cloudflaredTerms.target = '_blank'; cloudflaredTerms.rel = 'noopener noreferrer'; cloudflaredTerms.textContent = t('terms')
   const cloudflaredPurge = element('button', 'dsh-mobile-control__danger'); cloudflaredPurge.type = 'button'; cloudflaredPurge.textContent = t('purgeCloudflared')
   cloudflaredDetailsBody.append(cloudflaredDetailsText, cloudflaredStorage, cloudflaredOfficial, cloudflaredTerms, cloudflaredPurge); cloudflaredDetails.append(cloudflaredDetailsSummary, cloudflaredDetailsBody)
-  cloudflaredSetup.append(cloudflaredSetupTitle, cloudflaredComponentStatus, cloudflaredInstall, cloudflaredNote, cloudflaredDetails)
+  cloudflaredSetup.append(cloudflaredSetupTitle, cloudflaredTunnelTitle, cloudflaredMode, cloudflaredModeHint, cloudflaredTunnel, cloudflaredComponentStatus, cloudflaredInstall, cloudflaredNote, cloudflaredDetails)
   const selfHosted = element('details', 'dsh-mobile-control__self-hosted')
   const selfHostedSummary = element('summary', 'dsh-mobile-control__self-hosted-summary')
   const selfHostedSummaryText = element('span')
@@ -917,6 +940,11 @@ function installControl(): { remove: () => void; toggle: () => void; isOpen: () 
   let cpolarConfigured = false
   let cloudflaredInstalled = false
   let cloudflaredDownloadSize = ''
+  let cloudflaredTunnelMode: 'quick' | 'named' = 'quick'
+  let cloudflaredModeDraft: 'quick' | 'named' | null = null
+  let cloudflaredTunnelConfigured = false
+  let configuredCloudflaredHostname = ''
+  let configuredCloudflaredPort = 3444
   let originConfigured = false
   let originFormDirty = false
   let originFormBusy = false
@@ -1248,6 +1276,41 @@ function installControl(): { remove: () => void; toggle: () => void; isOpen: () 
       : !cloudflaredInstalled
         ? t('cloudflaredNotInstalled')
         : t('cloudflaredReady', { version: cloudflaredVersion })
+    const cloudflaredTunnelConfiguration = cloudflaredProvider.configuration !== null
+      && typeof cloudflaredProvider.configuration === 'object'
+      ? cloudflaredProvider.configuration as Record<string, unknown>
+      : {}
+    cloudflaredTunnelMode = cloudflaredTunnelConfiguration.mode === 'named' ? 'named' : 'quick'
+    cloudflaredTunnelConfigured = cloudflaredTunnelConfiguration.configured === true
+    configuredCloudflaredHostname = typeof cloudflaredTunnelConfiguration.hostname === 'string' ? cloudflaredTunnelConfiguration.hostname : ''
+    configuredCloudflaredPort = typeof cloudflaredTunnelConfiguration.port === 'number' ? cloudflaredTunnelConfiguration.port : 3444
+    const cloudflaredTunnelError = typeof cloudflaredTunnelConfiguration.errorCode === 'string' ? cloudflaredTunnelConfiguration.errorCode : ''
+    // A staged choice survives polls until the saved configuration agrees with it.
+    if (cloudflaredModeDraft !== null && cloudflaredModeDraft === cloudflaredTunnelMode) cloudflaredModeDraft = null
+    const cloudflaredShownMode = cloudflaredModeDraft ?? cloudflaredTunnelMode
+    cloudflaredModeQuick.classList.toggle('is-active', cloudflaredShownMode === 'quick')
+    cloudflaredModeNamed.classList.toggle('is-active', cloudflaredShownMode === 'named')
+    cloudflaredModeQuick.setAttribute('aria-pressed', String(cloudflaredShownMode === 'quick'))
+    cloudflaredModeNamed.setAttribute('aria-pressed', String(cloudflaredShownMode === 'named'))
+    cloudflaredModeQuick.disabled = remoteProviderBusy
+    cloudflaredModeNamed.disabled = remoteProviderBusy
+    cloudflaredModeHint.textContent = cloudflaredShownMode === 'named' ? t('cloudflaredTunnelNamedHint') : t('cloudflaredTunnelQuickHint')
+    cloudflaredTunnel.hidden = cloudflaredShownMode !== 'named'
+    // Saved values seed the form once; a field the user is editing is never
+    // overwritten by a poll.
+    if (cloudflaredHostname.value === '' && configuredCloudflaredHostname !== '') cloudflaredHostname.value = configuredCloudflaredHostname
+    if (cloudflaredTunnelConfigured && cloudflaredPort.value === '3444' && configuredCloudflaredPort !== 3444) {
+      cloudflaredPort.value = String(configuredCloudflaredPort)
+    }
+    cloudflaredToken.placeholder = cloudflaredTunnelConfigured ? t('cloudflaredTunnelTokenSaved') : t('cloudflaredTunnelTokenPlaceholder')
+    cloudflaredTunnelHint.textContent = t('cloudflaredTunnelHint', { port: String(configuredCloudflaredPort) })
+    cloudflaredTunnelStatus.textContent = cloudflaredTunnelError !== ''
+      ? t('cloudflaredTunnelInvalid')
+      : cloudflaredTunnelConfigured
+        ? t('cloudflaredTunnelConfigured', { hostname: configuredCloudflaredHostname, port: String(configuredCloudflaredPort) })
+        : t('cloudflaredTunnelMissing')
+    cloudflaredTunnelSave.disabled = remoteProviderBusy || !cloudflaredInstalled
+    cloudflaredTunnelForget.hidden = !cloudflaredTunnelConfigured
     const frpProvider = providers.frp !== null && typeof providers.frp === 'object' ? providers.frp as Record<string, unknown> : {}
     const frpComponent = frpProvider.component !== null && typeof frpProvider.component === 'object'
       ? frpProvider.component as Record<string, unknown>
@@ -1400,6 +1463,13 @@ function installControl(): { remove: () => void; toggle: () => void; isOpen: () 
       cloudflared_exited: t('cloudflaredExited'),
       cloudflared_invalid_output: t('cloudflaredOutputInvalid'),
       cloudflared_invalid_origin: t('cloudflaredOriginInvalid'),
+      cloudflared_tunnel_port_unavailable: t('cloudflaredTunnelPortUnavailable'),
+      cloudflared_tunnel_hostname_invalid: t('cloudflaredTunnelHostnameInvalid'),
+      cloudflared_tunnel_port_invalid: t('cloudflaredTunnelPortInvalid'),
+      cloudflared_tunnel_token_invalid: t('cloudflaredTunnelTokenInvalid'),
+      cloudflared_tunnel_settings_invalid: t('cloudflaredTunnelSettingsInvalid'),
+      cloudflared_tunnel_config_missing: t('cloudflaredTunnelConfigMissing'),
+      cloudflared_tunnel_config_invalid: t('cloudflaredTunnelInvalid'),
       frp_component_missing: t('frpMissing'),
       frp_component_invalid: t('frpInvalid'),
       frp_config_missing: t('frpConfigMissing'),
@@ -1500,6 +1570,79 @@ function installControl(): { remove: () => void; toggle: () => void; isOpen: () 
     void controlRequestJson('/api/mobile-access/remote/cloudflared/component/purge', { method: 'POST', body: JSON.stringify({ confirm: true }) }, LONG_CONTROL_REQUEST_TIMEOUT_MS)
       .then(renderRemote, error => { remoteFailureText = t('purgeFailed', { error: String(error) }); remoteStatus.textContent = remoteFailureText })
       .finally(() => { remoteProviderBusy = false; cloudflaredPurge.disabled = false; loadRemote() })
+  })
+  // Tunnel type is staged locally and only reaches the provider through Save, so
+  // clicking between the two never silently discards a saved token.
+  const showCloudflaredMode = (mode: 'quick' | 'named'): void => {
+    cloudflaredModeDraft = mode
+    cloudflaredModeQuick.classList.toggle('is-active', mode === 'quick')
+    cloudflaredModeNamed.classList.toggle('is-active', mode === 'named')
+    cloudflaredModeQuick.setAttribute('aria-pressed', String(mode === 'quick'))
+    cloudflaredModeNamed.setAttribute('aria-pressed', String(mode === 'named'))
+    cloudflaredModeHint.textContent = mode === 'named' ? t('cloudflaredTunnelNamedHint') : t('cloudflaredTunnelQuickHint')
+    cloudflaredTunnel.hidden = mode !== 'named'
+  }
+  cloudflaredModeQuick.addEventListener('click', () => { if (!remoteProviderBusy) showCloudflaredMode('quick') })
+  cloudflaredModeNamed.addEventListener('click', () => { if (!remoteProviderBusy) showCloudflaredMode('named') })
+  cloudflaredTunnelSave.addEventListener('click', () => {
+    if (remoteProviderBusy) return
+    const mode = cloudflaredModeDraft ?? cloudflaredTunnelMode
+    const hostname = String(cloudflaredHostname.value ?? '').trim()
+    const portValue = String(cloudflaredPort.value ?? '').trim()
+    const port = Number(portValue)
+    const token = String(cloudflaredToken.value ?? '')
+    // The provider re-validates everything; these checks only keep an obviously
+    // incomplete form from costing a round trip.
+    if (mode === 'named') {
+      if (hostname === '') { remoteStatus.textContent = t('cloudflaredTunnelHostnameInvalid'); return }
+      if (portValue === '' || !Number.isSafeInteger(port) || port < 1024 || port > 65535) {
+        remoteStatus.textContent = t('cloudflaredTunnelPortInvalid')
+        return
+      }
+      if (token === '' && !cloudflaredTunnelConfigured) { remoteStatus.textContent = t('cloudflaredTunnelConfigMissing'); return }
+      if (token !== '' && (token.length < 32 || !/^[A-Za-z0-9_=+/-]+$/u.test(token))) {
+        remoteStatus.textContent = t('cloudflaredTunnelTokenInvalid')
+        return
+      }
+    }
+    remoteProviderBusy = true
+    cloudflaredTunnelSave.disabled = true
+    cloudflaredTunnelSave.textContent = t('saving')
+    remoteStatus.textContent = mode === 'named' ? t('cloudflaredTunnelSaving') : t('switchingCloudflared')
+    void controlRequestJson('/api/mobile-access/remote/cloudflared/tunnel', {
+      method: 'POST',
+      body: JSON.stringify(mode === 'named' ? { mode, hostname, port, token } : { mode: 'quick' }),
+    })
+      .then(data => {
+        // The token is write-only: never keep a copy in the DOM after saving.
+        cloudflaredToken.value = ''
+        cloudflaredModeDraft = null
+        remoteFailureText = ''
+        renderRemote(data)
+      }, error => { remoteFailureText = t('requestFailed', { error: String(error) }); remoteStatus.textContent = remoteFailureText })
+      .finally(() => {
+        remoteProviderBusy = false
+        cloudflaredTunnelSave.disabled = false
+        cloudflaredTunnelSave.textContent = t('cloudflaredTunnelSave')
+        loadRemote()
+      })
+  })
+  cloudflaredTunnelForget.addEventListener('click', () => {
+    if (remoteProviderBusy) return
+    if (!window.confirm(t('cloudflaredTunnelForgetConfirm'))) return
+    remoteProviderBusy = true
+    cloudflaredTunnelForget.disabled = true
+    remoteStatus.textContent = t('cloudflaredTunnelForgetting')
+    void controlRequestJson('/api/mobile-access/remote/cloudflared/tunnel/purge', { method: 'POST', body: JSON.stringify({ confirm: true }) })
+      .then(data => {
+        cloudflaredToken.value = ''
+        cloudflaredHostname.value = ''
+        cloudflaredPort.value = '3444'
+        cloudflaredModeDraft = null
+        remoteFailureText = ''
+        renderRemote(data)
+      }, error => { remoteFailureText = t('requestFailed', { error: String(error) }); remoteStatus.textContent = remoteFailureText })
+      .finally(() => { remoteProviderBusy = false; cloudflaredTunnelForget.disabled = false; loadRemote() })
   })
   cpolarInstall.addEventListener('click', () => {
     if (remoteProviderBusy) return
@@ -2078,7 +2221,7 @@ function installControl(): { remove: () => void; toggle: () => void; isOpen: () 
           component_missing: 'remoteUnavailableTailscale', funnel_permission_required: 'funnelPermission', funnel_https_required: 'funnelHttps', funnel_start_failed: 'funnelStart', funnel_start_timeout: 'funnelTimeout', tailscale_dns_missing: 'tailscaleDnsMissing',
           sidecar_launch_failed: 'remoteUnavailableTailscale', sidecar_stopped: 'controlChannelFailed', sidecar_exited: 'controlChannelFailed', control_channel_failed: 'controlChannelFailed',
           cpolar_component_missing: 'cpolarMissing', cpolar_component_invalid: 'cpolarInvalid', cpolar_config_missing: 'cpolarConfigMissing', cpolar_config_invalid: 'cpolarConfigInvalid', cpolar_start_timeout: 'cpolarTimeout', cpolar_stopped: 'cpolarStopped', cpolar_exited: 'cpolarExited',
-          cloudflared_component_missing: 'cloudflaredMissing', cloudflared_component_invalid: 'cloudflaredInvalid', cloudflared_port_unavailable: 'cloudflaredPortUnavailable', cloudflared_launch_failed: 'cloudflaredLaunchFailed', cloudflared_start_timeout: 'cloudflaredTimeout', cloudflared_stopped: 'cloudflaredStopped', cloudflared_exited: 'cloudflaredExited', cloudflared_invalid_origin: 'cloudflaredOriginInvalid',
+          cloudflared_component_missing: 'cloudflaredMissing', cloudflared_component_invalid: 'cloudflaredInvalid', cloudflared_port_unavailable: 'cloudflaredPortUnavailable', cloudflared_launch_failed: 'cloudflaredLaunchFailed', cloudflared_start_timeout: 'cloudflaredTimeout', cloudflared_stopped: 'cloudflaredStopped', cloudflared_exited: 'cloudflaredExited', cloudflared_invalid_origin: 'cloudflaredOriginInvalid', cloudflared_tunnel_port_unavailable: 'cloudflaredTunnelPortUnavailable', cloudflared_tunnel_config_invalid: 'cloudflaredTunnelInvalid',
           frp_component_missing: 'frpMissing', frp_component_invalid: 'frpInvalid', frp_config_missing: 'frpConfigMissing', frp_config_verify_failed: 'frpConfigVerifyFailed', frp_vhost_publicly_reachable: 'frpVhostPublic', frp_vhost_probe_failed: 'frpVhostProbeFailed', frp_launch_failed: 'frpLaunchFailed', frp_start_timeout: 'frpTimeout', frp_discovery_mismatch: 'frpDiscoveryMismatch', frp_discovery_invalid: 'frpDiscoveryInvalid', frp_stopped: 'frpStopped', frp_exited: 'frpExited', gateway_start_failed: 'gatewayStartFailed',
         }
         const actionKey = controllerActionKeys[values.controllerCode ?? '']
@@ -3286,7 +3429,7 @@ export const CONTROL_STYLES = `
 .dsh-mobile-control__cpolar-setup{margin:0 0 12px;padding:12px;border:1px solid var(--dsw-alias-border-subtle,#dbe1e8);border-radius:13px;background:var(--dsw-alias-bg-layer-2,#fff)}.dsh-mobile-control__cpolar-setup[hidden],.dsh-mobile-control__cpolar-account[hidden],.dsh-mobile-control__details[hidden],.dsh-mobile-control__view.is-remote .dsh-mobile-control__actions[hidden],.dsh-mobile-control__danger[hidden]{display:none}.dsh-mobile-control__component-status,.dsh-mobile-control__component-note{margin:0 0 10px;color:var(--dsw-alias-label-secondary,#606873);font-size:11px;line-height:1.55}.dsh-mobile-control__cpolar-setup>.dsh-mobile-control__primary{width:100%;min-height:44px;padding:9px 12px;border-radius:10px;font:600 12px/1.3 system-ui;cursor:pointer}.dsh-mobile-control__cpolar-account{margin-top:10px}.dsh-mobile-control__link-row{display:flex;flex-wrap:wrap;gap:6px 12px;margin:0 0 10px}.dsh-mobile-control__text-link{color:var(--dsw-alias-label-primary-bluish,#2563eb);font-size:11px;text-decoration:none}.dsh-mobile-control__text-link:hover{text-decoration:underline}.dsh-mobile-control__token-label{display:flex;flex-direction:column;gap:5px;margin:0 0 8px;color:var(--dsw-alias-label-secondary,#606873);font-size:11px}.dsh-mobile-control__token{box-sizing:border-box;width:100%;min-height:44px;padding:9px 10px;border:1px solid var(--dsw-alias-border-normal,#cfd5dd);border-radius:10px;background:var(--dsw-alias-bg-layer-3,var(--dsw-alias-bg-layer-2,#fff));color:var(--dsw-alias-label-primary,#16181d);font:16px/1.4 system-ui}.dsh-mobile-control__cpolar-connect{display:flex;align-items:center;justify-content:center;box-sizing:border-box;width:100%;min-height:44px;padding:10px 14px;border-radius:12px;font:650 13px/1.2 system-ui;cursor:pointer;transition:background-color 160ms ease,border-color 160ms ease,opacity 160ms ease}.dsh-mobile-control__cpolar-connect:hover:not(:disabled){border-color:#1d4ed8;background:#1d4ed8}.dsh-mobile-control__cpolar-connect:active:not(:disabled){border-color:#1e40af;background:#1e40af}.dsh-mobile-control__cpolar-connect:disabled{cursor:wait;opacity:.55}.dsh-mobile-control__details{margin:10px 0 0;border-top:1px solid var(--dsw-alias-border-subtle,#e1e5eb);padding-top:9px}.dsh-mobile-control__details>summary{min-height:36px;color:var(--dsw-alias-label-secondary,#606873);font-size:11px;line-height:30px;cursor:pointer}.dsh-mobile-control__details-body{display:flex;flex-wrap:wrap;align-items:center;gap:7px 12px;padding:4px 0}.dsh-mobile-control__details-body p{flex:1 0 100%;margin:0;color:var(--dsw-alias-label-secondary,#606873);font-size:11px;line-height:1.5}.dsh-mobile-control__storage{display:block;flex:1 0 100%;max-width:100%;overflow:hidden;padding:7px 8px;border-radius:8px;background:var(--dsw-alias-bg-layer-1,#f3f5f8);color:var(--dsw-alias-label-secondary,#475569);font:11px/1.4 ui-monospace,SFMono-Regular,Consolas,monospace;text-overflow:ellipsis;white-space:nowrap}.dsh-mobile-control__danger{flex:1 0 100%;min-height:44px;margin-top:3px;padding:7px 10px;border:1px solid var(--dsw-alias-state-error-primary,#dc2626);border-radius:9px;background:transparent;color:var(--dsw-alias-label-primary,#dc2626)}
 .dsh-mobile-control__danger:hover:not(:disabled),.dsh-mobile-control__device-revoke:hover{background:var(--dsw-alias-interactive-bg-hover-danger,rgb(220 38 38 / 8%))};font:12px/1.3 system-ui;cursor:pointer}
 .dsh-mobile-control__frp-setup{margin:0;padding:12px;border:1px solid var(--dsw-alias-border-subtle,#dbe1e8);border-radius:13px;background:var(--dsw-alias-bg-layer-2,#fff)}.dsh-mobile-control__frp-setup[hidden]{display:none}.dsh-mobile-control__frp-step{padding:11px 0}.dsh-mobile-control__frp-step + .dsh-mobile-control__frp-step{border-top:1px solid var(--dsw-alias-border-subtle,#e1e5eb)}.dsh-mobile-control__frp-step>strong{display:block;margin-bottom:3px;font-size:12px;line-height:1.4}.dsh-mobile-control__frp-step>p{margin:0 0 9px;color:var(--dsw-alias-label-secondary,#606873);font-size:11px;line-height:1.5}.dsh-mobile-control__frp-changes{margin:0 0 9px;padding:0;list-style:none;color:var(--dsw-alias-label-secondary,#606873);font-size:11px;line-height:1.5}.dsh-mobile-control__frp-changes li{position:relative;margin:0;padding-left:12px}.dsh-mobile-control__frp-changes li+li{margin-top:5px}.dsh-mobile-control__frp-changes li::before{content:"•";position:absolute;left:2px;color:var(--dsw-alias-label-tertiary,#98a1ad)}.dsh-mobile-control__frp-step>.dsh-mobile-control__frp-requirement{padding:8px 9px;border-radius:9px;background:var(--dsw-alias-bg-layer-1,#f3f5f8);color:var(--dsw-alias-label-primary,#384152);font-size:11px}.dsh-mobile-control__frp-fields{display:grid;grid-template-columns:minmax(0,1fr) 96px;gap:8px}.dsh-mobile-control__field{display:flex;min-width:0;flex-direction:column;gap:5px;color:var(--dsw-alias-label-secondary,#606873);font-size:11px}.dsh-mobile-control__field:nth-child(3),.dsh-mobile-control__field:nth-child(4){grid-column:1/-1}.dsh-mobile-control__field input{box-sizing:border-box;width:100%;min-height:44px;padding:9px 10px;border:1px solid var(--dsw-alias-border-normal,#cfd5dd);border-radius:10px;background:var(--dsw-alias-bg-layer-2,#fff);color:var(--dsw-alias-label-primary,#16181d);font:16px/1.4 system-ui}.dsh-mobile-control__frp-action{box-sizing:border-box;width:100%;min-height:44px;padding:9px 12px;border-radius:10px;font:650 12px/1.3 system-ui;cursor:pointer}.dsh-mobile-control__frp-action:disabled{cursor:not-allowed;opacity:.5}.dsh-mobile-control__remote-workspace{margin:0;padding:12px;border:1px solid var(--dsw-alias-border-subtle,#dbe1e8);border-radius:15px;background:var(--dsw-alias-bg-layer-1,#f7f8fa)}.dsh-mobile-control__stage-header{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:9px}.dsh-mobile-control__stage-header .dsh-mobile-control__section-title{margin:0}.dsh-mobile-control__stage-meta{display:flex;min-width:0;align-items:center;justify-content:flex-end;gap:5px}.dsh-mobile-control__stage-value{max-width:115px;overflow:hidden;color:var(--dsw-alias-label-primary,#16181d);font:650 11px/1.3 system-ui;text-overflow:ellipsis;white-space:nowrap}.dsh-mobile-control__state-badge{flex:none;padding:3px 7px;border-radius:999px;background:var(--dsw-alias-bg-layer-2,#fff);color:var(--dsw-alias-label-secondary,#606873);font:650 11px/1.25 system-ui}.dsh-mobile-control__state-badge.is-ready{background:var(--dsw-alias-state-success-tertiary,#e6f7f0);color:var(--dsw-alias-label-primary,#087454)}.dsh-mobile-control__state-badge.is-busy{background:var(--dsw-alias-state-business-tertiary,#e8f0ff);color:var(--dsw-alias-label-primary,#1d4ed8)}.dsh-mobile-control__state-badge.is-attention{background:var(--dsw-alias-state-warn-tertiary,#fff4dc);color:var(--dsw-alias-label-primary,#935100)}.dsh-mobile-control__remote-workspace>.dsh-mobile-control__status{box-sizing:border-box;margin:0 0 10px;padding:9px 10px;border-radius:10px;background:var(--dsw-alias-bg-layer-2,#fff);font-size:11px;line-height:1.45}.dsh-mobile-control__provider-setup-body{margin:0 0 10px}.dsh-mobile-control__provider-setup-body>.dsh-mobile-control__cpolar-setup{margin:0}.dsh-mobile-control__provider-setup-body>.dsh-mobile-control__cpolar-setup>.dsh-mobile-control__section-title,.dsh-mobile-control__provider-setup-body>.dsh-mobile-control__frp-setup>.dsh-mobile-control__section-title{display:none}.dsh-mobile-control__provider-setup-body>.dsh-mobile-control__details{margin:0;padding:9px 10px;border:1px solid var(--dsw-alias-border-subtle,#dbe1e8);border-radius:11px;background:var(--dsw-alias-bg-layer-2,#fff)}.dsh-mobile-control__remote-workspace>.dsh-mobile-control__actions{margin-top:2px}.dsh-mobile-control__remote-workspace>.dsh-mobile-control__qr{margin:10px 0 0}.dsh-mobile-control__remote-workspace>.dsh-mobile-control__manage-row{margin-top:10px;padding-top:10px;border-top:1px solid var(--dsw-alias-border-subtle,#e1e5eb)}
-.dsh-mobile-control__frp-overview{display:grid;grid-template-columns:32px minmax(0,1fr);align-items:center;gap:10px;margin:0 0 10px;padding:10px;border:1px solid #a9dfc9;border-radius:11px;background:var(--dsw-alias-state-success-tertiary,#edf9f4)}.dsh-mobile-control__frp-overview[hidden]{display:none}.dsh-mobile-control__frp-overview-mark{display:grid;width:32px;height:32px;place-items:center;border-radius:50%;background:#087454;color:#fff;font:700 15px/1 system-ui}.dsh-mobile-control__frp-overview-body{display:flex;min-width:0;flex-direction:column;gap:2px}.dsh-mobile-control__frp-overview-body strong{color:var(--dsw-alias-label-primary,#075d46);font-size:12px;line-height:1.35}.dsh-mobile-control__frp-overview-body span{overflow:hidden;color:var(--dsw-alias-label-secondary,#357061);font:11px/1.4 ui-monospace,SFMono-Regular,Consolas,monospace;text-overflow:ellipsis;white-space:nowrap}.dsh-mobile-control__frp-group{margin:8px 0 0;overflow:hidden;border:1px solid var(--dsw-alias-border-subtle,#dbe1e8);border-radius:11px;background:var(--dsw-alias-bg-layer-1,#f8fafc)}.dsh-mobile-control__frp-group>summary{box-sizing:border-box;min-height:44px;padding:12px 34px 10px 12px;color:var(--dsw-alias-label-primary,#16181d);font:650 12px/1.4 system-ui;cursor:pointer}.dsh-mobile-control__frp-group[open]>summary{border-bottom:1px solid var(--dsw-alias-border-subtle,#e1e5eb);background:var(--dsw-alias-bg-layer-2,#fff)}.dsh-mobile-control__frp-group>.dsh-mobile-control__frp-step{padding:12px}.dsh-mobile-control__frp-group>.dsh-mobile-control__frp-step>strong:first-child{display:none}.dsh-mobile-control__frp-group .dsh-mobile-control__frp-step{border-top:0}.dsh-mobile-control__frp-setup>.dsh-mobile-control__frp-step{margin-bottom:8px;padding:10px;border:1px solid var(--dsw-alias-border-subtle,#dbe1e8);border-radius:11px;background:var(--dsw-alias-bg-layer-1,#f8fafc)}
+.dsh-mobile-control__frp-overview{display:grid;grid-template-columns:32px minmax(0,1fr);align-items:center;gap:10px;margin:0 0 10px;padding:10px;border:1px solid #a9dfc9;border-radius:11px;background:var(--dsw-alias-state-success-tertiary,#edf9f4)}.dsh-mobile-control__frp-overview[hidden]{display:none}.dsh-mobile-control__frp-overview-mark{display:grid;width:32px;height:32px;place-items:center;border-radius:50%;background:#087454;color:#fff;font:700 15px/1 system-ui}.dsh-mobile-control__frp-overview-body{display:flex;min-width:0;flex-direction:column;gap:2px}.dsh-mobile-control__frp-overview-body strong{color:var(--dsw-alias-label-primary,#075d46);font-size:12px;line-height:1.35}.dsh-mobile-control__frp-overview-body span{overflow:hidden;color:var(--dsw-alias-label-secondary,#357061);font:11px/1.4 ui-monospace,SFMono-Regular,Consolas,monospace;text-overflow:ellipsis;white-space:nowrap}.dsh-mobile-control__frp-group{margin:8px 0 0;overflow:hidden;border:1px solid var(--dsw-alias-border-subtle,#dbe1e8);border-radius:11px;background:var(--dsw-alias-bg-layer-1,#f8fafc)}.dsh-mobile-control__frp-group>summary{box-sizing:border-box;min-height:44px;padding:12px 34px 10px 12px;color:var(--dsw-alias-label-primary,#16181d);font:650 12px/1.4 system-ui;cursor:pointer}.dsh-mobile-control__frp-group[open]>summary{border-bottom:1px solid var(--dsw-alias-border-subtle,#e1e5eb);background:var(--dsw-alias-bg-layer-2,#fff)}.dsh-mobile-control__frp-group>.dsh-mobile-control__frp-step{padding:12px}.dsh-mobile-control__frp-group>.dsh-mobile-control__frp-step>strong:first-child{display:none}.dsh-mobile-control__frp-group .dsh-mobile-control__frp-step{border-top:0}.dsh-mobile-control__frp-setup>.dsh-mobile-control__frp-step{margin-bottom:8px;padding:10px;border:1px solid var(--dsw-alias-border-subtle,#dbe1e8);border-radius:11px;background:var(--dsw-alias-bg-layer-1,#f8fafc)}.dsh-mobile-control__tunnel{margin:0 0 10px}.dsh-mobile-control__tunnel[hidden]{display:none}
 .dsh-mobile-control__lan-setup{box-sizing:border-box;margin:0 0 12px;padding:14px;border:1px solid #6f96db;border-radius:15px;background:var(--dsw-alias-bg-layer-1,#f5f8ff)}.dsh-mobile-control__lan-setup[hidden],.dsh-mobile-control__lan-setup-form[hidden]{display:none}.dsh-mobile-control__lan-setup>.dsh-mobile-control__section-title{margin-bottom:5px}.dsh-mobile-control__lan-setup>.dsh-mobile-control__intro{margin-bottom:12px}.dsh-mobile-control__lan-setup-form{display:grid;gap:9px}.dsh-mobile-control__lan-setup .dsh-mobile-control__field select{box-sizing:border-box;width:100%;min-height:44px;padding:9px 32px 9px 10px;border:1px solid var(--dsw-alias-border-normal,#cfd5dd);border-radius:10px;background:var(--dsw-alias-bg-layer-2,#fff);color:var(--dsw-alias-label-primary,#16181d);font:14px/1.4 system-ui}.dsh-mobile-control__lan-setup .dsh-mobile-control__component-note{margin:0}.dsh-mobile-control__lan-setup-actions{display:grid;grid-template-columns:1fr 1.35fr;gap:8px}.dsh-mobile-control__lan-setup-actions button{box-sizing:border-box;min-width:0;min-height:44px;padding:9px 10px;border-radius:10px;font:650 12px/1.3 system-ui;cursor:pointer}.dsh-mobile-control__lan-setup-actions button:disabled{cursor:wait;opacity:.55}.dsh-mobile-control__lan-setup>.dsh-mobile-control__status{margin:10px 0 0;line-height:1.5}.dsh-mobile-control__lan-setup>.dsh-mobile-control__status:empty{display:none}
 .dsh-mobile-control__access{display:flex;align-items:baseline;gap:6px;min-width:0;margin:0 0 12px}.dsh-mobile-control__access[hidden]{display:none}.dsh-mobile-control__access-label{flex:none;color:var(--dsw-alias-label-secondary,#606873);white-space:nowrap}.dsh-mobile-control__access-label::after{content:"："}.dsh-mobile-control__access-link{min-width:0;overflow:hidden;color:var(--dsw-alias-label-primary-bluish,#2563eb);text-decoration:none;text-overflow:ellipsis;white-space:nowrap}.dsh-mobile-control__access-link:hover{text-decoration:underline}.dsh-mobile-control__qr{display:flex;justify-content:center;margin:0 0 12px}.dsh-mobile-control__qr[hidden]{display:none}.dsh-mobile-control__qr img{border-radius:12px;background:#fff;padding:8px}
 .dsh-mobile-control__status{margin:0 0 14px;overflow-wrap:anywhere;color:var(--dsw-alias-label-secondary,#606873)}.dsh-mobile-control__status::before{display:inline-block;width:8px;height:8px;margin-right:7px;border-radius:50%;background:var(--dsw-alias-label-tertiary,#98a1ad);content:""}.dsh-mobile-control__status.is-running::before{background:var(--dsw-alias-state-success-primary,#16a36a)}.dsh-mobile-control__status.is-key{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:12px;word-break:break-all}
