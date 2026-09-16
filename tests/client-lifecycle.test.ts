@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
 import postcss from 'postcss'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
@@ -300,6 +300,38 @@ describe('mobile-control localization', () => {
     // the error, which is what leaked `Error: cloudflared_...` to users.
     expect(source).toContain('remoteFailureTextFor(error, \'installFailed\')')
     expect(source).toContain('remoteFailureTextFor(error, \'requestFailed\')')
+  })
+
+  it('references only DSH tokens that exist, so no var() falls back to a light literal', () => {
+    // Four names used here once did not exist in DSH (`border-subtle`, `border-normal`,
+    // `danger-normal`, `warning-normal`) plus three in the native layout (`bg`,
+    // `interactive-border-focus`, another `border-subtle`). Every `var()` therefore took
+    // its light fallback and the dark theme never adapted. The DSH checkout is not
+    // available in CI, so the set the plugin may use is recorded here: adding a token is
+    // then a deliberate edit rather than a silent typo.
+    const allowed = new Set([
+      '--dsw-alias-bg-base', '--dsw-alias-bg-layer-1', '--dsw-alias-bg-layer-2', '--dsw-alias-bg-layer-3',
+      '--dsw-alias-bg-module-platform',
+      '--dsw-alias-border-l2', '--dsw-alias-border-l3', '--dsw-alias-border-l4',
+      '--dsw-alias-interactive-bg-active', '--dsw-alias-interactive-bg-hover',
+      '--dsw-alias-interactive-bg-hover-danger', '--dsw-alias-interactive-bg-hover-solid',
+      '--dsw-alias-label-primary', '--dsw-alias-label-primary-bluish',
+      '--dsw-alias-label-secondary', '--dsw-alias-label-tertiary',
+      '--dsw-alias-state-business-primary', '--dsw-alias-state-business-tertiary',
+      '--dsw-alias-state-error-primary', '--dsw-alias-state-error-secondary',
+      '--dsw-alias-state-success-primary', '--dsw-alias-state-success-tertiary',
+      '--dsw-alias-state-warn-label', '--dsw-alias-state-warn-primary', '--dsw-alias-state-warn-tertiary',
+    ])
+    const unknown = new Map()
+    for (const file of readdirSync(new URL('../src', import.meta.url))) {
+      if (!file.endsWith('.ts')) continue
+      const source = readFileSync(new URL(`../src/${file}`, import.meta.url), 'utf8')
+      for (const match of source.matchAll(/var\((--dsw-[a-z0-9-]+)/gu)) {
+        const token = match[1] ?? ''
+        if (!allowed.has(token)) unknown.set(`${file} ${token}`, true)
+      }
+    }
+    expect([...unknown.keys()]).toEqual([])
   })
 
   it('localizes own-proxy setup without equating a listening backend with public readiness', () => {
