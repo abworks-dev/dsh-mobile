@@ -121,8 +121,15 @@ export { OriginController } from './origin-proxy.js'
 export type { OriginControllerOptions, OriginState, OriginStatus } from './origin-proxy.js'
 export { CLOUDFLARED_COMPONENT_RELEASE, CloudflaredComponentManager } from './cloudflared-component.js'
 export type { CloudflaredComponentStatus } from './cloudflared-component.js'
-export { CloudflaredController, parseCloudflaredOrigin } from './cloudflared.js'
+export { CloudflaredController, isCloudflaredRegistration, parseCloudflaredOrigin } from './cloudflared.js'
 export type { CloudflaredControllerOptions, CloudflaredState, CloudflaredStatus } from './cloudflared.js'
+export {
+  CloudflaredTunnelStore, mergeSavedCloudflaredTunnelSettings, parseCloudflaredTunnelSettings,
+  validateCloudflaredTunnelHostname, validateCloudflaredTunnelPort, validateCloudflaredTunnelToken,
+} from './cloudflared-tunnel.js'
+export type {
+  CloudflaredTunnelMode, CloudflaredTunnelSettings, CloudflaredTunnelStatus,
+} from './cloudflared-tunnel.js'
 export { configuredRemoteProvider, JsonRemoteProviderStore, parseRemoteProviderState, REMOTE_PROVIDERS } from './remote.js'
 export type {
   RemoteProvider,
