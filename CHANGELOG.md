@@ -4,11 +4,11 @@ Notable changes to DSH Mobile are recorded here. GitHub Releases remain the sour
 
 ## Unreleased
 
-- Load a bundled Iterator compatibility script before DSH boot on the dedicated mobile frontend, preventing `Iterator is not defined` on WebViews without Iterator helpers. The script is served locally behind the existing gateway authentication and uses feature detection to preserve or repair native helpers without weakening CSP or dropping script nonces.
 - Add an Own reverse proxy provider under Remote → Self-hosted for an existing user-managed HTTPS proxy. It provides a separate authenticated private HTTP origin (default 3444), strict private bind/source-CIDR validation, custom public HTTPS ports, local configuration and safe settings-only purge.
 - Distinguish backend listening from unverified public HTTPS/certificate/WebSocket reachability, with localized setup, errors and diagnostics; retain the existing LAN gateway, remote pairing and Android protocol.
 - Cover the HTTPS proxy → private HTTP origin → DSH path with real loopback pairing, authenticated HTTP and WebSocket tests, including Host/Origin/forwarded-header rejection and LAN independence.
-- Permanently remove revoked devices from durable storage and the desktop list, terminate their active Sessions, and compact legacy `revokedAt` rows on startup. Deleted credentials are rejected as `authentication_failed`; no revocation tombstones are retained.
+- Permanently remove revoked devices from durable storage and the desktop list, terminate their active Sessions, and compact legacy `revokedAt` rows on startup. Deleted credentials are rejected as `authentication_failed`; no revocation tombstones are retained. An offline revoked device is therefore re-paired rather than shown as revoked when it reconnects.
+- Load a bundled Iterator compatibility script before DSH boot on the dedicated mobile frontend, preventing `Iterator is not defined` on WebViews without Iterator helpers. The script is served locally behind the existing gateway authentication and uses feature detection to preserve or repair native helpers without weakening CSP or dropping script nonces.
 - Keep the mobile gateway usable when its broadcast discovery socket cannot bind the UDP port: Windows keeps separate TCP and UDP port-exclusion tables, so the port the operating system handed the TCP listener can be refused for UDP, and another process may already hold it. Discovery now degrades on its own while mDNS, HTTP and WebSocket service continue, instead of failing the whole listener.
 
 ## 0.4.1 - 2026-09-15
@@ -32,7 +32,7 @@ Notable changes to DSH Mobile are recorded here. GitHub Releases remain the sour
 - Use a bounded session-free native probe for list reachability checks, with a renewal fallback for older plugins so status refreshes cannot evict an active DSH session.
 - Preserve a local row after computer-side revocation, stop automatic retries for revoked credentials, and expose a short-lived undo action for local deletion without restoring a computer-side authorization.
 - Follow the DSH conversation's actual nested scroll container when showing or hiding the Android toolbar, keeping task-notification settings reachable on current DSH Web layouts.
-- Let cpolar choose its default route instead of forcing `cn`; explicit region settings remain available for advanced deployments.
+- Let cpolar choose its default route instead of forcing `cn`: the plugin no longer passes `-region`, so cpolar selects its own tunnel server. No profile or environment setting exposes an explicit region.
 - Add Android task-completion and pending-input reminders through authenticated Host events and the exact-origin native bridge; notification permission is enabled explicitly from the foreground app menu, lock-screen text stays generic, and each completed turn keeps a separate reminder (thanks @qzyqmzn for PR #75).
 - Show and re-copy remote pairing links without invalidating the QR code's active one-time pairing window (thanks @qzyqmzn for PR #75).
 - Detect plugin-market installations that have not completed LAN setup, prevent the loopback-only `127.0.0.1` fallback from being presented as phone access, and provide a localized in-panel network picker that creates private TLS material and LAN-only Windows firewall rules after explicit confirmation. The configured gateway starts after one DSH restart (thanks @cangming99 for #72).
