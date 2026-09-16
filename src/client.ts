@@ -2265,13 +2265,23 @@ function installControl(): { remove: () => void; toggle: () => void; isOpen: () 
       const templates = catalog[reason]
       if (templates === undefined) return serverCopy
       const facts = entry.facts !== null && typeof entry.facts === 'object' ? entry.facts as Record<string, unknown> : {}
+      // Diagnostics read as sentences, so an internal provider id or a raw controller
+      // code belongs in the report, not in the prose: it renders as
+      // "Remote access through origin is currently off." or "reported gateway_start_failed".
+      const providerNames: Record<string, string> = {
+        tailscale: 'Tailscale Funnel', cpolar: 'cpolar', cloudflared: 'cloudflared',
+        frp: t('frpName'), origin: t('originName'),
+      }
+      const providerId = typeof facts.provider === 'string' ? facts.provider : ''
+      const controllerKey = typeof facts.controllerCode === 'string' ? REMOTE_ERROR_MESSAGE_KEYS[facts.controllerCode] : undefined
       const values: Record<string, string> = {
-        provider: facts.provider === 'tailscale' || facts.provider === 'cpolar' || facts.provider === 'cloudflared'
-        || facts.provider === 'frp' || facts.provider === 'origin' ? facts.provider : '',
+        provider: providerNames[providerId] ?? '',
         latencyMs: typeof facts.latencyMs === 'number' && Number.isFinite(facts.latencyMs) ? new Intl.NumberFormat(localeTag).format(facts.latencyMs) : '',
         interfaceName: typeof facts.interfaceName === 'string' ? facts.interfaceName : '',
         endpointSuffix: typeof facts.endpointSuffix === 'string' ? facts.endpointSuffix : '',
-        controllerCode: typeof facts.controllerCode === 'string' ? facts.controllerCode : '',
+        // A translated sentence when the code is known, otherwise nothing rather than
+        // an identifier no user can act on.
+        controllerCode: controllerKey === undefined ? '' : t(controllerKey),
       }
       const interpolate = (template: string): string => template.replace(/\{(\w+)\}/gu, (_match, key: string) => values[key] ?? '')
       let detail = interpolate(templates[0])
