@@ -44,6 +44,7 @@ describe('remote provider selection', () => {
     expect(parseRemoteProviderState({ version: 1, provider: 'tailscale' })).toEqual({ version: 1, provider: 'tailscale' })
     expect(parseRemoteProviderState({ version: 1, provider: 'cpolar' })).toEqual({ version: 1, provider: 'cpolar' })
     expect(parseRemoteProviderState({ version: 1, provider: 'frp' })).toEqual({ version: 1, provider: 'frp' })
+    expect(parseRemoteProviderState({ version: 1, provider: 'cloudflared' })).toEqual({ version: 1, provider: 'cloudflared' })
     expect(parseRemoteProviderState({ version: 1, provider: 'origin' })).toEqual({ version: 1, provider: 'origin' })
     expect(() => parseRemoteProviderState({ version: 1, provider: 'other' })).toThrow('unsupported format')
     expect(() => parseRemoteProviderState({ version: 1, provider: 'cpolar', token: 'secret' })).toThrow('unsupported format')
@@ -53,8 +54,10 @@ describe('remote provider selection', () => {
     expect(configuredRemoteProvider({})).toBe('tailscale')
     expect(configuredRemoteProvider({ DSH_MOBILE_REMOTE_PROVIDER: 'cpolar' })).toBe('cpolar')
     expect(configuredRemoteProvider({ DSH_MOBILE_REMOTE_PROVIDER: 'frp' })).toBe('frp')
+    expect(configuredRemoteProvider({ DSH_MOBILE_REMOTE_PROVIDER: 'cloudflared' })).toBe('cloudflared')
     expect(configuredRemoteProvider({ DSH_MOBILE_REMOTE_PROVIDER: 'origin' })).toBe('origin')
-    expect(() => configuredRemoteProvider({ DSH_MOBILE_REMOTE_PROVIDER: 'invalid' })).toThrow('must be tailscale, cpolar, frp, or origin')
+    expect(() => configuredRemoteProvider({ DSH_MOBILE_REMOTE_PROVIDER: 'invalid' }))
+      .toThrow('must be tailscale, cpolar, cloudflared, frp, or origin')
 
     const directory = await mkdtemp(join(tmpdir(), 'dsh-mobile-remote-provider-'))
     temporaryDirectories.push(directory)
@@ -69,6 +72,7 @@ describe('remote provider selection', () => {
     const controllers = {
       tailscale: new FakeRemoteController(),
       cpolar: new FakeRemoteController(),
+      cloudflared: new FakeRemoteController(),
       frp: new FakeRemoteController(),
       origin: new FakeRemoteController(),
     }
@@ -102,6 +106,7 @@ describe('remote provider selection', () => {
     const controllers = {
       tailscale: new FakeRemoteController(),
       cpolar: new FakeRemoteController(),
+      cloudflared: new FakeRemoteController(),
       frp: new FakeRemoteController(),
       origin: new FakeRemoteController(),
     }
