@@ -220,9 +220,13 @@ const planReview = await text('packages/client/ui-user-questions/src/client/Plan
 for (const marker of ['data-question-key', 'data-question-scroll']) {
   if (!questions.includes(marker)) throw new Error(`DSH question UI contract changed: missing ${marker}`)
 }
-for (const marker of ['data-plan-review-key', 'data-plan-review-scroll']) {
+for (const marker of ['data-plan-review-key']) {
   if (!planReview.includes(marker)) throw new Error(`DSH plan-review UI contract changed: missing ${marker}`)
 }
+// The scrollable plan-review body existed up to DSH 0.1.6-alpha.1; 0.1.6-alpha.2
+// narrowed the panel to a short summary card without a scroll region. The mobile
+// layout keeps its [data-plan-review-scroll] rule for older releases, so the
+// marker is accepted when present but no longer required.
 
 const hostInjections = await optionalText('packages/host/webserver/src/injections.ts')
 const legacyModules = await optionalText('packages/client/modules/src/index.ts')

@@ -165,6 +165,14 @@ describe('DSH source compatibility gate', () => {
     expect(result.output).toContain('DSH compatibility ok: 0.1.2-alpha.2 (renderer-v2)')
   })
 
+  it('accepts the plan-review panel without a scroll region (0.1.6-alpha.2)', async () => {
+    const sources = sourceFixture('0.1.6-alpha.2')
+    sources['packages/client/ui-user-questions/src/client/PlanReviewPanel.tsx'] = 'data-plan-review-key'
+    const result = await check(sources)
+    expect(result.status).toBe(0)
+    expect(result.output).toContain('DSH compatibility ok: 0.1.6-alpha.2 (renderer-v2)')
+  })
+
   it('accepts a named global transport hook used by the current Connection client', async () => {
     const sources = sourceFixture()
     const connectionSource = sources['packages/client/connection/src/client/index.ts']!
