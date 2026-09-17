@@ -35,9 +35,9 @@
 > **升级提醒**：0.4.2 插件可继续使用 0.4.0 Android App，已有设备无需重新配对；命名隧道要求 App 侧处于「远程」流程内扫码。若要使用本次 Android 构建，请同时安装 0.4.2 App。[兼容说明](#兼容性)。
 
 <p align="center">
-  <a href="https://github.com/saya-ch/dsh-mobile/releases/download/v0.4.2/dsh-mobile-android-v0.4.2.apk"><img src="assets/brand/app-icon-rounded.svg" alt="DSH Mobile 安卓应用图标" width="72" height="72"></a><br>
-  <a href="https://github.com/saya-ch/dsh-mobile/releases/download/v0.4.2/dsh-mobile-android-v0.4.2.apk"><strong>下载 Android App 0.4.2</strong></a><br>
-  <sub><a href="https://github.com/saya-ch/dsh-mobile/releases/tag/v0.4.2">版本说明与校验文件</a></sub>
+  <a href="https://github.com/saya-ch/dsh-mobile/releases/latest"><img src="assets/brand/app-icon-rounded.svg" alt="DSH Mobile 安卓应用图标" width="72" height="72"></a><br>
+  <a href="https://github.com/saya-ch/dsh-mobile/releases/latest"><strong>下载 Android App</strong></a><br>
+  <sub><a href="https://github.com/saya-ch/dsh-mobile/releases">版本说明与校验文件</a></sub>
 </p>
 
 DSH Mobile 是一个 DeepSeek Harness 插件，让手机浏览器或 Android App 通过局域网，或可选的 Tailscale Funnel、cpolar、cloudflared、自建 FRP 或自有反向代理远程通道连接电脑，继续使用同一份会话、工作区、消息和工具。局域网与远程访问分别启停、分别管理设备，且都不修改 DeepSeek Harness 源码。
@@ -50,13 +50,12 @@ DSH Mobile 是一个 DeepSeek Harness 插件，让手机浏览器或 Android App
 
 - **在手机上继续电脑端的工作**：同一份会话、工作区、消息和工具，实时同步。
 - **用对话定制手机端**：直接在 DSH 对话里改手机页面的布局、交互和功能，几秒内刷新。
-- **专属触屏布局**：会话抽屉、工具详情、设置、提问卡片和输入栏都按手机重新组织。App 原生页面跟随系统显示简体中文、英文或意大利文；插件界面跟随 DSH 的语言设置，意大利语资源已为 DSH 后续支持预留。
-- **图片附件**：文件选择使用 DSH 原生“添加”组；DSH Mobile 只在该组补充“拍照”，拍摄结果按 DSH 原生附件流程发送。
-- **自动发现、无需重新配对**：切换 Wi-Fi、热点或 IP 后通常自动恢复。
-- **一键连接诊断**：检查版本、网关、网卡、防火墙和远程通道；稳定的原因码在界面中本地化，并生成不含凭据与完整地址的脱敏报告。
-- **第三方插件 WebSocket 一键放行**：诊断页按目录分组记录被拦截的插件连接（含次数），点允许即放行确切路径，未批准的一律拦截；有新拦截时侧栏红点提醒（#47）。若某插件的连接一直失败（如终端报 1006），先到诊断页看看有没有被拦的连接，一键放行即可，通常无需手动配置。
-- **更快恢复连接**：远程重开会并行恢复可信连接、复用版本化资源，并压缩移动端启动批次。
-- **三种配对方式**：扫码、配对链接、密钥。
+- **专属触屏布局**：会话抽屉、工具详情、设置、提问卡片和输入栏都按手机重新组织；App 跟随系统语言（简/英/意），插件界面跟随 DSH 语言。
+- **多种远程通道**：Tailscale、cpolar、cloudflared 快速/命名隧道、自建 FRP、自有反向代理，按网络任选。
+- **配对与多设备**：扫码、链接或密钥配对一次；切换 Wi-Fi、热点或 IP 后通常自动恢复；App 在一个设备列表中同时显示多台已配对电脑（局域网与全部远程），每台实时显示可达状态，一键切换、重新配对或删除。
+- **一键诊断与放行**：检查版本、网关、网卡、防火墙和远程通道，生成脱敏报告；被拦截的第三方插件连接按确切路径一键放行。
+- **任务系统通知**：任务完成与待输入以 Android 系统通知推送，在 App 前台菜单开启，锁屏文本脱敏。
+- **纵深安全**：独立 HTTPS 与证书固定，凭据存 Keystore，设备令牌只发往精确 Origin，第三方 WS 默认拦截。
 
 配对设备被视为完全信任，可以操作电脑上的 DSH；建议只在可信的家庭、办公局域网或可信 VPN 中使用。
 
@@ -133,7 +132,8 @@ dsh plugin --profile web add dshmarket
    - **cpolar**：点击 **安装官方组件**，登录 cpolar 控制台取得 Authtoken，粘贴后点击 **保存并连接**。组件只会在确认后下载到插件私有目录；免费临时地址可能在 DSH 或 cpolar 重启后变化。
    - **自建 FRP（高级）**：展开 **自建连接**，填写 VPS、frps 端口、共享 Token 和公开 HTTPS 地址；公开地址可以是自己的域名，也可以直接是 VPS 公网 IPv4（例如 `https://203.0.113.10`，请换成你自己的真实地址，文档示例网段会被拒绝）。可以复制受限模板手动部署，也可以填写 SSH 用户、SSH 端口和本机私钥路径，点击 **部署 frps + Caddy** 自动部署。自动部署支持 Ubuntu/Debian + systemd，使用 OpenSSH 密钥或 ssh-agent，不接受密码，也不会覆盖非 DSH Mobile 管理的 Caddyfile；部署与清理前都会展示服务器主机指纹，需到 VPS 控制台核对后才能继续。公网 IP 模式会申请约 6 天有效的 Let’s Encrypt IP 证书并配置每日自动续期。部署完成后再安装官方 `frpc` 并验证连接。不再需要服务器时可用“复制 VPS 卸载脚本”或一键清理，只删除 DSH Mobile 自己的服务与配置。需要 Android App 0.3.3 或更高版本。详见 [自建 FRP 使用指南](docs/SELF_HOSTED_FRP.md)。
    - **自有反向代理**：展开 **自建连接 → 自有反向代理**，填写公网 HTTPS 地址（支持自定义端口）、私有监听 IPv4、独立 HTTP 后端端口（默认 3444）和代理来源 CIDR，再点击 **保存并启动后端**。适合已有 Lucky/Nginx/Caddy 的用户，无需隧道组件；需要 Android App 0.4.0 或更高版本。详见 [自有反向代理指南](docs/SELF_HOSTED_ORIGIN.md)。
-   - **cloudflared**：点击 **安装官方组件**，插件在确认后从官方发布页下载固定版本到插件私有目录，随后自动申请一个临时公网地址（quick tunnel），**无需注册或登录**。适合不想注册账号的用户；quick tunnel 地址每次重连都会变化，官方定位为测试用途、有限流且无可用性保证，请勿用于必须长期可达的生产访问。已有 Cloudflare 账号和域名时，可把隧道类型切到 **命名隧道**，填入连接器令牌、公网域名与本机转发端口，即可获得重启后不变的固定地址（令牌只存私有目录、只经环境变量传给 cloudflared）。步骤见 [Cloudflare 命名隧道](docs/CLOUDFLARE_TUNNEL.md)。
+   - **cloudflared 快速隧道**：点击 **安装官方组件**，插件在确认后从官方发布页下载固定版本到插件私有目录，随后自动申请一个临时公网地址（quick tunnel），**无需注册或登录**。适合不想注册账号的用户；quick tunnel 地址每次重连都会变化，官方定位为测试用途、有限流且无可用性保证，请勿用于必须长期可达的生产访问，只适合临时或验证场景。
+   - **cloudflared 命名隧道**：已有 Cloudflare 账号和域名时，把隧道类型切到 **命名隧道**，填入连接器令牌、公网域名与本机转发端口，即可获得重启后不变的固定地址（令牌只存私有目录、只经环境变量传给 cloudflared）。步骤见 [Cloudflare 命名隧道](docs/CLOUDFLARE_TUNNEL.md)。
 2. 状态变为“远程访问已就绪”后，点击 **生成远程配对二维码**。自有反向代理仅显示“后端已监听”：它不验证公网连通性，仍需检查代理 HTTPS、证书与 WebSocket 并用手机验收。
 3. 在 Android App 中进入 **远程访问**，扫描二维码完成独立配对。
 4. 此后 App 会保存当前地址和设备凭据并自动重连。若 cpolar 免费临时地址发生变化，请扫描电脑端当前远程二维码重新验证连接；无需清除 App 数据。旧设备 token 只会发送到原先保存的精确 Origin，不会发送给二维码中的新域名。
@@ -181,9 +181,9 @@ Tailscale Funnel 覆盖范围广，但在中国大陆网络下可能不稳定。
   <img src="https://raw.githubusercontent.com/saya-ch/dsh-mobile/main/assets/screenshots/cyberpunk-monitor-1.png" width="22%" style="margin-left:8px" alt="/mobile 定制为赛博朋克监控面板">
 </p>
 
-### 设备管理
+## 设备管理
 
-Android App 将局域网、cpolar、cloudflared、Tailscale Funnel 和自建 FRP 统一整理到“已配对设备”列表。首次升级会自动迁移旧版局域网与远程凭据，不要求重新配对；地址变化时按 DSH 安装的稳定 `instanceId` 合并原记录，保留自定义名称。设备 Token 和局域网 CA 继续由 Android Keystore 加密保存，不会显示在列表或二维码中。
+Android App 用一个“已配对设备”列表同时显示多台电脑：局域网、cpolar、cloudflared、Tailscale Funnel 和自建 FRP 配对共处一处。首次升级会自动迁移旧版局域网与远程凭据，不要求重新配对；地址变化时按 DSH 安装的稳定 `instanceId` 合并原记录，保留自定义名称。设备 Token 和局域网 CA 继续由 Android Keystore 加密保存，不会显示在列表或二维码中。
 
 每条记录显示自定义名称、连接方式、Origin、实时可达状态和最近连接时间。绿色状态点表示“可达”，灰色状态点表示“检测中”“暂不可达”“配对已过期”或“电脑端已移除”；可达性检查直接验证 DSH Gateway，不依赖 ICMP，也不会把暂时断网误判成电脑端撤销。
 
@@ -207,7 +207,7 @@ Android App 将局域网、cpolar、cloudflared、Tailscale Funnel 和自建 FRP
   </tr>
 </table>
 
-### 第三方插件适配
+## 第三方插件适配
 
 移动适配保持 DSH 原有的工作区、任务管理、终端和文件面板入口，不会把第三方插件内容隔离成另一套页面。下面的宽屏截图展示 Android App 在宽屏下的布局。App 会根据屏幕宽度自适应：手机使用抽屉和浮层，宽屏使用并排面板；两种布局共享相同的功能和连接方式。第三方插件仍由 DSH 自己加载，移动层负责适配布局与连接，不修改 DeepSeek Harness 源码。
 
@@ -268,7 +268,7 @@ flowchart LR
 - 局域网监听只用于可信家庭、办公网络或可信热点；不要自行做端口转发。
 - 远程地址可从公网到达，但未配对请求无法进入 DSH；不使用时应关闭远程开关。
 - cpolar 仅在用户确认后下载固定官方版本并校验大小和 SHA-256；不会安装系统服务、写入 PATH 或设置开机启动，插件清理会删除其托管文件。
-- cloudflared 同样仅在用户确认后从官方 GitHub Release 下载固定版本并校验精确大小和 SHA-256，且启动时关闭自动更新，以保证运行的始终是已校验的那份二进制；不需要账号、Token 或 DNS 记录，不写入任何凭据，清理时删除插件托管的全部文件。
+- cloudflared 同样仅在用户确认后从官方 GitHub Release 下载固定版本并校验精确大小和 SHA-256，且启动时关闭自动更新，以保证运行的始终是已校验的那份二进制；快速隧道不需要账号、Token 或 DNS 记录；命名隧道令牌只存插件私有目录、只经环境变量传给 cloudflared，清理时删除插件托管的全部文件。
 - 自建 FRP 仅在用户确认后从官方 Release 下载固定版本 `frpc`，校验来源、精确大小、SHA-256、压缩包路径和可执行文件版本；共享 Token 不会出现在状态、诊断或日志中。复制服务器模板时 Token 会进入系统剪贴板，请粘贴后及时清除；本机清理只删除插件管理的文件，VPS 需要用面板提供的卸载脚本或一键清理单独清除。自动部署与一键清理前都会展示 SSH 主机指纹，必须到 VPS 控制台核对后才能继续。
 - 配对设备拥有控制电脑端 DeepSeek Harness 的能力，应视为完全可信设备；丢失手机后应在电脑端撤销设备。
 - 移动网关开启时才监听局域网；关闭后 DeepSeek Harness 仍正常在电脑本机运行。

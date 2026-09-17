@@ -35,9 +35,9 @@
 > **Upgrade reminder**: the 0.4.2 plugin continues to work with the 0.4.0 Android app and existing devices do not need re-pairing; a named tunnel must be scanned from inside the app's Remote flow. Install the 0.4.2 app as well if you want this Android build. [Compatibility notes](#compatibility).
 
 <p align="center">
-  <a href="https://github.com/saya-ch/dsh-mobile/releases/download/v0.4.2/dsh-mobile-android-v0.4.2.apk"><img src="assets/brand/app-icon-rounded.svg" alt="DSH Mobile Android app icon" width="72" height="72"></a><br>
-  <a href="https://github.com/saya-ch/dsh-mobile/releases/download/v0.4.2/dsh-mobile-android-v0.4.2.apk"><strong>Download Android app 0.4.2</strong></a><br>
-  <sub><a href="https://github.com/saya-ch/dsh-mobile/releases/tag/v0.4.2">Release notes and checksums</a></sub>
+  <a href="https://github.com/saya-ch/dsh-mobile/releases/latest"><img src="assets/brand/app-icon-rounded.svg" alt="DSH Mobile Android app icon" width="72" height="72"></a><br>
+  <a href="https://github.com/saya-ch/dsh-mobile/releases/latest"><strong>Download Android app</strong></a><br>
+  <sub><a href="https://github.com/saya-ch/dsh-mobile/releases">Release notes and checksums</a></sub>
 </p>
 
 DSH Mobile is a DeepSeek Harness plugin that lets a mobile browser or the Android app connect over a protected LAN or an optional Tailscale Funnel, cpolar, cloudflared, self-hosted FRP, or own reverse-proxy remote path. Local and remote access keep the same sessions, Workspaces, messages, and tools while using separate switches and paired-device stores without modifying DeepSeek Harness source.
@@ -50,13 +50,12 @@ It also lets you customize the phone from a DSH conversation: `/mobile <what you
 
 - **Continue DSH work from a phone**: the same sessions, Workspaces, messages, and tools, in real time.
 - **Customize the phone UI by talking to DSH**: change the mobile layout, interactions, and features from a conversation; open pages refresh within seconds.
-- **A dedicated touch layout**: session drawer, tool details, settings, question cards, and composer reorganized for phones. Native app screens follow the Android system locale in Simplified Chinese, English, or Italian. Plugin-owned Web UI follows DSH's selected locale; Italian resources are ready for a future DSH Italian locale.
-- **Image attachments**: file selection uses DSH's native **Add** group; DSH Mobile only adds **Take photo** to that group, and captured images follow DSH's native attachment flow.
-- **Auto-discovery, no re-pairing**: Wi-Fi, hotspot, or IP changes normally recover automatically.
-- **One-click connection diagnostics**: check versions, gateway, network interface, firewall, and the remote path; stable reason codes are localized in the UI, and the copied report excludes credentials and complete addresses.
-- **One-click approval for third-party plugin WebSockets**: the diagnostics view groups blocked plugin connections by directory (with attempt counts); allowing a path unblocks that exact path while everything unapproved stays blocked, and a red badge marks the sidebar entry until reviewed (#47). If a plugin keeps failing to connect (for example a terminal reporting 1006), first look at the diagnostics view for blocked connections and approve them in one click — manual configuration is usually unnecessary.
-- **Faster reconnection**: trusted connections race during restore, revisioned assets are reused, and mobile boot batches are compressed.
-- **Three pairing options**: scan a QR code, paste a pairing link, or enter a key.
+- **A dedicated touch layout**: session drawer, tool details, settings, question cards, and composer reorganized for phones; the app follows the system locale (Chinese/English/Italian), plugin UI follows DSH's locale.
+- **Every remote path covered**: Tailscale, cpolar, cloudflared quick/named tunnels, self-hosted FRP, or your own reverse proxy.
+- **Pairing and multi-device**: pair once via QR code, link, or key; Wi-Fi, hotspot, or IP changes normally recover automatically; the app shows all paired computers together in one device list (LAN and every remote), each with live reachability — switch, re-pair, or delete in one tap.
+- **One-click diagnostics and approval**: check versions, gateway, network interface, firewall, and the remote path with a redacted report; approve blocked third-party plugin connections per exact path.
+- **Task system notifications**: completion and pending-input alerts via Android system notifications, enabled from the app foreground menu, with redacted lock-screen text.
+- **Defense in depth**: dedicated HTTPS with pinned certificates, Keystore-backed credentials, device tokens sent only to their exact Origin, third-party WebSockets blocked by default.
 
 A paired device is fully trusted and can operate the DSH on the computer. Use this only on a trusted home or office LAN, or a trusted VPN.
 
@@ -133,7 +132,8 @@ Remote providers may impose bandwidth and connection limits: the [cpolar Free pl
    - **cpolar**: select **Install official component**, sign in to the cpolar dashboard and obtain an Authtoken, paste it, then select **Save and connect**. The component is downloaded into the plugin's private directory only after confirmation; free temporary addresses may change after DSH or cpolar restarts.
    - **Self-hosted FRP (advanced)**: expand **Self-hosted connection**, enter the VPS, frps port, shared token, and public HTTPS origin. The origin may use your domain or the VPS public IPv4 address (for example, `https://203.0.113.10` — substitute your own real address; documentation ranges are rejected). Apply the restricted template manually or enter an SSH user, port, and local private-key path for automatic deployment. Automatic deployment supports Ubuntu/Debian with systemd, uses OpenSSH keys or an agent, refuses password auth, and does not overwrite Caddy configuration it does not manage; both deployment and server cleanup display the SSH host keys for verification against the VPS console before continuing. IPv4 mode obtains a roughly six-day Let's Encrypt IP certificate and installs daily automatic renewal. Install the official `frpc` on demand and verify the path afterward. A reviewable uninstall script or one-click server cleanup removes only DSH Mobile-owned services and configs. This requires Android app 0.3.3 or later. See the [English self-hosted FRP guide](docs/SELF_HOSTED_FRP.en.md) for the complete procedure.
    - **Own reverse proxy**: open **Self-hosted connection → Own reverse proxy**, enter the public HTTPS origin (custom ports supported), private listen IPv4, separate HTTP backend port (default 3444), and allowed proxy source CIDRs, then select **Save and start backend**. This uses your existing Lucky/Nginx/Caddy without a tunnel component and requires Android app 0.4.0 or later. See the [own reverse proxy guide](docs/SELF_HOSTED_ORIGIN.en.md).
-   - **cloudflared**: select **Install official component**. After you confirm, the plugin downloads a pinned build from the official release page into its private directory and requests a temporary public address (a quick tunnel) with **no sign-up or sign-in**. Choose this when you would rather not create an account. The quick-tunnel hostname changes on every reconnect, and Cloudflare positions quick tunnels for testing: they are rate-limited and carry no uptime guarantee, so do not rely on one for production access that must stay reachable. With a Cloudflare account and domain, switch **Tunnel type** to **Named**, then supply a connector token, a public hostname and a local forward port to get an address that survives restarts. The token is stored only in the private directory and reaches cloudflared through the environment rather than the command line; see [Cloudflare named tunnel](docs/CLOUDFLARE_TUNNEL.en.md).
+   - **cloudflared quick tunnel**: select **Install official component**. After you confirm, the plugin downloads a pinned build from the official release page into its private directory and requests a temporary public address (a quick tunnel) with **no sign-up or sign-in**. Choose this when you would rather not create an account. The quick-tunnel hostname changes on every reconnect, and Cloudflare positions quick tunnels for testing: they are rate-limited and carry no uptime guarantee, so do not rely on one for production access that must stay reachable; it suits temporary or verification use.
+   - **cloudflared named tunnel**: with a Cloudflare account and domain, switch **Tunnel type** to **Named**, then supply a connector token, a public hostname and a local forward port to get an address that survives restarts. The token is stored only in the private directory and reaches cloudflared through the environment rather than the command line; see [Cloudflare named tunnel](docs/CLOUDFLARE_TUNNEL.en.md).
 2. When the panel reports that remote access is ready, select **Create remote pairing QR code**. Own reverse proxy reports only **Backend listening**: public HTTPS, its certificate and WebSocket still require verification from your phone.
 3. In the Android app, open **Remote access** and scan the QR code to create its separate pairing.
 4. The app saves the current address and device credential for automatic reconnection. If a free cpolar address changes, scan the computer's current remote QR code to verify the connection again; clearing app data is unnecessary. A stored device token is sent only to its exact saved Origin, never to a new QR-code domain.
@@ -181,9 +181,9 @@ The examples above, applied:
   <img src="https://raw.githubusercontent.com/saya-ch/dsh-mobile/main/assets/screenshots/cyberpunk-monitor-1.png" width="22%" style="margin-left:8px" alt="Mobile UI customized into a cyberpunk computer monitor">
 </p>
 
-### Device management
+## Device management
 
-The Android app keeps LAN, cpolar, cloudflared, Tailscale Funnel, and self-hosted FRP pairings in one **Paired computers** list. The first upgrade migrates the legacy LAN and remote credentials without requiring another pairing; when an address changes, the app merges the row by the DSH installation's stable `instanceId` and keeps its custom name. Device tokens and LAN CAs remain encrypted by Android Keystore and never appear in the list or QR code.
+The Android app shows multiple computers at once in one **Paired computers** list: LAN, cpolar, cloudflared, Tailscale Funnel, and self-hosted FRP pairings together. The first upgrade migrates the legacy LAN and remote credentials without requiring another pairing; when an address changes, the app merges the row by the DSH installation's stable `instanceId` and keeps its custom name. Device tokens and LAN CAs remain encrypted by Android Keystore and never appear in the list or QR code.
 
 Each row shows its custom name, transport, Origin, live reachability, and last connection time. A green dot means **Reachable**; a gray dot means **Checking**, **Temporarily unreachable**, **Pairing expired**, or **Removed on computer**. The check validates the DSH Gateway over HTTPS instead of using ICMP, so a temporary network outage is not mistaken for computer-side revocation.
 
@@ -207,7 +207,7 @@ Revoking a device permanently deletes its durable record and token digest instea
   </tr>
 </table>
 
-### Third-party plugin compatibility
+## Third-party plugin compatibility
 
 The mobile adaptation keeps DSH's existing Workspace, task-management, terminal, and file-panel entry points instead of isolating third-party plugin content in a separate page. The wide-layout screenshot below shows the Android app in a wide viewport. The app adapts to the available width: phones use drawers and overlays, while wide screens use side-by-side panels; both layouts expose the same features and connection methods. DSH still loads third-party plugins itself—the mobile layer only adapts layout and access, without modifying DeepSeek Harness source.
 
@@ -266,7 +266,7 @@ Three layers: the Host face for discovery, pairing, HTTPS, loopback proxying, an
 - Use the LAN listener only on a trusted home, office, or hotspot network; do not add your own port forwarding.
 - A remote origin is publicly reachable, but unpaired requests cannot enter DSH; turn the remote switch off when it is not needed.
 - cpolar downloads a pinned official build only after confirmation and verifies its size and SHA-256. It installs no system service, PATH entry, or startup task, and plugin cleanup removes its managed files.
-- cloudflared likewise downloads a pinned build from the official GitHub Release only after confirmation and verifies the exact size and SHA-256, and it launches the client with automatic updates disabled so the running binary is always the verified one. It needs no account, token, or DNS record, stores no credential, and cleanup deletes every file it manages.
+- cloudflared likewise downloads a pinned build from the official GitHub Release only after confirmation and verifies the exact size and SHA-256, and it launches the client with automatic updates disabled so the running binary is always the verified one. A quick tunnel needs no account, token, or DNS record; a named tunnel token is stored only in the plugin private directory and reaches cloudflared through the environment, and cleanup deletes every file it manages.
 - Self-hosted FRP downloads pinned official `frpc` only after confirmation and verifies the origin, exact size, SHA-256, archive paths, and executable version. The shared token never appears in status, diagnostics, or logs. Copying the server template places it on the system clipboard, so clear the clipboard after use; local cleanup removes only plugin-managed files, while the VPS is cleaned separately with the uninstall script or one-click server cleanup. Automatic deployment and server cleanup both display the SSH host keys, which must be verified against the VPS console before continuing.
 - A paired device is a fully trusted DeepSeek Harness operator and can run tools on the computer; revoke lost devices from the computer.
 - The LAN gateway listens only while Mobile Access is enabled; with it off, DSH keeps running normally on the computer.
