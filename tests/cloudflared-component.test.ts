@@ -2,7 +2,7 @@ import { lstat, mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { CLOUDFLARED_COMPONENT_RELEASE, CloudflaredComponentManager } from '../src/cloudflared-component.js'
+import { CLOUDFLARED_COMPONENT_RELEASE, CLOUDFLARED_COMPONENT_RELEASES, CloudflaredComponentManager } from '../src/cloudflared-component.js'
 
 const temporaryDirectories: string[] = []
 
@@ -31,16 +31,21 @@ async function missing(path: string): Promise<boolean> {
 }
 
 describe('managed cloudflared component', () => {
-  it('pins the official release for Windows x64 only', () => {
+  it('pins the official release per platform', () => {
     expect(CLOUDFLARED_COMPONENT_RELEASE.version).toMatch(/^\d{4}\.\d+\.\d+$/u)
     expect(CLOUDFLARED_COMPONENT_RELEASE.platform).toBe('win32')
     expect(CLOUDFLARED_COMPONENT_RELEASE.arch).toBe('x64')
     expect(CLOUDFLARED_COMPONENT_RELEASE.downloadUrl).toBe(
       `https://github.com/cloudflare/cloudflared/releases/download/${CLOUDFLARED_COMPONENT_RELEASE.version}/cloudflared-windows-amd64.exe`,
     )
-    expect(CLOUDFLARED_COMPONENT_RELEASE.downloadUrl).toMatch(/^https:\/\/github\.com\/cloudflare\/cloudflared\//u)
-    expect(CLOUDFLARED_COMPONENT_RELEASE.downloadSha256).toMatch(/^[a-f0-9]{64}$/u)
-    expect(CLOUDFLARED_COMPONENT_RELEASE.downloadBytes).toBeGreaterThan(0)
+    expect(Object.keys(CLOUDFLARED_COMPONENT_RELEASES).sort()).toEqual(['linux-arm64', 'linux-x64', 'win32-x64'])
+    for (const release of Object.values(CLOUDFLARED_COMPONENT_RELEASES)) {
+      expect(release.version).toBe(CLOUDFLARED_COMPONENT_RELEASE.version)
+      expect(release.downloadUrl).toMatch(/^https:\/\/github\.com\/cloudflare\/cloudflared\//u)
+      expect(release.downloadSha256).toMatch(/^[a-f0-9]{64}$/u)
+      expect(release.downloadBytes).toBeGreaterThan(0)
+      expect(release.executableName).toBe(release.platform === 'win32' ? 'cloudflared.exe' : 'cloudflared')
+    }
   })
 
   it('reports an uninstalled component without touching the network', async () => {
@@ -56,10 +61,24 @@ describe('managed cloudflared component', () => {
   it('refuses unsupported hosts before downloading anything', async () => {
     const directory = await stateDirectory()
     const fetchArtifact = vi.fn()
-    const manager = new CloudflaredComponentManager({ stateDirectory: directory, platform: 'linux', arch: 'x64', fetchArtifact })
+    const manager = new CloudflaredComponentManager({ stateDirectory: directory, platform: 'freebsd', arch: 'x64', fetchArtifact })
     await manager.initialize()
     expect(manager.status()).toMatchObject({ supported: false, installed: false })
     await expect(manager.install()).rejects.toThrow('cloudflared_component_unsupported')
+    expect(fetchArtifact).not.toHaveBeenCalled()
+  })
+
+  it('supports Linux hosts with a bare executable name', async () => {
+    const directory = await stateDirectory()
+    const fetchArtifact = vi.fn()
+    for (const arch of ['x64', 'arm64'] as const) {
+      const manager = new CloudflaredComponentManager({ stateDirectory: directory, platform: 'linux', arch, fetchArtifact })
+      await manager.initialize()
+      expect(manager.status()).toMatchObject({ supported: true, installed: false })
+      expect(manager.status().sourceUrl).toBe(CLOUDFLARED_COMPONENT_RELEASES[`linux-${arch}`]?.downloadUrl)
+      expect(manager.executable.endsWith('cloudflared')).toBe(true)
+      expect(manager.executable.endsWith('.exe')).toBe(false)
+    }
     expect(fetchArtifact).not.toHaveBeenCalled()
   })
 

@@ -146,7 +146,7 @@ Self-hosted FRP generates only one HTTP vhost to the DSH loopback gateway. It ex
 
 The own-proxy HTTP backend must remain on a trusted private network: **never port-forward it publicly or bypass it by proxying to DSH or the existing LAN 3443 gateway**. CIDRs match the proxy's direct TCP peer, not forwarded headers. Preserve the external Host (including port), Origin, cookies and WebSocket. Clearing proxy settings keeps paired remote devices.
 
-The public remote origin still requires DSH device pairing. The bundled Funnel and the managed cpolar and cloudflared components currently support Windows x64; on-demand FRP 0.70.1 supports Windows, Linux, and macOS on x64 and arm64.
+The public remote origin still requires DSH device pairing. The bundled Funnel and the managed cpolar and cloudflared components support Windows x64 and Linux x64/arm64; on-demand FRP 0.70.1 supports Windows, Linux, and macOS on x64 and arm64. See [Compatibility](#compatibility) for the per-channel OS matrix.
 
 ## Extend and customize
 
@@ -276,6 +276,19 @@ See [SECURITY.md](SECURITY.md).
 ## Compatibility
 
 The table below lists, for each plugin version, the DeepSeek Harness version it is verified to support (earlier 0.1.x releases are compatible as well). Starting with 0.3.6 the plugin no longer rejects a DSH version by number alone; newer unlisted versions are covered by CI's contract checks. History lives in [CHANGELOG.md](CHANGELOG.md).
+
+### OS support matrix
+
+| Channel | Windows x64 | Linux x64 | Linux arm64 | macOS |
+| --- | --- | --- | --- | --- |
+| Local network | ✅ (firewall automated) | ✅ (open the firewall yourself) | ✅ | ✅ |
+| Tailscale Funnel | ✅ (bundled) | ✅ (bundled) | ✅ (bundled) | ❌ |
+| cpolar | ✅ (on-demand) | ✅ (on-demand) | ✅ (on-demand) | ❌ |
+| cloudflared quick/named tunnel | ✅ (on-demand) | ✅ (on-demand) | ✅ (on-demand) | ❌ |
+| Self-hosted FRP | ✅ (on-demand) | ✅ (on-demand) | ✅ (on-demand) | ✅ (on-demand) |
+| Own reverse proxy | ✅ (config only) | ✅ (config only) | ✅ (config only) | ✅ (config only) |
+
+On macOS, local network, self-hosted FRP, and the own reverse proxy work; the three managed components have no macOS build yet. The diagnostics firewall check currently covers Windows only and reports “not applicable” elsewhere.
 
 | DSH Mobile plugin | Verified DeepSeek Harness version |
 | --- | --- |

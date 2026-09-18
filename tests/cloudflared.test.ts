@@ -510,4 +510,38 @@ describe('cloudflared named tunnel', () => {
     expect(failed).toEqual({ enabled: true, state: 'error', errorCode: 'cloudflared_start_timeout' })
     expect(controller.gateway()).toBeUndefined()
   })
+
+  it('keeps waiting while a live named connector has not registered yet', async () => {
+    const port = await freeLoopbackPort()
+    const directory = await mkdtemp(join(tmpdir(), 'dsh-mobile-cloudflared-named-slow-'))
+    temporaryDirectories.push(directory)
+    const executable = join(directory, 'component', 'cloudflared.exe')
+    await mkdir(dirname(executable), { recursive: true })
+    await writeFile(executable, 'fake-cloudflared')
+    const child = new FakeChild()
+    const journal = new StatusJournal()
+    const controller = new CloudflaredController({
+      store: new MemoryControlStore(),
+      executable,
+      createGateway: async (origin, listenPort) => gateway(origin, listenPort),
+      tunnel: { settings: () => namedSettings(port) },
+      onStatus: journal.publish,
+      startupTimeoutMs: 20,
+      maxStartupRounds: 5,
+      spawnProcess: () => child as unknown as ChildProcessWithoutNullStreams,
+    })
+    controllers.push(controller)
+    await controller.initialize()
+
+    // Two timeout rounds pass with the connector still alive: no error, no kill.
+    await new Promise(resolve => setTimeout(resolve, 50))
+    expect(child.exitCode).toBeNull()
+    expect(controller.status().state).toBe('connecting')
+
+    // A late registration (rebooted network finally usable) still promotes to ready.
+    child.stderr.write('2026-09-16T11:18:10Z INF Registered tunnel connection connIndex=0 connection=645e1fe2-9ac7-4a17-bc65-4cc7be9d7d67 location=sin08 protocol=quic\n')
+    const ready = await journal.waitFor(status => status.state === 'ready')
+    expect(ready).toEqual({ enabled: true, state: 'ready', origin: NAMED_ORIGIN })
+    expect(child.exitCode).toBeNull()
+  })
 })

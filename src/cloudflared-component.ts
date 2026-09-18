@@ -14,23 +14,69 @@ import { isAbsolute, join, relative, resolve } from 'node:path'
 import { downloadPinnedArtifact } from './component-download.js'
 
 /**
- * Pinned cloudflared Windows component fetched only after an explicit user action.
+ * Pinned cloudflared components fetched only after an explicit user action.
  *
- * Unlike the cpolar archive this artifact IS the executable: there is nothing to
- * unpack, so the download digest and the installed digest are the same pair.
+ * Unlike the cpolar archive each artifact IS the executable: there is nothing
+ * to unpack, so the download digest and the installed digest are the same pair.
  * `--no-autoupdate` is passed at runtime as well, so the pinned bytes stay the
  * bytes that were verified.
  */
-export const CLOUDFLARED_COMPONENT_RELEASE = Object.freeze({
-  version: '2026.9.1',
-  platform: 'win32',
-  arch: 'x64',
-  downloadUrl: 'https://github.com/cloudflare/cloudflared/releases/download/2026.9.1/cloudflared-windows-amd64.exe',
-  downloadBytes: 54_976_432,
-  downloadSha256: '2837888cc0f5d58f15b6dc478376de90b4d3ba5241c7947455d1e0a0df429712',
-  downloadPage: 'https://github.com/cloudflare/cloudflared/releases',
-  termsUrl: 'https://www.cloudflare.com/website-terms/',
-})
+interface CloudflaredArtifact {
+  readonly version: string
+  readonly platform: NodeJS.Platform
+  readonly arch: string
+  readonly downloadUrl: string
+  readonly downloadBytes: number
+  readonly downloadSha256: string
+  readonly executableName: string
+}
+
+const CLOUDFLARED_VERSION = '2026.9.1'
+
+const releases = [
+  {
+    version: CLOUDFLARED_VERSION,
+    platform: 'win32',
+    arch: 'x64',
+    downloadUrl: `https://github.com/cloudflare/cloudflared/releases/download/${CLOUDFLARED_VERSION}/cloudflared-windows-amd64.exe`,
+    downloadBytes: 54_976_432,
+    downloadSha256: '2837888cc0f5d58f15b6dc478376de90b4d3ba5241c7947455d1e0a0df429712',
+    executableName: 'cloudflared.exe',
+  },
+  {
+    version: CLOUDFLARED_VERSION,
+    platform: 'linux',
+    arch: 'x64',
+    downloadUrl: `https://github.com/cloudflare/cloudflared/releases/download/${CLOUDFLARED_VERSION}/cloudflared-linux-amd64`,
+    downloadBytes: 39_838_488,
+    downloadSha256: '03f1f25d1cc93b9ad6c60569d44060bc4f17ed97075760ed8cfca4b12dcd68cc',
+    executableName: 'cloudflared',
+  },
+  {
+    version: CLOUDFLARED_VERSION,
+    platform: 'linux',
+    arch: 'arm64',
+    downloadUrl: `https://github.com/cloudflare/cloudflared/releases/download/${CLOUDFLARED_VERSION}/cloudflared-linux-arm64`,
+    downloadBytes: 37_466_252,
+    downloadSha256: '3d97437c71848bd8df68041e12436b484a661d95073ea1937f01a845ce88faa3',
+    executableName: 'cloudflared',
+  },
+] as const satisfies readonly CloudflaredArtifact[]
+
+/** Pinned official cloudflared release metadata for supported desktop targets. */
+export const CLOUDFLARED_COMPONENT_RELEASES: Readonly<Record<string, CloudflaredArtifact>> = Object.freeze(Object.fromEntries(
+  releases.map(release => [`${release.platform}-${release.arch}`, Object.freeze(release)]),
+))
+
+/**
+ * Canonical release metadata. New code should select from
+ * {@link CLOUDFLARED_COMPONENT_RELEASES} by platform and architecture; this
+ * alias preserves the original Windows x64 entry for existing callers.
+ */
+export const CLOUDFLARED_COMPONENT_RELEASE = CLOUDFLARED_COMPONENT_RELEASES['win32-x64'] as CloudflaredArtifact
+
+const DOWNLOAD_PAGE = 'https://github.com/cloudflare/cloudflared/releases'
+const TERMS_URL = 'https://www.cloudflare.com/website-terms/'
 
 /**
  * Public, credential-free description of the managed cloudflared component.
@@ -77,13 +123,22 @@ async function regularFile(file: string, expectedBytes?: number): Promise<boolea
   }
 }
 
-async function defaultFetchArtifact(url: string, signal: AbortSignal): Promise<Uint8Array> {
+async function defaultFetchArtifact(
+  url: string,
+  signal: AbortSignal,
+  expectedBytes: number,
+): Promise<Uint8Array> {
   return downloadPinnedArtifact({
     url,
-    expectedBytes: CLOUDFLARED_COMPONENT_RELEASE.downloadBytes,
+    expectedBytes,
     errorPrefix: 'cloudflared',
     signal,
   })
+}
+
+/** Select the pinned artifact for one host, or undefined where unsupported. */
+function lookupRelease(platform: NodeJS.Platform, arch: string): CloudflaredArtifact | undefined {
+  return CLOUDFLARED_COMPONENT_RELEASES[`${platform}-${arch}`]
 }
 
 /** Owns the optional cloudflared binary inside DSH Mobile state. */
@@ -96,6 +151,7 @@ export class CloudflaredComponentManager {
   private readonly stagingRoot: string
   private readonly platform: NodeJS.Platform
   private readonly arch: string
+  private readonly release: CloudflaredArtifact | undefined
   private readonly fetchArtifact: (url: string, signal: AbortSignal) => Promise<Uint8Array>
   private installed = false
   private errorCode: string | undefined
@@ -106,22 +162,26 @@ export class CloudflaredComponentManager {
     if (!isAbsolute(stateDirectory)) throw new Error('cloudflared state directory must be absolute')
     this.platform = options.platform ?? process.platform
     this.arch = options.arch ?? process.arch
+    this.release = lookupRelease(this.platform, this.arch)
     this.componentRoot = join(stateDirectory, 'components', 'cloudflared')
-    this.componentStorage = join(this.componentRoot, CLOUDFLARED_COMPONENT_RELEASE.version)
-    this.executable = join(this.componentStorage, 'cloudflared.exe')
+    this.componentStorage = join(this.componentRoot, this.release?.version ?? CLOUDFLARED_VERSION)
+    this.executable = join(this.componentStorage, this.release?.executableName ?? 'cloudflared')
     this.stateRoot = join(stateDirectory, 'state', 'cloudflared')
     this.logRoot = join(stateDirectory, 'logs', 'cloudflared')
     this.stagingRoot = join(stateDirectory, 'staging', 'cloudflared')
     for (const child of [this.componentRoot, this.componentStorage, this.stateRoot, this.logRoot, this.stagingRoot]) {
       if (!inside(stateDirectory, child)) throw new Error('cloudflared component path escaped its state directory')
     }
-    this.fetchArtifact = options.fetchArtifact ?? defaultFetchArtifact
+    const release = this.release
+    this.fetchArtifact = options.fetchArtifact
+      ?? ((url, signal) => defaultFetchArtifact(url, signal, release?.downloadBytes ?? 0))
   }
 
   /** Inspect the managed binary without using any global cloudflared state. */
   async initialize(): Promise<void> {
-    this.installed = await regularFile(this.executable, CLOUDFLARED_COMPONENT_RELEASE.downloadBytes)
-    if (this.installed && await sha256(this.executable) !== CLOUDFLARED_COMPONENT_RELEASE.downloadSha256) {
+    const release = this.release
+    this.installed = release !== undefined && await regularFile(this.executable, release.downloadBytes)
+    if (this.installed && release !== undefined && await sha256(this.executable) !== release.downloadSha256) {
       this.installed = false
       this.errorCode = 'cloudflared_component_invalid'
     }
@@ -129,15 +189,18 @@ export class CloudflaredComponentManager {
 
   /** Return a safe status that never includes machine-specific account data. */
   status(): CloudflaredComponentStatus {
+    // Unsupported hosts still report the canonical entry so the panel can show
+    // what would be installed elsewhere; `supported` carries the actual gate.
+    const release = this.release ?? CLOUDFLARED_COMPONENT_RELEASE
     return Object.freeze({
-      supported: this.platform === CLOUDFLARED_COMPONENT_RELEASE.platform && this.arch === CLOUDFLARED_COMPONENT_RELEASE.arch,
+      supported: this.release !== undefined,
       installed: this.installed,
-      version: CLOUDFLARED_COMPONENT_RELEASE.version,
-      downloadBytes: CLOUDFLARED_COMPONENT_RELEASE.downloadBytes,
-      installedBytes: CLOUDFLARED_COMPONENT_RELEASE.downloadBytes,
-      sourceUrl: CLOUDFLARED_COMPONENT_RELEASE.downloadUrl,
-      downloadPage: CLOUDFLARED_COMPONENT_RELEASE.downloadPage,
-      termsUrl: CLOUDFLARED_COMPONENT_RELEASE.termsUrl,
+      version: release.version,
+      downloadBytes: release.downloadBytes,
+      installedBytes: release.downloadBytes,
+      sourceUrl: release.downloadUrl,
+      downloadPage: DOWNLOAD_PAGE,
+      termsUrl: TERMS_URL,
       storagePath: this.componentRoot,
       ...(this.errorCode === undefined ? {} : { errorCode: this.errorCode }),
     })
@@ -146,35 +209,35 @@ export class CloudflaredComponentManager {
   /** Download, verify, and install the pinned cloudflared executable after explicit confirmation. */
   install(): Promise<CloudflaredComponentStatus> {
     return this.enqueue(async () => {
-      if (this.platform !== CLOUDFLARED_COMPONENT_RELEASE.platform || this.arch !== CLOUDFLARED_COMPONENT_RELEASE.arch) {
-        throw new Error('cloudflared_component_unsupported')
-      }
+      const release = this.release
+      if (release === undefined) throw new Error('cloudflared_component_unsupported')
       await mkdir(this.stagingRoot, { recursive: true, mode: 0o700 })
       const staging = await mkdtemp(join(this.stagingRoot, 'install-'))
       try {
         const controller = new AbortController()
-        // The pinned artifact is ~55 MB, so the transfer budget is larger than
-        // the cpolar archive's: a slow but working link must not fail the install.
+        // The pinned artifact is tens of megabytes, so the transfer budget is
+        // larger than a control handshake: a slow but working link must not
+        // fail the install.
         const timeout = setTimeout(() => { controller.abort() }, 300_000)
         timeout.unref()
         let bytes: Uint8Array
-        try { bytes = await this.fetchArtifact(CLOUDFLARED_COMPONENT_RELEASE.downloadUrl, controller.signal) } finally { clearTimeout(timeout) }
-        if (bytes.byteLength !== CLOUDFLARED_COMPONENT_RELEASE.downloadBytes) {
+        try { bytes = await this.fetchArtifact(release.downloadUrl, controller.signal) } finally { clearTimeout(timeout) }
+        if (bytes.byteLength !== release.downloadBytes) {
           throw new Error('cloudflared_download_size_mismatch')
         }
         const digest = createHash('sha256').update(bytes).digest('hex')
-        if (digest !== CLOUDFLARED_COMPONENT_RELEASE.downloadSha256) throw new Error('cloudflared_download_hash_mismatch')
-        const staged = join(staging, 'cloudflared.exe')
+        if (digest !== release.downloadSha256) throw new Error('cloudflared_download_hash_mismatch')
+        const staged = join(staging, release.executableName)
         await writeFile(staged, bytes, { flag: 'wx', mode: 0o600 })
         await chmod(staged, 0o700)
-        if (!await regularFile(staged, CLOUDFLARED_COMPONENT_RELEASE.downloadBytes)
-          || await sha256(staged) !== CLOUDFLARED_COMPONENT_RELEASE.downloadSha256) {
+        if (!await regularFile(staged, release.downloadBytes)
+          || await sha256(staged) !== release.downloadSha256) {
           throw new Error('cloudflared_executable_hash_mismatch')
         }
         const candidate = join(this.componentRoot, `.install-${randomBytes(12).toString('hex')}`)
         await mkdir(candidate, { recursive: true, mode: 0o700 })
-        await copyFile(staged, join(candidate, 'cloudflared.exe'))
-        await chmod(join(candidate, 'cloudflared.exe'), 0o700)
+        await copyFile(staged, join(candidate, release.executableName))
+        await chmod(join(candidate, release.executableName), 0o700)
         await rm(this.componentStorage, { recursive: true, force: true })
         await rename(candidate, this.componentStorage)
         this.installed = true

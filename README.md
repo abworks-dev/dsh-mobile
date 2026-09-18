@@ -146,7 +146,7 @@ Tailscale Funnel 覆盖范围广，但在中国大陆网络下可能不稳定。
 
 自有反向代理的 HTTP 后端只允许留在可信私网；**不要把它映射到公网，也不要绕过它直连 DSH 或现有 LAN 3443**。来源 CIDR 匹配代理的直接 TCP 来源，不信任转发头；反代须保留外部 Host（含端口）、Origin、Cookie 和 WebSocket。清除代理配置不会删除已配对远程设备。
 
-远程公开地址仍受 DSH 设备配对保护。内置 Funnel 与托管 cpolar、cloudflared 当前支持 Windows x64；按需安装的 FRP 0.70.1 支持 Windows、Linux、macOS 的 x64 与 arm64。
+远程公开地址仍受 DSH 设备配对保护。内置 Funnel 与托管 cpolar、cloudflared 支持 Windows x64 与 Linux x64/arm64；按需安装的 FRP 0.70.1 支持 Windows、Linux、macOS 的 x64 与 arm64。各通道的系统支持矩阵见[兼容性](#兼容性)。
 
 ## 扩展与自定义
 
@@ -278,6 +278,19 @@ flowchart LR
 ## 兼容性
 
 下表列出各插件版本验证支持到的 DeepSeek Harness 版本（早于该版本的 0.1.x 均兼容）。0.3.6 起插件不再按版本号拒绝启动，未列出的更新版本由 CI 契约检查兜底。历史记录见 [CHANGELOG.md](CHANGELOG.md)。
+
+### 系统支持矩阵
+
+| 通道 | Windows x64 | Linux x64 | Linux arm64 | macOS |
+| --- | --- | --- | --- | --- |
+| 局域网 | ✅（自动配防火墙） | ✅（防火墙自理） | ✅ | ✅ |
+| Tailscale Funnel | ✅（随包提供） | ✅（随包提供） | ✅（随包提供） | ❌ |
+| cpolar | ✅（按需下载） | ✅（按需下载） | ✅（按需下载） | ❌ |
+| cloudflared 快速/命名隧道 | ✅（按需下载） | ✅（按需下载） | ✅（按需下载） | ❌ |
+| 自建 FRP | ✅（按需下载） | ✅（按需下载） | ✅（按需下载） | ✅（按需下载） |
+| 自有反向代理 | ✅（纯配置） | ✅（纯配置） | ✅（纯配置） | ✅（纯配置） |
+
+macOS 上局域网、自建 FRP 与自有反向代理可用；三个托管组件暂未提供 macOS 包。诊断页的防火墙检查目前仅覆盖 Windows，其他系统显示“不适用”。
 
 
 | DSH Mobile 插件                         | 验证支持的 DeepSeek Harness 版本                             |

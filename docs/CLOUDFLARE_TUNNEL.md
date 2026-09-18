@@ -77,8 +77,8 @@
 | 无法预留本机端口 | `cloudflared_port_reservation_failed` | 本机端口预留本身失败（不是端口被占）。重试；若持续出现请检查系统资源。 |
 | 组件下载校验失败 | `cloudflared_download_hash_mismatch` / `cloudflared_download_size_mismatch` | 下载到的二进制与固定版本的大小或 SHA-256 不符。重新安装；若反复失败说明中间链路在改包。 |
 | 已安装组件校验失败 | `cloudflared_executable_hash_mismatch` | 本机那份 cloudflared 与校验过的版本不一致。彻底移除后重新安装。 |
-| 当前构建不支持该组件 | `cloudflared_component_unsupported` | 当前平台不在支持范围内（目前仅 Windows x64）。 |
-| 等待隧道可用超时 | `cloudflared_start_timeout` | connector 在 60 秒内没有打印 `Registered tunnel connection`。常见原因是网络到 Cloudflare 边缘不通。 |
+| 当前构建不支持该组件 | `cloudflared_component_unsupported` | 当前平台不在支持范围内（目前支持 Windows x64 与 Linux x64/arm64）。 |
+| 等待隧道可用超时 | `cloudflared_start_timeout` | connector 在超时预算内没有打印 `Registered tunnel connection`。命名隧道下进程活着会继续等（最多约 5 分钟）；常见原因是网络到 Cloudflare 边缘不通。 |
 | 组件未安装 | `cloudflared_component_missing` | 还没安装官方组件。按上面的准备步骤安装。 |
 | 组件校验失败 | `cloudflared_component_invalid` | 本机组件与校验过的版本不符。彻底移除后重新安装。 |
 | 无法分配端口 | `cloudflared_port_unavailable` | 快速隧道模式下无法分配本机网关端口。重试。 |

@@ -15,6 +15,15 @@ const MAX_LOG_BUFFER_BYTES = 64 * 1024
  * looking healthy for longer than a user will wait.
  */
 const START_TIMEOUT_MS = 60_000
+/**
+ * How many startup-timeout rounds a named tunnel may wait through while its
+ * connector process is still alive. A rebooted PC often autostarts DSH before
+ * Wi-Fi / VPN / DNS is usable; cloudflared retries the edge on its own, so
+ * killing it after a single 60 s window turns a slow boot into a manual
+ * reconnect loop. An exited connector (bad token, bad config) still fails fast
+ * on the first round.
+ */
+const NAMED_STARTUP_ROUNDS = 5
 const CLOUDFLARED_HOST_SUFFIX = '.trycloudflare.com'
 
 /**
@@ -47,8 +56,13 @@ export interface CloudflaredControllerOptions {
   readonly tunnel: { settings(): CloudflaredTunnelSettings }
   readonly createGateway: (origin: string, listenPort: number) => Promise<MobileAccessGateway>
   readonly onStatus?: (status: CloudflaredStatus) => void
-  /** Liveness bound for one quick-tunnel allocation; defaults to the product timeout. */
+  /** Liveness bound for one startup-timeout round; defaults to the product timeout. */
   readonly startupTimeoutMs?: number
+  /**
+   * Total startup-timeout rounds before a live named connector is given up on;
+   * defaults to NAMED_STARTUP_ROUNDS. Quick tunnels always use a single round.
+   */
+  readonly maxStartupRounds?: number
   readonly spawnProcess?: (
     executable: string,
     args: readonly string[],
@@ -184,6 +198,7 @@ export class CloudflaredController implements RemoteProviderController {
   private latest: CloudflaredStatus = publicStatus({ enabled: false, state: 'off' })
   private queue: Promise<void> = Promise.resolve()
   private startupTimer: NodeJS.Timeout | undefined
+  private startupRounds = 0
 
   constructor(private readonly options: CloudflaredControllerOptions) {
     if (!isAbsolute(options.executable)) {
@@ -303,6 +318,7 @@ export class CloudflaredController implements RemoteProviderController {
     }
     this.reservation = reservation
     this.buffer = ''
+    this.startupRounds = 0
     this.publish({ enabled: true, state: 'starting' })
 
     if (named !== undefined) {
@@ -358,10 +374,33 @@ export class CloudflaredController implements RemoteProviderController {
       this.child = undefined
       if (this.enabled) void this.enqueue(() => this.failGeneration(generation, code === 0 ? 'cloudflared_stopped' : 'cloudflared_exited'))
     })
+    this.armStartupTimer(generation)
+  }
+
+  private armStartupTimer(generation: number): void {
+    if (this.startupTimer !== undefined) clearTimeout(this.startupTimer)
     this.startupTimer = setTimeout(() => {
-      void this.enqueue(() => this.failGeneration(generation, 'cloudflared_start_timeout'))
+      void this.enqueue(() => this.checkStartupTimeout(generation))
     }, this.options.startupTimeoutMs ?? START_TIMEOUT_MS)
     this.startupTimer.unref()
+  }
+
+  /**
+   * Give a live named connector more time instead of killing it: it retries the
+   * edge on its own and usually registers once the rebooted network is usable.
+   * A dead connector, or an exhausted budget, fails the generation as before.
+   */
+  private async checkStartupTimeout(generation: number): Promise<void> {
+    if (generation !== this.generation || !this.enabled || this.disposed) return
+    if (this.latest.state === 'ready') return
+    const childAlive = this.child !== undefined && this.child.exitCode === null
+    const budget = this.options.maxStartupRounds ?? NAMED_STARTUP_ROUNDS
+    if (this.mode === 'named' && childAlive && this.startupRounds + 1 < budget) {
+      this.startupRounds += 1
+      this.armStartupTimer(generation)
+      return
+    }
+    await this.failGeneration(generation, 'cloudflared_start_timeout')
   }
 
   private consume(generation: number, chunk: string): void {

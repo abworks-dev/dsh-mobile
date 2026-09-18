@@ -1,9 +1,10 @@
 import { lstat, mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   CPOLAR_COMPONENT_RELEASE,
+  CPOLAR_COMPONENT_RELEASES,
   CpolarComponentManager,
   validateCpolarAuthtoken,
 } from '../src/cpolar-component.js'
@@ -15,10 +16,18 @@ afterEach(async () => {
 })
 
 describe('managed cpolar component', () => {
-  it('pins the official artifact and rejects malformed tokens', () => {
+  it('pins the official artifact per platform and rejects malformed tokens', () => {
     expect(CPOLAR_COMPONENT_RELEASE.downloadUrl).toMatch(/^https:\/\/www\.cpolar\.com\//u)
     expect(CPOLAR_COMPONENT_RELEASE.downloadSha256).toMatch(/^[a-f0-9]{64}$/u)
     expect(CPOLAR_COMPONENT_RELEASE.executableSha256).toMatch(/^[a-f0-9]{64}$/u)
+    expect(Object.keys(CPOLAR_COMPONENT_RELEASES).sort()).toEqual(['linux-arm64', 'linux-x64', 'win32-x64'])
+    for (const release of Object.values(CPOLAR_COMPONENT_RELEASES)) {
+      expect(release.version).toBe(CPOLAR_COMPONENT_RELEASE.version)
+      expect(release.downloadUrl).toMatch(/^https:\/\/www\.cpolar\.com\//u)
+      expect(release.downloadSha256).toMatch(/^[a-f0-9]{64}$/u)
+      expect(release.executableSha256).toMatch(/^[a-f0-9]{64}$/u)
+      expect(release.executableName).toBe(release.platform === 'win32' ? 'cpolar.exe' : 'cpolar')
+    }
     expect(validateCpolarAuthtoken('a'.repeat(32))).toBe('a'.repeat(32))
     expect(() => validateCpolarAuthtoken('short')).toThrow('cpolar_authtoken_invalid')
     expect(() => validateCpolarAuthtoken(`a${'b'.repeat(30)}\n`)).toThrow('cpolar_authtoken_invalid')
@@ -49,9 +58,28 @@ describe('managed cpolar component', () => {
   it('reports unsupported hosts without attempting a download', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'dsh-mobile-cpolar-component-'))
     temporaryDirectories.push(directory)
-    const manager = new CpolarComponentManager({ stateDirectory: directory, platform: 'linux', arch: 'x64' })
+    const manager = new CpolarComponentManager({ stateDirectory: directory, platform: 'freebsd', arch: 'x64' })
     await manager.initialize()
     expect(manager.status()).toMatchObject({ supported: false, installed: false })
     await expect(manager.install()).rejects.toThrow('cpolar_component_unsupported')
+  })
+
+  it('selects the Linux tarball on Linux hosts', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'dsh-mobile-cpolar-component-'))
+    temporaryDirectories.push(directory)
+    const fetchArtifact = vi.fn(async () => new Uint8Array(16))
+    for (const arch of ['x64', 'arm64'] as const) {
+      const manager = new CpolarComponentManager({ stateDirectory: directory, platform: 'linux', arch, fetchArtifact })
+      await manager.initialize()
+      expect(manager.status()).toMatchObject({ supported: true, installed: false })
+      expect(manager.status().sourceUrl).toBe(CPOLAR_COMPONENT_RELEASES[`linux-${arch}`]?.downloadUrl)
+      expect(manager.executable.endsWith('cpolar')).toBe(true)
+      expect(manager.executable.endsWith('.exe')).toBe(false)
+      await expect(manager.install()).rejects.toThrow('cpolar_download_hash_mismatch')
+    }
+    expect(fetchArtifact).toHaveBeenCalledWith(
+      CPOLAR_COMPONENT_RELEASES['linux-x64']?.downloadUrl,
+      expect.anything(),
+    )
   })
 })

@@ -16,21 +16,78 @@ import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:pat
 import { downloadPinnedArtifact } from './component-download.js'
 import { restrictPrivateFile } from './private-file.js'
 
-/** Pinned cpolar Windows component fetched only after an explicit user action. */
-export const CPOLAR_COMPONENT_RELEASE = Object.freeze({
-  version: '3.3.18',
-  platform: 'win32',
-  arch: 'x64',
-  downloadUrl: 'https://www.cpolar.com/static/downloads/releases/3.3.18/cpolar-stable-windows-amd64-setup.zip',
-  downloadBytes: 7_603_505,
-  downloadSha256: 'fb8cf60289058ee26079f995d2eeea0b21768a742d90c93015afe96e83428830',
-  executableBytes: 19_637_680,
-  executableSha256: 'b2d865ee505e842d22ceca5493a872efa893a79b079a7a8ee2bd3aa5343a5c41',
-  downloadPage: 'https://www.cpolar.com/download',
-  signupUrl: 'https://dashboard.cpolar.com/signup',
-  dashboardUrl: 'https://dashboard.cpolar.com/auth',
-  termsUrl: 'https://www.cpolar.com/tos',
-})
+/** Pinned cpolar components fetched only after an explicit user action. */
+interface CpolarArtifact {
+  readonly version: string
+  readonly platform: NodeJS.Platform
+  readonly arch: string
+  readonly downloadUrl: string
+  readonly downloadBytes: number
+  readonly downloadSha256: string
+  readonly executableName: string
+  readonly executableBytes: number
+  readonly executableSha256: string
+  /** Windows ships an MSI inside a zip; Linux ships the binary in a tarball. */
+  readonly archiveKind: 'msi-zip' | 'tar.gz'
+}
+
+const CPOLAR_VERSION = '3.3.18'
+
+const releases = [
+  {
+    version: CPOLAR_VERSION,
+    platform: 'win32',
+    arch: 'x64',
+    downloadUrl: `https://www.cpolar.com/static/downloads/releases/${CPOLAR_VERSION}/cpolar-stable-windows-amd64-setup.zip`,
+    downloadBytes: 7_603_505,
+    downloadSha256: 'fb8cf60289058ee26079f995d2eeea0b21768a742d90c93015afe96e83428830',
+    executableName: 'cpolar.exe',
+    executableBytes: 19_637_680,
+    executableSha256: 'b2d865ee505e842d22ceca5493a872efa893a79b079a7a8ee2bd3aa5343a5c41',
+    archiveKind: 'msi-zip',
+  },
+  {
+    version: CPOLAR_VERSION,
+    platform: 'linux',
+    arch: 'x64',
+    downloadUrl: `https://www.cpolar.com/static/downloads/releases/${CPOLAR_VERSION}/cpolar-stable-linux-amd64.tar.gz`,
+    downloadBytes: 7_404_781,
+    downloadSha256: '5cd3320c4369928ccb509c4f5fa2ec3b86151ead77e1b77c1694aa64c43e32e7',
+    executableName: 'cpolar',
+    executableBytes: 19_328_632,
+    executableSha256: 'c076e1109372a3f88031841c5989030e49b6871b54aee3260c796da9122dec05',
+    archiveKind: 'tar.gz',
+  },
+  {
+    version: CPOLAR_VERSION,
+    platform: 'linux',
+    arch: 'arm64',
+    downloadUrl: `https://www.cpolar.com/static/downloads/releases/${CPOLAR_VERSION}/cpolar-stable-linux-arm64.tar.gz`,
+    downloadBytes: 6_855_666,
+    downloadSha256: '8a61a97983f18ae5ffb4b8bac4c9b3d8e2399a6ee101844e7b0b30d7f326157c',
+    executableName: 'cpolar',
+    executableBytes: 19_017_169,
+    executableSha256: '8d76a1b7e518df45f387f107c7a428079c67ecd9b971a2915c53b947ea9b443a',
+    archiveKind: 'tar.gz',
+  },
+] as const satisfies readonly CpolarArtifact[]
+
+/** Pinned official cpolar release metadata for supported desktop targets. */
+export const CPOLAR_COMPONENT_RELEASES: Readonly<Record<string, CpolarArtifact>> = Object.freeze(Object.fromEntries(
+  releases.map(release => [`${release.platform}-${release.arch}`, Object.freeze(release)]),
+))
+
+/**
+ * Canonical release metadata. New code should select from
+ * {@link CPOLAR_COMPONENT_RELEASES} by platform and architecture; this alias
+ * preserves the original Windows x64 entry for existing callers.
+ */
+export const CPOLAR_COMPONENT_RELEASE = CPOLAR_COMPONENT_RELEASES['win32-x64'] as CpolarArtifact
+
+const DOWNLOAD_PAGE = 'https://www.cpolar.com/download'
+const SIGNUP_URL = 'https://dashboard.cpolar.com/signup'
+const DASHBOARD_URL = 'https://dashboard.cpolar.com/auth'
+const TERMS_URL = 'https://www.cpolar.com/tos'
 
 /** Public, credential-free description of the managed cpolar component. */
 export interface CpolarComponentStatus {
@@ -85,16 +142,20 @@ async function run(file: string, args: readonly string[]): Promise<void> {
   })
 }
 
-async function defaultFetchArtifact(url: string, signal: AbortSignal): Promise<Uint8Array> {
+async function defaultFetchArtifact(
+  url: string,
+  signal: AbortSignal,
+  expectedBytes: number,
+): Promise<Uint8Array> {
   return downloadPinnedArtifact({
     url,
-    expectedBytes: CPOLAR_COMPONENT_RELEASE.downloadBytes,
+    expectedBytes,
     errorPrefix: 'cpolar',
     signal,
   })
 }
 
-async function defaultExtractArtifact(archive: string, destination: string): Promise<void> {
+async function extractWindowsMsi(archive: string, destination: string, executableName: string): Promise<void> {
   if (process.platform !== 'win32') throw new Error('cpolar_component_unsupported')
   const unpacked = join(destination, 'archive')
   const administrative = join(destination, 'administrative')
@@ -106,9 +167,25 @@ async function defaultExtractArtifact(archive: string, destination: string): Pro
   if (msiRelative === undefined) throw new Error('cpolar_installer_missing')
   await run('msiexec.exe', ['/a', join(unpacked, msiRelative), '/qn', `TARGETDIR=${administrative}`])
   const installedEntries = await readdir(administrative, { recursive: true })
-  const executableRelative = installedEntries.find(entry => basename(entry).toLowerCase() === 'cpolar.exe')
+  const executableRelative = installedEntries.find(entry => basename(entry).toLowerCase() === executableName.toLowerCase())
   if (executableRelative === undefined) throw new Error('cpolar_executable_missing')
-  await copyFile(join(administrative, executableRelative), join(destination, 'cpolar.exe'))
+  await copyFile(join(administrative, executableRelative), join(destination, executableName))
+}
+
+async function extractLinuxTarball(archive: string, destination: string, executableName: string): Promise<void> {
+  const unpacked = join(destination, 'archive')
+  await mkdir(unpacked, { recursive: true, mode: 0o700 })
+  // The Linux tarball carries the binary at its root; no installer involved.
+  await run(process.platform === 'win32' ? 'tar.exe' : 'tar', ['-xzf', archive, '-C', unpacked])
+  const archiveEntries = await readdir(unpacked, { recursive: true })
+  const executableRelative = archiveEntries.find(entry => basename(entry).toLowerCase() === executableName.toLowerCase())
+  if (executableRelative === undefined) throw new Error('cpolar_executable_missing')
+  await copyFile(join(unpacked, executableRelative), join(destination, executableName))
+}
+
+async function defaultExtractArtifact(archive: string, destination: string, release: CpolarArtifact): Promise<void> {
+  if (release.archiveKind === 'tar.gz') return extractLinuxTarball(archive, destination, release.executableName)
+  return extractWindowsMsi(archive, destination, release.executableName)
 }
 
 /** Validate a cpolar Authtoken before it crosses the durable-file boundary. */
@@ -131,6 +208,7 @@ export class CpolarComponentManager {
   private readonly stagingRoot: string
   private readonly platform: NodeJS.Platform
   private readonly arch: string
+  private readonly release: CpolarArtifact | undefined
   private readonly fetchArtifact: (url: string, signal: AbortSignal) => Promise<Uint8Array>
   private readonly extractArtifact: (archive: string, destination: string) => Promise<void>
   private installed = false
@@ -143,9 +221,10 @@ export class CpolarComponentManager {
     if (!isAbsolute(stateDirectory)) throw new Error('cpolar state directory must be absolute')
     this.platform = options.platform ?? process.platform
     this.arch = options.arch ?? process.arch
+    this.release = CPOLAR_COMPONENT_RELEASES[`${this.platform}-${this.arch}`]
     this.componentRoot = join(stateDirectory, 'components', 'cpolar')
-    this.componentStorage = join(this.componentRoot, CPOLAR_COMPONENT_RELEASE.version)
-    this.executable = join(this.componentStorage, 'cpolar.exe')
+    this.componentStorage = join(this.componentRoot, this.release?.version ?? CPOLAR_VERSION)
+    this.executable = join(this.componentStorage, this.release?.executableName ?? 'cpolar')
     this.stateRoot = join(stateDirectory, 'state', 'cpolar')
     this.configFile = join(this.stateRoot, 'cpolar.yml')
     this.logRoot = join(stateDirectory, 'logs', 'cpolar')
@@ -153,14 +232,21 @@ export class CpolarComponentManager {
     for (const child of [this.componentRoot, this.componentStorage, this.stateRoot, this.logRoot, this.stagingRoot]) {
       if (!inside(stateDirectory, child)) throw new Error('cpolar component path escaped its state directory')
     }
-    this.fetchArtifact = options.fetchArtifact ?? defaultFetchArtifact
-    this.extractArtifact = options.extractArtifact ?? defaultExtractArtifact
+    const release = this.release
+    this.fetchArtifact = options.fetchArtifact
+      ?? ((url, signal) => defaultFetchArtifact(url, signal, release?.downloadBytes ?? 0))
+    this.extractArtifact = options.extractArtifact
+      ?? ((archive, destination) => {
+        if (release === undefined) throw new Error('cpolar_component_unsupported')
+        return defaultExtractArtifact(archive, destination, release)
+      })
   }
 
   /** Inspect the managed binary and configuration without using global cpolar state. */
   async initialize(): Promise<void> {
-    this.installed = await regularFile(this.executable, CPOLAR_COMPONENT_RELEASE.executableBytes)
-    if (this.installed && await sha256(this.executable) !== CPOLAR_COMPONENT_RELEASE.executableSha256) {
+    const release = this.release
+    this.installed = release !== undefined && await regularFile(this.executable, release.executableBytes)
+    if (this.installed && release !== undefined && await sha256(this.executable) !== release.executableSha256) {
       this.installed = false
       this.errorCode = 'cpolar_component_invalid'
     }
@@ -170,18 +256,21 @@ export class CpolarComponentManager {
 
   /** Return a safe status that never includes the account token. */
   status(): CpolarComponentStatus {
+    // Unsupported hosts still report the canonical entry so the panel can show
+    // what would be installed elsewhere; `supported` carries the actual gate.
+    const release = this.release ?? CPOLAR_COMPONENT_RELEASE
     return Object.freeze({
-      supported: this.platform === CPOLAR_COMPONENT_RELEASE.platform && this.arch === CPOLAR_COMPONENT_RELEASE.arch,
+      supported: this.release !== undefined,
       installed: this.installed,
       configured: this.configured,
-      version: CPOLAR_COMPONENT_RELEASE.version,
-      downloadBytes: CPOLAR_COMPONENT_RELEASE.downloadBytes,
-      installedBytes: CPOLAR_COMPONENT_RELEASE.executableBytes,
-      sourceUrl: CPOLAR_COMPONENT_RELEASE.downloadUrl,
-      downloadPage: CPOLAR_COMPONENT_RELEASE.downloadPage,
-      signupUrl: CPOLAR_COMPONENT_RELEASE.signupUrl,
-      dashboardUrl: CPOLAR_COMPONENT_RELEASE.dashboardUrl,
-      termsUrl: CPOLAR_COMPONENT_RELEASE.termsUrl,
+      version: release.version,
+      downloadBytes: release.downloadBytes,
+      installedBytes: release.executableBytes,
+      sourceUrl: release.downloadUrl,
+      downloadPage: DOWNLOAD_PAGE,
+      signupUrl: SIGNUP_URL,
+      dashboardUrl: DASHBOARD_URL,
+      termsUrl: TERMS_URL,
       storagePath: this.componentRoot,
       ...(this.errorCode === undefined ? {} : { errorCode: this.errorCode }),
     })
@@ -190,9 +279,8 @@ export class CpolarComponentManager {
   /** Download, verify, and administratively extract cpolar after explicit confirmation. */
   install(): Promise<CpolarComponentStatus> {
     return this.enqueue(async () => {
-      if (this.platform !== CPOLAR_COMPONENT_RELEASE.platform || this.arch !== CPOLAR_COMPONENT_RELEASE.arch) {
-        throw new Error('cpolar_component_unsupported')
-      }
+      const release = this.release
+      if (release === undefined) throw new Error('cpolar_component_unsupported')
       await mkdir(this.stagingRoot, { recursive: true, mode: 0o700 })
       const staging = await mkdtemp(join(this.stagingRoot, 'install-'))
       try {
@@ -200,21 +288,21 @@ export class CpolarComponentManager {
         const timeout = setTimeout(() => { controller.abort() }, 120_000)
         timeout.unref()
         let bytes: Uint8Array
-        try { bytes = await this.fetchArtifact(CPOLAR_COMPONENT_RELEASE.downloadUrl, controller.signal) } finally { clearTimeout(timeout) }
+        try { bytes = await this.fetchArtifact(release.downloadUrl, controller.signal) } finally { clearTimeout(timeout) }
         const digest = createHash('sha256').update(bytes).digest('hex')
-        if (digest !== CPOLAR_COMPONENT_RELEASE.downloadSha256) throw new Error('cpolar_download_hash_mismatch')
-        const archive = join(staging, 'cpolar.zip')
+        if (digest !== release.downloadSha256) throw new Error('cpolar_download_hash_mismatch')
+        const archive = join(staging, release.archiveKind === 'tar.gz' ? 'cpolar.tar.gz' : 'cpolar.zip')
         await writeFile(archive, bytes, { flag: 'wx', mode: 0o600 })
         await this.extractArtifact(archive, staging)
-        const extracted = join(staging, 'cpolar.exe')
-        if (!await regularFile(extracted, CPOLAR_COMPONENT_RELEASE.executableBytes)
-          || await sha256(extracted) !== CPOLAR_COMPONENT_RELEASE.executableSha256) {
+        const extracted = join(staging, release.executableName)
+        if (!await regularFile(extracted, release.executableBytes)
+          || await sha256(extracted) !== release.executableSha256) {
           throw new Error('cpolar_executable_hash_mismatch')
         }
         const candidate = join(this.componentRoot, `.install-${randomBytes(12).toString('hex')}`)
         await mkdir(candidate, { recursive: true, mode: 0o700 })
-        await copyFile(extracted, join(candidate, 'cpolar.exe'))
-        await chmod(join(candidate, 'cpolar.exe'), 0o700)
+        await copyFile(extracted, join(candidate, release.executableName))
+        await chmod(join(candidate, release.executableName), 0o700)
         await rm(this.componentStorage, { recursive: true, force: true })
         await rename(candidate, this.componentStorage)
         this.installed = true

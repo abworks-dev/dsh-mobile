@@ -229,17 +229,23 @@ async function checkAndroid() {
 }
 
 async function checkFunnelHost() {
-  const [manifestSource, goModule, goSum, source, executable, thirdPartyLicenses] = await Promise.all([
+  const [manifestSource, goModule, goSum, source, windowsExecutable, linuxX64, linuxArm64, thirdPartyLicenses] = await Promise.all([
     read('package.json', 'utf8'),
     read('native/funnel-host/go.mod', 'utf8'),
     read('native/funnel-host/go.sum', 'utf8'),
     read('native/funnel-host/main.go', 'utf8'),
     read('bin/dsh-mobile-funnel-win32-x64.exe'),
+    read('bin/dsh-mobile-funnel-linux-x64'),
+    read('bin/dsh-mobile-funnel-linux-arm64'),
     read('FUNNEL_THIRD_PARTY_LICENSES.txt', 'utf8'),
   ])
   const manifest = JSON.parse(manifestSource)
-  if (!manifest.files?.includes('bin/dsh-mobile-funnel-win32-x64.exe')) {
-    fail('package files must include the Windows Funnel host')
+  for (const file of [
+    'bin/dsh-mobile-funnel-win32-x64.exe',
+    'bin/dsh-mobile-funnel-linux-x64',
+    'bin/dsh-mobile-funnel-linux-arm64',
+  ]) {
+    if (!manifest.files?.includes(file)) fail(`package files must include the Funnel host ${file}`)
   }
   if (!manifest.files?.includes('THIRD_PARTY_NOTICES.md')) fail('package files must include third-party notices')
   if (!manifest.files?.includes('FUNNEL_THIRD_PARTY_LICENSES.txt')) {
@@ -249,10 +255,17 @@ async function checkFunnelHost() {
     fail('Funnel host must pin Go 1.26.6 and Tailscale 1.102.3')
   }
   if (goSum.length === 0 || !source.includes('tailscale.com/tsnet')) fail('Funnel host source and module checksums are incomplete')
-  if (executable.byteLength < 2 || executable.subarray(0, 2).toString('ascii') !== 'MZ') {
+  if (windowsExecutable.byteLength < 2 || windowsExecutable.subarray(0, 2).toString('ascii') !== 'MZ') {
     fail('Funnel host must be a Windows executable built from the checked source')
   }
-  if (executable.byteLength >= 40 * 1024 * 1024) fail('Funnel host must remain below 40 MiB')
+  for (const [name, binary] of [['linux-x64', linuxX64], ['linux-arm64', linuxArm64]]) {
+    if (binary.byteLength < 4 || binary[0] !== 0x7f || binary.subarray(1, 4).toString('ascii') !== 'ELF') {
+      fail(`Funnel host must be a Linux executable built from the checked source (${name})`)
+    }
+  }
+  for (const binary of [windowsExecutable, linuxX64, linuxArm64]) {
+    if (binary.byteLength >= 40 * 1024 * 1024) fail('Funnel host must remain below 40 MiB')
+  }
   if (!thirdPartyLicenses.includes('Go toolchain: go1.26.6')
     || !thirdPartyLicenses.includes('Embedded third-party modules:')
     || !thirdPartyLicenses.includes('--- BEGIN Go toolchain LICENSE ---')

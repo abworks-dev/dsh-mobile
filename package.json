@@ -28,6 +28,8 @@
     "lib/mobile-compat.js",
     "lib/**/*.map",
     "bin/dsh-mobile-funnel-win32-x64.exe",
+    "bin/dsh-mobile-funnel-linux-x64",
+    "bin/dsh-mobile-funnel-linux-arm64",
     "cordis.patch.yml",
     "README.md",
     "README.en.md",

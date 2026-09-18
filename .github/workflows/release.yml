@@ -47,6 +47,8 @@ jobs:
           sha256sum dsh-mobile-*.tgz > dsh-mobile-plugin.sha256
           npm sbom --sbom-format cyclonedx > dsh-mobile-npm-sbom.cdx.json
           go version -m bin/dsh-mobile-funnel-win32-x64.exe > dsh-mobile-funnel-go-modules.txt
+          go version -m bin/dsh-mobile-funnel-linux-x64 >> dsh-mobile-funnel-go-modules.txt
+          go version -m bin/dsh-mobile-funnel-linux-arm64 >> dsh-mobile-funnel-go-modules.txt
       - uses: actions/upload-artifact@v7
         with:
           name: plugin-package

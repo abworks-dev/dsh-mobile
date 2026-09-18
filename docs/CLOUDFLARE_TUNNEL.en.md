@@ -77,8 +77,8 @@ The old remote entry in the device list will show **Address may have changed** o
 | Could not reserve a local port | `cloudflared_port_reservation_failed` | Reserving the loopback port failed for a reason other than the port being busy. Retry, and check system resources if it persists. |
 | Component download failed verification | `cloudflared_download_hash_mismatch` / `cloudflared_download_size_mismatch` | The downloaded binary does not match the pinned size or SHA-256. Install again; repeated failures mean something is rewriting the transfer. |
 | Installed component failed verification | `cloudflared_executable_hash_mismatch` | The local cloudflared no longer matches the verified build. Remove it completely and install again. |
-| This build cannot run the component | `cloudflared_component_unsupported` | The platform is outside the supported set (currently Windows x64 only). |
-| Timed out waiting for the tunnel | `cloudflared_start_timeout` | The connector did not print `Registered tunnel connection` within 60 seconds, usually because it cannot reach a Cloudflare edge. |
+| This build cannot run the component | `cloudflared_component_unsupported` | The platform is outside the supported set (currently Windows x64 and Linux x64/arm64). |
+| Timed out waiting for the tunnel | `cloudflared_start_timeout` | The connector did not print `Registered tunnel connection` within the startup budget. In named mode a live connector keeps waiting (up to about 5 minutes); usually it cannot reach a Cloudflare edge. |
 | Component not installed | `cloudflared_component_missing` | The official component is absent. Complete the preparation steps above. |
 | Component verification failed | `cloudflared_component_invalid` | The local component does not match the verified build. Remove it completely and install again. |
 | Could not allocate a port | `cloudflared_port_unavailable` | Quick mode could not allocate the loopback gateway port. Retry. |
