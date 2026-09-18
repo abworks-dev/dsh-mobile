@@ -105,6 +105,19 @@ const MOBILE_LAYOUT_PATH = `${AUTH_PREFIX}/mobile-layout.js`
 const MOBILE_BOOT_BATCH_PREFIX = `${AUTH_PREFIX}/mobile-boot/`
 const MAX_MOBILE_BOOT_BATCH_BYTES = 32 * 1024 * 1024
 const MAX_MOBILE_BOOT_ENTRY_BYTES = 8 * 1024 * 1024
+/**
+ * Per-merged-batch byte budget. One upstream application batch can carry dozens
+ * of client bundles whose combined size exceeds the hard batch cap; the layout
+ * batch is therefore chunked into multiple merged batches, each kept safely
+ * below {@link MAX_MOBILE_BOOT_BATCH_BYTES} so assembly can never reject it.
+ */
+const MOBILE_BOOT_CHUNK_BYTES = 16 * 1024 * 1024
+/** Bytes the assembly emits between entries (`body` plus `\n;\n`). */
+const MOBILE_BOOT_SEPARATOR_BYTES = 2
+/** Freshness window for cached upstream bundle byte sizes. */
+const MOBILE_BOOT_SIZE_CACHE_TTL_MS = 30_000
+/** Marker header distinguishing size probes from ordinary proxied bundle fetches. */
+const MOBILE_BOOT_SIZE_PROBE_HEADER = 'x-dsh-mobile-size-probe'
 const MAX_MOBILE_BOOT_BATCHES = 8
 const MOBILE_BOOT_UPSTREAM_ATTEMPTS = 4
 const MOBILE_BOOT_RETRY_DELAY_MS = 150
@@ -200,7 +213,26 @@ interface MobileBootBatchPlan {
 
 interface RewrittenMobileIndex {
   readonly html: string
-  readonly batch?: MobileBootBatchPlan
+  /** Merged batches the gateway assembles and serves; pass-through rows are not plans. */
+  readonly batches: readonly MobileBootBatchPlan[]
+}
+
+/** Parsed boot manifest with the layout entry rewired to the gateway-owned layout module. */
+interface MobileBootPlanRef {
+  readonly parsed: { rev: string; entries: BootGraphEntry[]; batches?: BootGraphBatch[] }
+  readonly entries: BootGraphEntry[]
+  readonly batches?: BootGraphBatch[]
+  readonly slotProvider: string
+  readonly assignment: string
+  readonly replaceStart: number
+  readonly replaceEnd: number
+  readonly layoutBatch?: BootGraphBatch
+  readonly planEntries?: readonly MobileBootBatchEntry[]
+}
+
+interface SplitMobileBootBatch {
+  readonly plans: readonly MobileBootBatchPlan[]
+  readonly rows: readonly BootGraphBatch[]
 }
 
 interface StoredMobileBootBatch {
@@ -277,11 +309,17 @@ function revisionedMobileBatchPath(entries: readonly MobileBootBatchEntry[]): { 
   return { key, path: `${MOBILE_BOOT_BATCH_PREFIX}${key}.js` }
 }
 
-function rewriteMobileIndexWithBatch(html: string): RewrittenMobileIndex {
+/**
+ * Parse one upstream boot manifest and rewire the layout entry onto the
+ * gateway-owned layout module. The layout entry's URL and revision become the
+ * local `mobile-layout.js` path; the dedicated frontend is authenticated in the
+ * gateway, so the requested layout needs no upstream address.
+ */
+export function parseMobileBootPlan(html: string): MobileBootPlanRef {
   const assignment = /(?:window\.__DSH_BOOT__|globalThis\["__DSH_BOOT__"\])\s*=\s*/u.exec(html)
   if (assignment?.index === undefined) throw new Error('upstream DSH index has no boot manifest')
-  const start = assignment.index
-  const valueStart = start + assignment[0].length
+  const replaceStart = assignment.index
+  const valueStart = replaceStart + assignment[0].length
   const scriptEnd = html.indexOf('</script>', valueStart)
   if (scriptEnd < 0) throw new Error('upstream DSH boot manifest script is incomplete')
   const source = html.slice(valueStart, scriptEnd).trim().replace(/;$/u, '')
@@ -303,47 +341,124 @@ function rewriteMobileIndexWithBatch(html: string): RewrittenMobileIndex {
   if (dependencyProfile === undefined) throw new Error('upstream DSH layout module has unsupported dependencies')
   layout[0].url = MOBILE_LAYOUT_PATH
   layout[0].rev = `dsh-mobile-layout-${DSH_MOBILE_VERSION}`
-  const remoteSettings = orderAuthenticatedSettings(entries, dependencyProfile.slots)
-
-  let mobileBatch: MobileBootBatchPlan | undefined
-  if (parsed.batches !== undefined) {
-    if (!Array.isArray(parsed.batches)) throw new Error('upstream DSH boot manifest batches are malformed')
-    const batches = parsed.batches as BootGraphBatch[]
-    const entryById = new Map(entries.map(entry => [entry.id, entry]))
-    if (entryById.size !== entries.length) throw new Error('upstream DSH boot manifest has duplicate entries')
-    const layoutBatches: BootGraphBatch[] = []
-    for (const batch of batches) {
-      if (batch === null || typeof batch !== 'object'
-        || (batch.phase !== 'bootstrap' && batch.phase !== 'application')
-        || typeof batch.url !== 'string' || typeof batch.rev !== 'string'
-        || !Array.isArray(batch.entries) || batch.entries.length === 0
-        || batch.entries.some(id => typeof id !== 'string' || !entryById.has(id))) {
-        throw new Error('upstream DSH boot manifest batches are malformed')
-      }
-      if (batch.entries.includes(MOBILE_LAYOUT_MODULE)) layoutBatches.push(batch)
-    }
-    if (layoutBatches.length !== 1 || layoutBatches[0]?.phase !== 'application') {
-      throw new Error('upstream DSH boot manifest has no unique application layout batch')
-    }
-    const layoutBatch = layoutBatches[0]
-    const planEntries = layoutBatch.entries.map((id): MobileBootBatchEntry => {
-      const entry = entryById.get(id)
-      if (entry === undefined || typeof entry.url !== 'string' || typeof entry.rev !== 'string') {
-        throw new Error('upstream DSH boot manifest batches are malformed')
-      }
-      return Object.freeze({ id, url: entry.url, rev: entry.rev })
+  const parsedBatches = parsed.batches
+  if (parsedBatches === undefined) {
+    return Object.freeze({
+      parsed: parsed as { rev: string; entries: BootGraphEntry[] },
+      entries,
+      slotProvider: dependencyProfile.slots,
+      assignment: assignment[0],
+      replaceStart,
+      replaceEnd: scriptEnd,
     })
-    const revision = revisionedMobileBatchPath(planEntries)
-    layoutBatch.url = revision.path
-    layoutBatch.rev = revision.key
-    mobileBatch = Object.freeze({ ...revision, entries: Object.freeze(planEntries) })
-    parsed.rev = createHash('sha256').update(JSON.stringify({ entries, batches })).digest('hex').slice(0, 16)
+  }
+  if (!Array.isArray(parsedBatches)) throw new Error('upstream DSH boot manifest batches are malformed')
+  const batches = parsedBatches as BootGraphBatch[]
+  const entryById = new Map(entries.map(entry => [entry.id, entry]))
+  if (entryById.size !== entries.length) throw new Error('upstream DSH boot manifest has duplicate entries')
+  const layoutBatches: BootGraphBatch[] = []
+  for (const batch of batches) {
+    if (batch === null || typeof batch !== 'object'
+      || (batch.phase !== 'bootstrap' && batch.phase !== 'application')
+      || typeof batch.url !== 'string' || typeof batch.rev !== 'string'
+      || !Array.isArray(batch.entries) || batch.entries.length === 0
+      || batch.entries.some(id => typeof id !== 'string' || !entryById.has(id))) {
+      throw new Error('upstream DSH boot manifest batches are malformed')
+    }
+    if (batch.entries.includes(MOBILE_LAYOUT_MODULE)) layoutBatches.push(batch)
+  }
+  if (layoutBatches.length !== 1 || layoutBatches[0]?.phase !== 'application') {
+    throw new Error('upstream DSH boot manifest has no unique application layout batch')
+  }
+  const layoutBatch = layoutBatches[0]
+  const planEntries = layoutBatch.entries.map((id): MobileBootBatchEntry => {
+    const entry = entryById.get(id)
+    if (entry === undefined || typeof entry.url !== 'string' || typeof entry.rev !== 'string') {
+      throw new Error('upstream DSH boot manifest batches are malformed')
+    }
+    return Object.freeze({ id, url: entry.url, rev: entry.rev })
+  })
+  return Object.freeze({
+    parsed: parsed as { rev: string; entries: BootGraphEntry[]; batches: BootGraphBatch[] },
+    entries,
+    batches,
+    slotProvider: dependencyProfile.slots,
+    assignment: assignment[0],
+    replaceStart,
+    replaceEnd: scriptEnd,
+    layoutBatch,
+    planEntries,
+  })
+}
+
+/**
+ * Partition one upstream application batch into merged batches plus pass-through
+ * rows. Every entry whose bundle is at or above the per-entry cap keeps its own
+ * upstream `/plugins` row (the gateway proxies it verbatim), because a merged
+ * batch cannot carry it. The remaining entries are greedily packed into merged
+ * batches under {@link MOBILE_BOOT_CHUNK_BYTES}; the layout module always merges,
+ * since its body is the gateway-owned layout file, never an upstream fetch.
+ */
+export function splitMobileBootBatch(
+  entries: readonly MobileBootBatchEntry[],
+  sizes: ReadonlyMap<string, number>,
+  passThrough: ReadonlySet<string>,
+): SplitMobileBootBatch {
+  const rows: BootGraphBatch[] = []
+  const plans: MobileBootBatchPlan[] = []
+  let chunk: { ids: string[]; entries: MobileBootBatchEntry[]; bytes: number } | undefined
+  const flush = (): void => {
+    if (chunk === undefined || chunk.entries.length === 0) return
+    const revision = revisionedMobileBatchPath(chunk.entries)
+    rows.push({ phase: 'application', url: revision.path, rev: revision.key, entries: chunk.ids })
+    plans.push(Object.freeze({ key: revision.key, path: revision.path, entries: Object.freeze(chunk.entries) }))
+    chunk = undefined
+  }
+  for (const entry of entries) {
+    const size = sizes.get(entry.url)
+    const oversized = passThrough.has(entry.url)
+      || (size !== undefined && size >= MAX_MOBILE_BOOT_ENTRY_BYTES)
+    if (oversized && entry.id !== MOBILE_LAYOUT_MODULE) {
+      // A pass-through row never joins a merged batch; it also must not split
+      // the open chunk, because chunk contents are independent of row order.
+      rows.push({ phase: 'application', url: entry.url, rev: entry.rev, entries: [entry.id] })
+      continue
+    }
+    const bytes = (size ?? 0) + MOBILE_BOOT_SEPARATOR_BYTES
+    if (chunk !== undefined && chunk.entries.length > 0 && chunk.bytes + bytes > MOBILE_BOOT_CHUNK_BYTES) flush()
+    chunk ??= { ids: [], entries: [], bytes: 0 }
+    chunk.ids.push(entry.id)
+    chunk.entries.push(entry)
+    chunk.bytes += bytes
+  }
+  flush()
+  return { plans, rows }
+}
+
+function rewriteMobileIndexWithBatch(
+  html: string,
+  options: { readonly sizes?: ReadonlyMap<string, number>; readonly passThrough?: ReadonlySet<string> } = {},
+): RewrittenMobileIndex {
+  const plan = parseMobileBootPlan(html)
+  const remoteSettings = orderAuthenticatedSettings(plan.entries, plan.slotProvider)
+  let batches: readonly MobileBootBatchPlan[] = []
+  if (plan.batches !== undefined && plan.layoutBatch !== undefined && plan.planEntries !== undefined) {
+    const split = splitMobileBootBatch(
+      plan.planEntries,
+      options.sizes ?? new Map(),
+      options.passThrough ?? new Set(),
+    )
+    const at = plan.batches.indexOf(plan.layoutBatch)
+    if (at < 0) throw new Error('upstream DSH boot manifest has no unique application layout batch')
+    plan.batches.splice(at, 1, ...split.rows)
+    batches = Object.freeze(split.plans)
+    plan.parsed.rev = createHash('sha256').update(JSON.stringify({ entries: plan.entries, batches: plan.batches })).digest('hex').slice(0, 16)
   }
   const transportBootstrap = remoteSettings ? MOBILE_AUTHENTICATED_TRANSPORT_BOOTSTRAP : ''
-  const replacement = `${transportBootstrap}${MOBILE_CSRF_FETCH_BOOTSTRAP}window.__DSH_MOBILE_FRONTEND__="dedicated";${assignment[0]}${JSON.stringify(parsed)};`
+  const replacement = `${transportBootstrap}${MOBILE_CSRF_FETCH_BOOTSTRAP}window.__DSH_MOBILE_FRONTEND__="dedicated";${plan.assignment}${JSON.stringify(plan.parsed)};`
   return Object.freeze({
-    html: ensureMobileViewport(ensureMobileCompatibility(`${html.slice(0, start)}${replacement}${html.slice(scriptEnd)}`)),
-    ...(mobileBatch === undefined ? {} : { batch: mobileBatch }),
+    html: ensureMobileViewport(ensureMobileCompatibility(`${html.slice(0, plan.replaceStart)}${replacement}${html.slice(plan.replaceEnd)}`)),
+    batches,
   })
 }
 
@@ -801,6 +916,8 @@ export class MobileAccessGateway {
   private readonly activeRequests = new Map<number, ActiveRequest>()
   private readonly activeWebSockets = new Map<number, ActiveWebSocket>()
   private readonly mobileBootBatches = new Map<string, StoredMobileBootBatch>()
+  /** Cached upstream bundle byte sizes (HEAD probes), keyed by resource URL. */
+  private readonly bootEntrySizeCache = new Map<string, { size: number; at: number }>()
   private readonly extensionEventListeners = new Set<(revision: number) => void>()
   private extensionEventRevision = 0
   private readonly taskEventListeners = new Set<(payload: string) => void>()
@@ -1772,8 +1889,13 @@ export class MobileAccessGateway {
       }
       let body: Buffer
       try {
-        const rewritten = rewriteMobileIndexWithBatch(Buffer.concat(chunks).toString('utf8'))
-        if (rewritten.batch !== undefined) this.rememberMobileBootBatch(rewritten.batch)
+        const html = Buffer.concat(chunks).toString('utf8')
+        const plan = parseMobileBootPlan(html)
+        const options = plan.planEntries === undefined
+          ? {}
+          : await this.resolveMobileBootSizes(plan.planEntries)
+        const rewritten = rewriteMobileIndexWithBatch(html, options)
+        for (const batch of rewritten.batches) this.rememberMobileBootBatch(batch)
         body = Buffer.from(rewritten.html)
       } catch {
         throw new HttpError(502, 'upstream_unavailable')
@@ -1809,6 +1931,102 @@ export class MobileAccessGateway {
       if (oldest === undefined) break
       this.mobileBootBatches.get(oldest)?.assembly?.controller.abort()
       this.mobileBootBatches.delete(oldest)
+    }
+  }
+
+  /**
+   * Determine which layout-batch entries can share a merged boot batch and which
+   * must pass through. An entry at or above the per-entry cap, or one whose size
+   * could not be probed, keeps its own upstream `/plugins` row: a merged batch
+   * cannot carry it, and an unknown bundle must not risk the whole batch.
+   */
+  private async resolveMobileBootSizes(
+    planEntries: readonly MobileBootBatchEntry[],
+  ): Promise<{ sizes: Map<string, number>; passThrough: Set<string> }> {
+    const sizes = new Map<string, number>()
+    const passThrough = new Set<string>()
+    const candidates = planEntries.filter(entry => entry.id !== MOBILE_LAYOUT_MODULE && entry.url.startsWith('/plugins/'))
+    let cursor = 0
+    const worker = async (): Promise<void> => {
+      while (cursor < candidates.length) {
+        const index = cursor++
+        const source = candidates[index]!.url
+        const size = await this.upstreamBundleSize(source)
+        if (size === undefined || size >= MAX_MOBILE_BOOT_ENTRY_BYTES) passThrough.add(source)
+        else sizes.set(source, size)
+      }
+    }
+    await Promise.all(Array.from({ length: Math.min(8, candidates.length) }, worker))
+    return { sizes, passThrough }
+  }
+
+  /**
+   * Read one upstream bundle's byte size with a header-only GET probe (the
+   * upstream serves `/plugins` bundles without a Content-Length on HEAD), cached
+   * for a short window. The response is destroyed at the headers so the probe
+   * never transfers the bundle body.
+   */
+  /**
+   * Measure one upstream bundle by reading its body. The upstream serves
+   * `/plugins` bundles as chunked streams without a Content-Length, so a probe
+   * counts bytes; it aborts instantly past the per-entry cap. Measurements are
+   * cached for a short window.
+   */
+  private async upstreamBundleSize(source: string): Promise<number | undefined> {
+    if (!source.startsWith('/plugins/') || source.includes('#')) return undefined
+    const cached = this.bootEntrySizeCache.get(source)
+    if (cached !== undefined && Date.now() - cached.at < MOBILE_BOOT_SIZE_CACHE_TTL_MS) return cached.size
+    const target = new URL(source, this.config.upstreamOrigin)
+    if (target.origin !== this.config.upstreamOrigin.origin) return undefined
+    const upstreamCookie = await this.upstreamCookieHeader()
+    let upstreamRequest: ClientRequest | undefined
+    try {
+      const proxied = await new Promise<IncomingMessage>((resolve, reject) => {
+        upstreamRequest = requestHttp({
+          protocol: 'http:',
+          hostname: stripIpv6Brackets(this.config.upstreamOrigin.hostname),
+          port: Number(this.config.upstreamOrigin.port),
+          method: 'GET',
+          path: `${target.pathname}${target.search}`,
+          headers: {
+            host: this.config.upstreamOrigin.host,
+            accept: 'text/javascript',
+            'accept-encoding': 'identity',
+            [MOBILE_BOOT_SIZE_PROBE_HEADER]: '1',
+            ...(upstreamCookie === undefined ? {} : { cookie: upstreamCookie }),
+          },
+          agent: false,
+        })
+        upstreamRequest.setTimeout(this.config.upstreamTimeoutMs, () => {
+          upstreamRequest?.destroy(upstreamTimeoutError())
+        })
+        upstreamRequest.once('response', resolve)
+        upstreamRequest.once('error', reject)
+        upstreamRequest.end()
+      })
+      if (proxied.statusCode !== 200) {
+        proxied.resume()
+        return undefined
+      }
+      const size = await new Promise<number | undefined>((resolve, reject) => {
+        let bytes = 0
+        proxied.on('data', (chunk: Buffer) => {
+          bytes += chunk.length
+          if (bytes > MAX_MOBILE_BOOT_ENTRY_BYTES) {
+            proxied.destroy()
+            resolve(undefined)
+          }
+        })
+        proxied.once('end', () => resolve(bytes))
+        proxied.once('error', reject)
+      })
+      if (size === undefined) return undefined
+      this.bootEntrySizeCache.set(source, { size, at: Date.now() })
+      return size
+    } catch {
+      return undefined
+    } finally {
+      upstreamRequest?.destroy()
     }
   }
 
@@ -2014,7 +2232,52 @@ export class MobileAccessGateway {
     }
   }
 
+  /**
+   * Proxy one request upstream. Pass-through client bundles (`GET /plugins`)
+   * receive bounded transient retries — the upstream resets a fraction of fresh
+   * connections — matching the resilience the merged-batch assembly already has.
+   * A request is only retried before any byte reached the client.
+   */
   private async proxyHttp(
+    request: IncomingMessage,
+    response: ServerResponse,
+    authorization: SessionAuthorization,
+  ): Promise<void> {
+    const retryable = request.method === 'GET'
+      && request.url?.split('?', 1)[0]?.startsWith('/plugins/') === true
+    if (!retryable) {
+      try {
+        await this.proxyHttpOnce(request, response, authorization)
+      } catch (error) {
+        if (error instanceof HttpError) throw error
+        if (response.headersSent) response.destroy()
+        else throw new HttpError(502, 'upstream_unavailable')
+      }
+      return
+    }
+    const delay = (attempt: number): Promise<void> => (
+      new Promise(resolve => setTimeout(resolve, MOBILE_BOOT_RETRY_DELAY_MS * attempt))
+    )
+    for (let attempt = 1; attempt <= MOBILE_BOOT_UPSTREAM_ATTEMPTS; attempt++) {
+      try {
+        await this.proxyHttpOnce(request, response, authorization)
+        return
+      } catch (error) {
+        if (response.headersSent) {
+          response.destroy()
+          return
+        }
+        if (error instanceof HttpError || !isTransientUpstreamError(error)) {
+          throw error instanceof HttpError ? error : new HttpError(502, 'upstream_unavailable')
+        }
+        if (attempt === MOBILE_BOOT_UPSTREAM_ATTEMPTS) throw new HttpError(502, 'upstream_unavailable')
+        await delay(attempt)
+      }
+    }
+    throw new HttpError(502, 'upstream_unavailable')
+  }
+
+  private async proxyHttpOnce(
     request: IncomingMessage,
     response: ServerResponse,
     authorization: SessionAuthorization,
@@ -2084,7 +2347,9 @@ export class MobileAccessGateway {
       await bodyDone?.catch(() => undefined)
       if (error instanceof HttpError) throw error
       if (response.headersSent) response.destroy()
-      else throw new HttpError(502, 'upstream_unavailable')
+      // Raw transient errors reach the proxyHttp retry window; anything else
+      // becomes the standard upstream-unavailable answer.
+      throw error
     } finally {
       operation.release()
     }

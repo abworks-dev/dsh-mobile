@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { runInNewContext } from 'node:vm'
 import { describe, expect, it, vi } from 'vitest'
-import { rewriteMobileIndex } from '../src/gateway.js'
+import { parseMobileBootPlan, rewriteMobileIndex, splitMobileBootBatch } from '../src/gateway.js'
 import { CSRF_COOKIE, CSRF_HEADER } from '../src/http-security.js'
 import {
   MOBILE_LAYOUT_MESSAGES,
@@ -658,5 +658,79 @@ describe('dedicated mobile layout boot', () => {
     expect(() => rewriteMobileIndex(index([
       { id: '@deepseek-ai/dsh-client-ui-layout', url: '/layout.js', rev: 'layout', inject: ['new-runtime'] },
     ]))).toThrow('unsupported dependencies')
+  })
+})
+
+const layoutId = '@deepseek-ai/dsh-client-ui-layout'
+const chartLayoutInject = ['@deepseek-ai/dsh-client-locale', rendererModule, '@deepseek-ai/dsh-client-ui-session', '@deepseek-ai/dsh-client-ui-theme']
+
+function batchedIndex(ids: string[]): string {
+  const others = ids
+    .filter(id => id !== layoutId)
+    .map(id => ({ id, url: `/plugins/${id}.js`, rev: 'r' }))
+  const layout = { id: layoutId, url: '/plugins/layout.js', rev: 'rl', inject: chartLayoutInject }
+  const entries = [...others, layout]
+  const graph = {
+    rev: 'stock',
+    entries,
+    batches: [{ phase: 'application', url: '/plugins/application.js', rev: 'stock-batch', entries: entries.map(entry => entry.id) }],
+  }
+  return `<!doctype html><html><head><script>globalThis["__DSH_BOOT__"] = ${JSON.stringify(graph)};</script></head><body></body></html>`
+}
+
+describe('mobile boot batch chunking', () => {
+  it('merges every entry into one batch when no sizes are provided', () => {
+    const plan = parseMobileBootPlan(batchedIndex(['a', 'b']))
+    expect(plan.planEntries).toBeDefined()
+    const split = splitMobileBootBatch(plan.planEntries!, new Map(), new Set())
+    expect(split.plans).toHaveLength(1)
+    expect(split.rows).toHaveLength(1)
+    expect(split.rows[0]!.url).toMatch(/^\/mobile-access\/mobile-boot\/[a-f\d]{64}\.js$/u)
+    expect(split.rows[0]!.entries).toEqual(expect.arrayContaining(['a', 'b', layoutId]))
+  })
+
+  it('passes an entry at the per-entry cap through its own batch', () => {
+    const plan = parseMobileBootPlan(batchedIndex(['a', 'b']))
+    const split = splitMobileBootBatch(plan.planEntries!, new Map([
+      ['/plugins/a.js', 9 * 1024 * 1024],
+      ['/plugins/b.js', 4096],
+    ]), new Set())
+    expect(split.plans).toHaveLength(1)
+    expect(split.rows).toHaveLength(2)
+    const solo = split.rows.find(row => row.entries.length === 1 && row.entries[0] === 'a')
+    expect(solo).toBeDefined()
+    expect(solo!.url).toBe('/plugins/a.js')
+    expect(solo!.rev).toBe('r')
+    const merged = split.rows.find(row => row.url.startsWith('/mobile-access/mobile-boot/'))
+    expect(merged!.entries).toEqual(expect.arrayContaining([layoutId, 'b']))
+    expect(split.rows.flatMap(row => row.entries).sort()).toEqual(['a', 'b', layoutId].sort())
+  })
+
+  it('only rejects what the caller measured or explicitly flagged', () => {
+    const plan = parseMobileBootPlan(batchedIndex(['a', 'b']))
+    const split = splitMobileBootBatch(plan.planEntries!, new Map(), new Set(['/plugins/a.js']))
+    expect(split.rows.find(row => row.entries.length === 1 && row.entries[0] === 'a')?.url).toBe('/plugins/a.js')
+    expect(split.rows.find(row => row.url.startsWith('/mobile-access/'))?.entries).toEqual(expect.arrayContaining([layoutId, 'b']))
+  })
+
+  it('chunks a large application batch into multiple merged batches', () => {
+    const ids = ['a', 'b', 'c', 'd', 'e', 'f']
+    const plan = parseMobileBootPlan(batchedIndex(ids))
+    const sizes = new Map(ids.map(id => [`/plugins/${id}.js`, 5 * 1024 * 1024]))
+    const split = splitMobileBootBatch(plan.planEntries!, sizes, new Set())
+    expect(split.plans.length).toBeGreaterThan(1)
+    expect(split.rows.filter(row => row.url.startsWith('/mobile-access/'))).toHaveLength(split.plans.length)
+    expect(split.rows.filter(row => row.url.startsWith('/plugins/'))).toHaveLength(0)
+    expect(split.rows.flatMap(row => row.entries).sort()).toEqual([...ids, layoutId].sort())
+  })
+
+  it('keeps the layout module inside a merged batch even when the batch is otherwise oversized', () => {
+    const plan = parseMobileBootPlan(batchedIndex(['a']))
+    const split = splitMobileBootBatch(plan.planEntries!, new Map([
+      ['/plugins/a.js', 9 * 1024 * 1024],
+    ]), new Set())
+    const merged = split.rows.find(row => row.url.startsWith('/mobile-access/mobile-boot/'))
+    expect(merged?.entries).toEqual([layoutId])
+    expect(split.rows.filter(row => row.url.startsWith('/plugins/')).map(row => row.entries[0])).toEqual(['a'])
   })
 })

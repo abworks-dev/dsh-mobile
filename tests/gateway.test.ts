@@ -792,7 +792,8 @@ describe('HTTP gateway', () => {
   it('does not retry a deterministic bundle response and permits the next assembly to recover', async () => {
     let rejectRenderer = true
     const fixture = await mobileBatchFixture((incoming, response) => {
-      if (!rejectRenderer || incoming.url !== '/plugins/renderer.js?rev=renderer') return false
+      if (incoming.headers['x-dsh-mobile-size-probe'] !== undefined) return false
+      if (!rejectRenderer || incoming.method !== 'GET' || incoming.url !== '/plugins/renderer.js?rev=renderer') return false
       response.writeHead(503, { 'content-type': 'text/plain' })
       response.end('temporarily unavailable')
       return true
@@ -801,19 +802,20 @@ describe('HTTP gateway', () => {
     const failed = await request(fixture.instance.address().port, fixture.path, { headers: fixture.headers })
     expect(failed.status).toBe(502)
     expect(JSON.parse(failed.body)).toEqual({ error: 'upstream_unavailable' })
-    expect(fixture.inner.observations.filter(entry => entry.url === '/plugins/renderer.js?rev=renderer')).toHaveLength(1)
+    expect(fixture.inner.observations.filter(entry => entry.method === 'GET' && entry.headers['x-dsh-mobile-size-probe'] === undefined && entry.url === '/plugins/renderer.js?rev=renderer')).toHaveLength(1)
 
     rejectRenderer = false
     const recovered = await request(fixture.instance.address().port, fixture.path, { headers: fixture.headers })
     expect(recovered.status).toBe(200)
     expect(recovered.body).toContain('/plugins/renderer.js?rev=renderer')
-    expect(fixture.inner.observations.filter(entry => entry.url === '/plugins/renderer.js?rev=renderer')).toHaveLength(2)
+    expect(fixture.inner.observations.filter(entry => entry.method === 'GET' && entry.headers['x-dsh-mobile-size-probe'] === undefined && entry.url === '/plugins/renderer.js?rev=renderer')).toHaveLength(2)
   })
 
   it('retries a transient upstream reset while assembling a mobile batch', async () => {
     let resetRenderer = true
     const fixture = await mobileBatchFixture((incoming) => {
-      if (!resetRenderer || incoming.url !== '/plugins/renderer.js?rev=renderer') return false
+      if (incoming.headers['x-dsh-mobile-size-probe'] !== undefined) return false
+      if (!resetRenderer || incoming.method !== 'GET' || incoming.url !== '/plugins/renderer.js?rev=renderer') return false
       resetRenderer = false
       incoming.socket.destroy()
       return true
@@ -822,20 +824,21 @@ describe('HTTP gateway', () => {
     const batch = await request(fixture.instance.address().port, fixture.path, { headers: fixture.headers })
     expect(batch.status).toBe(200)
     expect(batch.body).toContain('/plugins/renderer.js?rev=renderer')
-    expect(fixture.inner.observations.filter(entry => entry.url === '/plugins/renderer.js?rev=renderer')).toHaveLength(2)
+    expect(fixture.inner.observations.filter(entry => entry.method === 'GET' && entry.headers['x-dsh-mobile-size-probe'] === undefined && entry.url === '/plugins/renderer.js?rev=renderer')).toHaveLength(2)
   })
 
   it('reuses one in-flight assembly for concurrent mobile batch requests', async () => {
     let releaseBundles!: () => void
     const bundlesReleased = new Promise<void>(resolve => { releaseBundles = resolve })
-    const fixture = await mobileBatchFixture(async () => {
+    const fixture = await mobileBatchFixture(async (incoming) => {
+      if (incoming.headers['x-dsh-mobile-size-probe'] !== undefined || incoming.method !== 'GET') return false
       await bundlesReleased
       return false
     })
 
     const first = beginRequest(fixture.instance.address().port, fixture.path, { headers: fixture.headers })
     await vi.waitFor(() => {
-      expect(fixture.inner.observations.filter(entry => entry.url.startsWith('/plugins/'))).toHaveLength(2)
+      expect(fixture.inner.observations.filter(entry => entry.method === 'GET' && entry.headers['x-dsh-mobile-size-probe'] === undefined && entry.url.startsWith('/plugins/'))).toHaveLength(2)
     })
     const second = beginRequest(fixture.instance.address().port, fixture.path, { headers: fixture.headers })
     await vi.waitFor(() => { expect(activeRequestCount(fixture.instance)).toBe(2) })
@@ -845,20 +848,21 @@ describe('HTTP gateway', () => {
     expect(firstResult.status).toBe(200)
     expect(secondResult.status).toBe(200)
     expect(secondResult.rawBody).toEqual(firstResult.rawBody)
-    expect(fixture.inner.observations.filter(entry => entry.url.startsWith('/plugins/'))).toHaveLength(2)
+    expect(fixture.inner.observations.filter(entry => entry.method === 'GET' && entry.headers['x-dsh-mobile-size-probe'] === undefined && entry.url.startsWith('/plugins/'))).toHaveLength(2)
   })
 
   it('keeps a shared mobile batch assembly alive when its first requester disconnects', async () => {
     let releaseBundles!: () => void
     const bundlesReleased = new Promise<void>(resolve => { releaseBundles = resolve })
-    const fixture = await mobileBatchFixture(async () => {
+    const fixture = await mobileBatchFixture(async (incoming) => {
+      if (incoming.headers['x-dsh-mobile-size-probe'] !== undefined || incoming.method !== 'GET') return false
       await bundlesReleased
       return false
     })
 
     const first = beginRequest(fixture.instance.address().port, fixture.path, { headers: fixture.headers })
     await vi.waitFor(() => {
-      expect(fixture.inner.observations.filter(entry => entry.url.startsWith('/plugins/'))).toHaveLength(2)
+      expect(fixture.inner.observations.filter(entry => entry.method === 'GET' && entry.headers['x-dsh-mobile-size-probe'] === undefined && entry.url.startsWith('/plugins/'))).toHaveLength(2)
     })
     first.outgoing.destroy(new Error('test requester disconnected'))
     await first.result.catch(() => undefined)
@@ -870,14 +874,14 @@ describe('HTTP gateway', () => {
     const result = await second.result
     expect(result.status).toBe(200)
     expect(result.body).toContain('/plugins/renderer.js?rev=renderer')
-    expect(fixture.inner.observations.filter(entry => entry.url.startsWith('/plugins/'))).toHaveLength(2)
+    expect(fixture.inner.observations.filter(entry => entry.method === 'GET' && entry.headers['x-dsh-mobile-size-probe'] === undefined && entry.url.startsWith('/plugins/'))).toHaveLength(2)
   })
 
   it('aborts an assembly during retry teardown without issuing another upstream request', async () => {
     let reportReset!: () => void
     const resetObserved = new Promise<void>(resolve => { reportReset = resolve })
     const fixture = await mobileBatchFixture((incoming) => {
-      if (incoming.url !== '/plugins/renderer.js?rev=renderer') return false
+      if (incoming.headers['x-dsh-mobile-size-probe'] !== undefined || incoming.method !== 'GET' || incoming.url !== '/plugins/renderer.js?rev=renderer') return false
       reportReset()
       incoming.socket.destroy()
       return true
@@ -890,7 +894,146 @@ describe('HTTP gateway', () => {
     await fixture.instance.close()
     await expect(assembly).rejects.toBeDefined()
     await pending.result.catch(() => undefined)
-    expect(fixture.inner.observations.filter(entry => entry.url === '/plugins/renderer.js?rev=renderer')).toHaveLength(1)
+    expect(fixture.inner.observations.filter(entry => entry.method === 'GET' && entry.headers['x-dsh-mobile-size-probe'] === undefined && entry.url === '/plugins/renderer.js?rev=renderer')).toHaveLength(1)
+  })
+
+  it('passes an oversized entry through its own batch while merging the rest', async () => {
+    const layoutId = '@deepseek-ai/dsh-client-ui-layout'
+    const directory = await mkdtemp(join(tmpdir(), 'dsh-mobile-oversized-'))
+    cleanups.push(() => rm(directory, { recursive: true, force: true }))
+    const mobileLayoutFile = join(directory, 'mobile-layout.js')
+    await writeFile(mobileLayoutFile, 'globalThis.__dedicatedMobileLayout = true;\n', 'utf8')
+    const oversizedBytes = 9 * 1024 * 1024
+    const graph = {
+      rev: 'stock',
+      entries: [
+        { id: 'small', url: '/plugins/small.js?rev=small', rev: 'small' },
+        { id: 'huge', url: '/plugins/huge.js?rev=huge', rev: 'huge' },
+        { id: layoutId, url: '/plugins/layout.js?rev=layout', rev: 'layout', inject: ['@deepseek-ai/dsh-client-locale', '@deepseek-ai/dsh-client-ui-renderer', '@deepseek-ai/dsh-client-ui-session', '@deepseek-ai/dsh-client-ui-theme'] },
+        { id: 'feature', url: '/plugins/feature.js?rev=feature', rev: 'feature' },
+      ],
+      batches: [{ phase: 'application', url: '/plugins/application.js?rev=stock', rev: 'stock-batch', entries: ['small', 'huge', layoutId, 'feature'] }],
+    }
+    const inner = createServer((incoming, response) => {
+      if (incoming.url === '/' && incoming.headers.accept?.includes('text/html')) {
+        const body = `<!doctype html><html><head><script>globalThis["__DSH_BOOT__"] = ${JSON.stringify(graph)};</script></head><body></body></html>`
+        response.writeHead(200, { 'content-type': 'text/html', 'content-length': Buffer.byteLength(body) })
+        response.end(body)
+        return
+      }
+      if (incoming.url === '/plugins/huge.js?rev=huge' && incoming.headers['x-dsh-mobile-size-probe'] !== undefined) {
+        response.writeHead(200, { 'content-type': 'text/javascript' })
+        response.end(Buffer.alloc(oversizedBytes, 0x78))
+        return
+      }
+      if (incoming.url?.startsWith('/plugins/') === true) {
+        const body = `globalThis.__loadedMobile = ${JSON.stringify(incoming.url)};\n`
+        response.writeHead(200, { 'content-type': 'text/javascript', 'content-length': Buffer.byteLength(body) })
+        response.end(body)
+        return
+      }
+      response.writeHead(404)
+      response.end()
+    })
+    const port = await listen(inner)
+    cleanups.push(() => closeServer(inner))
+    const instance = await gateway(port, { mobileLayoutFile })
+    const paired = await pair(instance)
+    const headers = {
+      ...browserHeaders(instance),
+      accept: 'text/html,application/xhtml+xml',
+      cookie: `${SESSION_COOKIE}=${paired.session}`,
+    }
+
+    const mobile = await request(instance.address().port, '/', { headers })
+    expect(mobile.status).toBe(200)
+    const bootMatch = /globalThis\["__DSH_BOOT__"\]\s*=\s*(\{.*\});/u.exec(mobile.body)
+    expect(bootMatch?.[1]).toBeDefined()
+    const rewritten = JSON.parse(bootMatch![1]!) as { entries: Array<{ id: string; url: string }>; batches: Array<{ phase: string; url: string; entries: string[] }> }
+    const rows = rewritten.batches.filter(batch => batch.phase === 'application')
+    const merged = rows.find(row => row.url.startsWith('/mobile-access/mobile-boot/'))
+    const solo = rows.find(row => row.url === '/plugins/huge.js?rev=huge')
+    expect(merged?.entries).toEqual(expect.arrayContaining(['small', layoutId, 'feature']))
+    expect(merged?.entries).not.toContain('huge')
+    expect(solo?.entries).toEqual(['huge'])
+    expect(solo?.url).toBe('/plugins/huge.js?rev=huge')
+
+    const batch = await request(instance.address().port, merged!.url, { headers })
+    expect(batch.status).toBe(200)
+    expect(batch.body).toContain('/plugins/small.js?rev=small')
+    expect(batch.body).toContain('__dedicatedMobileLayout = true')
+    expect(batch.body).toContain('/plugins/feature.js?rev=feature')
+    expect(batch.body).not.toContain('/plugins/huge.js?rev=huge')
+  })
+
+  it('retries a transient upstream reset when proxying a pass-through client bundle', async () => {
+    const layoutId = '@deepseek-ai/dsh-client-ui-layout'
+    const directory = await mkdtemp(join(tmpdir(), 'dsh-mobile-passthrough-retry-'))
+    cleanups.push(() => rm(directory, { recursive: true, force: true }))
+    const mobileLayoutFile = join(directory, 'mobile-layout.js')
+    await writeFile(mobileLayoutFile, 'globalThis.__dedicatedMobileLayout = true;\n', 'utf8')
+    const oversizedBytes = 9 * 1024 * 1024
+    let resetNext = true
+    const passthroughObservations: string[] = []
+    const graph = {
+      rev: 'stock',
+      entries: [
+        { id: layoutId, url: '/plugins/layout.js?rev=layout', rev: 'layout', inject: ['@deepseek-ai/dsh-client-locale', '@deepseek-ai/dsh-client-ui-renderer', '@deepseek-ai/dsh-client-ui-session', '@deepseek-ai/dsh-client-ui-theme'] },
+        { id: 'huge', url: '/plugins/huge.js?rev=huge', rev: 'huge' },
+      ],
+      batches: [{ phase: 'application', url: '/plugins/application.js?rev=stock', rev: 'stock-batch', entries: [layoutId, 'huge'] }],
+    }
+    const inner = createServer((incoming, response) => {
+      if (incoming.url === '/' && incoming.headers.accept?.includes('text/html')) {
+        const body = `<!doctype html><html><head><script>globalThis["__DSH_BOOT__"] = ${JSON.stringify(graph)};</script></head><body></body></html>`
+        response.writeHead(200, { 'content-type': 'text/html', 'content-length': Buffer.byteLength(body) })
+        response.end(body)
+        return
+      }
+      if (incoming.url === '/plugins/huge.js?rev=huge' && incoming.headers['x-dsh-mobile-size-probe'] !== undefined) {
+        response.writeHead(200, { 'content-type': 'text/javascript' })
+        response.end(Buffer.alloc(oversizedBytes, 0x78))
+        return
+      }
+      if (incoming.url === '/plugins/huge.js?rev=huge' && incoming.method === 'GET') {
+        passthroughObservations.push('GET')
+        if (resetNext) {
+          resetNext = false
+          incoming.socket.destroy()
+          return
+        }
+        const body = 'globalThis.__loadedHuge = true;\n'
+        response.writeHead(200, { 'content-type': 'text/javascript', 'content-length': Buffer.byteLength(body) })
+        response.end(body)
+        return
+      }
+      if (incoming.url?.startsWith('/plugins/') === true) {
+        const body = `globalThis.__loadedMobile = ${JSON.stringify(incoming.url)};\n`
+        response.writeHead(200, { 'content-type': 'text/javascript', 'content-length': Buffer.byteLength(body) })
+        response.end(body)
+        return
+      }
+      response.writeHead(404)
+      response.end()
+    })
+    const port = await listen(inner)
+    cleanups.push(() => closeServer(inner))
+    const instance = await gateway(port, { mobileLayoutFile })
+    const paired = await pair(instance)
+    const headers = {
+      ...browserHeaders(instance),
+      accept: 'text/html,application/xhtml+xml',
+      cookie: `${SESSION_COOKIE}=${paired.session}`,
+    }
+
+    const mobile = await request(instance.address().port, '/', { headers })
+    expect(mobile.status).toBe(200)
+    const passthrough = await request(instance.address().port, '/plugins/huge.js?rev=huge', {
+      headers: { ...headers, accept: '*/*' },
+    })
+    expect(passthrough.status).toBe(200)
+    expect(passthrough.body).toContain('__loadedHuge = true')
+    expect(passthroughObservations).toEqual(['GET', 'GET'])
   })
 
   it('keeps the DSH 0.1.2 browser-auth cookie inside the authenticated mobile gateway', async () => {
