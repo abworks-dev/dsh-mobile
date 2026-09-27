@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { applyNativeMobileLanguageMarker, bindComposerSoftEnter, createHeaderStripPanController, dispatchComposerImageDrop, drawerScrimVisible, installNativeMobileSurface, isComposerMediaOriginCurrent, isSoftKeyboardEnterLineBreak, markNativeMobileSettings, measureHeaderStripOverflow, NATIVE_MOBILE_OVERLAY_QUERY, NATIVE_MOBILE_STYLES, preflightComposerImageDrop, resolveNativeMobileFrame, resolveNativeMobileLanguage, shouldAutoLoadEarlier } from '../src/native-mobile.js'
+import { applyNativeMobileLanguageMarker, bindComposerSoftEnter, composerIsLandingHero, createHeaderStripPanController, dispatchComposerImageDrop, drawerScrimVisible, installNativeMobileSurface, isComposerMediaOriginCurrent, isSoftKeyboardEnterLineBreak, markNativeMobileSettings, measureHeaderStripOverflow, NATIVE_MOBILE_OVERLAY_QUERY, NATIVE_MOBILE_STYLES, preflightComposerImageDrop, resolveNativeMobileFrame, resolveNativeMobileLanguage, shouldAutoLoadEarlier } from '../src/native-mobile.js'
 
 interface FakeElementOptions {
   readonly children?: readonly HTMLElement[]
@@ -403,6 +403,24 @@ describe('composer soft-keyboard Enter', () => {
     expect(source).toContain('[data-trigger-menu],button[aria-haspopup="listbox"][aria-expanded="true"]')
     expect(source).toContain("editor.addEventListener('keydown', onKeyDown, { capture: true })")
     expect(source).not.toContain('lineBreakButton')
+  })
+
+  it('falls back to the conversation surface when the layout published no session id', () => {
+    const heroRoot = { classList: ['composer_root', 'composer_hero'], parentElement: null } as unknown as Element
+    const heroCard = { classList: ['composer_card'], parentElement: heroRoot } as unknown as Element
+    const conversationRoot = { classList: ['dshm_main'], parentElement: null } as unknown as Element
+    const conversationCard = { classList: ['composer_card'], parentElement: conversationRoot } as unknown as Element
+    expect(composerIsLandingHero(heroCard)).toBe(true)
+    expect(composerIsLandingHero(conversationCard)).toBe(false)
+    expect(composerIsLandingHero(null)).toBe(false)
+
+    const source = readFileSync(new URL('../src/native-mobile.ts', import.meta.url), 'utf8')
+    // Both published signals can be absent inside an open conversation on a phone:
+    // the layout omits the session id for a blank session, and the drawer is closed
+    // so no row is selected. Without this fallback the guard never passes and Enter
+    // submits instead of breaking the line.
+    expect(source).toContain("document.querySelector<Element>('.dshm-main')")
+    expect(source).toContain('composerIsLandingHero(boundComposer)')
   })
 })
 function headerPanHarness(initialRange = 220) {
