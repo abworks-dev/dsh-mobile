@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { applyNativeMobileLanguageMarker, bindComposerSoftEnter, composerIsLandingHero, createHeaderStripPanController, dispatchComposerImageDrop, drawerScrimVisible, installNativeMobileSurface, isComposerMediaOriginCurrent, isSoftKeyboardEnterLineBreak, markNativeMobileSettings, measureHeaderStripOverflow, NATIVE_MOBILE_OVERLAY_QUERY, NATIVE_MOBILE_STYLES, preflightComposerImageDrop, resolveNativeMobileFrame, resolveNativeMobileLanguage, shouldAutoLoadEarlier } from '../src/native-mobile.js'
+import { activeSessionForSoftEnter, applyNativeMobileLanguageMarker, bindComposerSoftEnter, composerIsLandingHero, createHeaderStripPanController, dispatchComposerImageDrop, drawerScrimVisible, installNativeMobileSurface, isComposerMediaOriginCurrent, isSoftKeyboardEnterLineBreak, markNativeMobileSettings, measureHeaderStripOverflow, NATIVE_MOBILE_OVERLAY_QUERY, NATIVE_MOBILE_STYLES, preflightComposerImageDrop, resolveComposerSessionOrigin, resolveNativeMobileFrame, resolveNativeMobileLanguage, shouldAutoLoadEarlier } from '../src/native-mobile.js'
 
 interface FakeElementOptions {
   readonly children?: readonly HTMLElement[]
@@ -405,22 +405,70 @@ describe('composer soft-keyboard Enter', () => {
     expect(source).not.toContain('lineBreakButton')
   })
 
-  it('falls back to the conversation surface when the layout published no session id', () => {
-    const heroRoot = { classList: ['composer_root', 'composer_hero'], parentElement: null } as unknown as Element
-    const heroCard = { classList: ['composer_card'], parentElement: heroRoot } as unknown as Element
-    const conversationRoot = { classList: ['dshm_main'], parentElement: null } as unknown as Element
-    const conversationCard = { classList: ['composer_card'], parentElement: conversationRoot } as unknown as Element
-    expect(composerIsLandingHero(heroCard)).toBe(true)
-    expect(composerIsLandingHero(conversationCard)).toBe(false)
-    expect(composerIsLandingHero(null)).toBe(false)
+  it('uses the real conversation id for id-less mobile layout and rejects an old photo after navigation', () => {
+    let actualSessionId: string | null = 'session-a'
+    const main = { classList: ['dshm-main'], parentElement: null, getAttribute: () => null } as unknown as Element
+    const conversation = {
+      classList: ['conversation_body'], parentElement: main,
+      getAttribute: (name: string) => name === 'data-conversation-session' ? actualSessionId : null,
+    } as unknown as Element
+    const card = {
+      classList: ['composer_card'], parentElement: conversation,
+      closest: (selector: string) => selector === '[data-conversation-session]' && actualSessionId !== null
+        ? conversation
+        : selector === '.dshm-main' ? main : null,
+    } as unknown as Element
+    const tokenForRow = vi.fn(() => 'unused')
+    const first = resolveComposerSessionOrigin(card, null, tokenForRow)
+    expect(first).toEqual({ sessionRoot: conversation, sessionId: 'session-a' })
+    expect(activeSessionForSoftEnter(card, first.sessionId)).toBe(true)
+    expect(tokenForRow).not.toHaveBeenCalled()
 
-    const source = readFileSync(new URL('../src/native-mobile.ts', import.meta.url), 'utf8')
-    // Both published signals can be absent inside an open conversation on a phone:
-    // the layout omits the session id for a blank session, and the drawer is closed
-    // so no row is selected. Without this fallback the guard never passes and Enter
-    // submits instead of breaking the line.
-    expect(source).toContain("document.querySelector<Element>('.dshm-main')")
-    expect(source).toContain('composerIsLandingHero(boundComposer)')
+    const origin = { generation: 1, href: 'https://dsh.test/', composer: card, ...first }
+    actualSessionId = 'session-b'
+    const second = resolveComposerSessionOrigin(card, null, tokenForRow)
+    expect(second).toEqual({ sessionRoot: conversation, sessionId: 'session-b' })
+    expect(isComposerMediaOriginCurrent(origin, {
+      ...origin, ...second, disposed: false, composerConnected: true,
+    })).toBe(false)
+
+    actualSessionId = null
+    const unpublished = resolveComposerSessionOrigin(card, null, tokenForRow)
+    expect(unpublished).toEqual({ sessionRoot: null, sessionId: null })
+    expect(activeSessionForSoftEnter(card, unpublished.sessionId)).toBe(true)
+    expect(isComposerMediaOriginCurrent({ ...origin, ...unpublished }, {
+      ...origin, ...unpublished, disposed: false, composerConnected: true,
+    })).toBe(false)
+    const enter = new TestKeyboardEvent('keydown', { key: 'Enter', trusted: true }) as unknown as KeyboardEvent
+    expect(isSoftKeyboardEnterLineBreak(enter, { ...eligibleContext(), activeSession: activeSessionForSoftEnter(card, unpublished.sessionId) })).toBe(true)
+  })
+
+  it('does not infer a session for the landing hero or for an id-less stock composer', () => {
+    const main = { classList: ['dshm-main'], parentElement: null } as unknown as Element
+    const heroRoot = { classList: ['composer_root', 'composer_hero'], parentElement: main } as unknown as Element
+    const heroCard = {
+      classList: ['composer_card'], parentElement: heroRoot,
+      closest: (selector: string) => selector === '.dshm-main' ? main : null,
+    } as unknown as Element
+    const stockCard = {
+      classList: ['composer_card'], parentElement: null,
+      closest: () => null,
+    } as unknown as Element
+    expect(composerIsLandingHero(heroCard)).toBe(true)
+    expect(activeSessionForSoftEnter(heroCard, null)).toBe(false)
+    expect(activeSessionForSoftEnter(stockCard, null)).toBe(false)
+    expect(activeSessionForSoftEnter(null, null)).toBe(false)
+    const enter = new TestKeyboardEvent('keydown', { key: 'Enter', trusted: true }) as unknown as KeyboardEvent
+    expect(isSoftKeyboardEnterLineBreak(enter, { ...eligibleContext(), activeSession: activeSessionForSoftEnter(heroCard, null) })).toBe(false)
+    expect(resolveComposerSessionOrigin(heroCard, null, () => 'unused')).toEqual({ sessionRoot: null, sessionId: null })
+
+    const selectedRow = {
+      getAttribute: (name: string) => name === 'data-session-id' ? 'stock-session' : null,
+      textContent: 'Stock session',
+    } as unknown as Element
+    expect(resolveComposerSessionOrigin(stockCard, selectedRow, () => 'row-1')).toEqual({
+      sessionRoot: selectedRow, sessionId: 'row-1:stock-session',
+    })
   })
 })
 function headerPanHarness(initialRange = 220) {

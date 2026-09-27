@@ -233,6 +233,33 @@ export function composerIsLandingHero(composer: Element | null, depth = 4): bool
   return false
 }
 
+/** Resolve only identities published by the current conversation or selected session row. */
+export function resolveComposerSessionOrigin(
+  composer: Element | null,
+  selectedRow: Element | null,
+  selectedRowToken: (row: Element) => string,
+): { readonly sessionRoot: Element | null; readonly sessionId: string | null } {
+  const conversationRoot = composer?.closest('[data-conversation-session]') ?? null
+  const conversationId = conversationRoot?.getAttribute('data-conversation-session')
+  if (conversationRoot !== null && conversationId) return { sessionRoot: conversationRoot, sessionId: conversationId }
+
+  const dedicatedRoot = composer?.closest('[data-dsh-mobile-session]') ?? null
+  const dedicatedId = dedicatedRoot?.getAttribute('data-dsh-mobile-session')
+  if (dedicatedRoot !== null && dedicatedId) return { sessionRoot: dedicatedRoot, sessionId: dedicatedId }
+
+  if (selectedRow === null) return { sessionRoot: null, sessionId: null }
+  const identity = selectedRow.getAttribute('data-session-id')
+    ?? selectedRow.getAttribute('aria-label')
+    ?? selectedRow.textContent?.trim()
+    ?? ''
+  return { sessionRoot: selectedRow, sessionId: `${selectedRowToken(selectedRow)}:${identity}` }
+}
+
+/** An id-less non-hero composer still accepts App soft-keyboard line breaks, but not camera results. */
+export function activeSessionForSoftEnter(composer: Element | null, sessionId: string | null): boolean {
+  return sessionId !== null || (composer !== null && composer.closest('.dshm-main') !== null && !composerIsLandingHero(composer))
+}
+
 /** Find the stock DSH application frame without mistaking a feature card for the shell. */
 export function resolveNativeMobileFrame(root: ParentNode, dedicatedCenter: HTMLElement | undefined): HTMLElement | undefined {
   if (dedicatedCenter !== undefined) return undefined
@@ -586,37 +613,12 @@ export function installNativeMobileSurface(): () => void {
   let nextSessionToken = 0
   type MediaRequestContext = ComposerMediaOrigin & { readonly composer: Element | null; readonly sessionRoot: Element | null }
   const currentSessionOrigin = (): { readonly sessionRoot: Element | null; readonly sessionId: string | null } => {
-    const dedicatedRoot = boundComposer?.closest('[data-dsh-mobile-session]') ?? null
-    const dedicatedId = dedicatedRoot?.getAttribute('data-dsh-mobile-session')
-    if (dedicatedRoot !== null && typeof dedicatedId === 'string' && dedicatedId !== '') {
-      return { sessionRoot: dedicatedRoot, sessionId: dedicatedId }
-    }
     const selectedRow = document.querySelector<Element>('[role="treeitem"][aria-selected="true"]')
-    if (selectedRow === null) {
-      // The mobile layout publishes a session id on the conversation only for a
-      // non-blank current session, and the sidebar row above is not rendered while
-      // the phone drawer is closed — so both signals can be missing while the user
-      // is plainly inside an open conversation. A composer that is not the landing
-      // hero is that conversation, and nothing else in this guard distinguishes the
-      // two, which left soft-keyboard Enter submitting instead of breaking the line.
-      const conversation = document.querySelector<Element>('.dshm-main')
-      if (conversation === null || composerIsLandingHero(boundComposer)) {
-        return { sessionRoot: null, sessionId: null }
-      }
-      let conversationToken = sessionTokens.get(conversation)
-      if (conversationToken === undefined) {
-        conversationToken = `conversation-${String(++nextSessionToken)}`
-        sessionTokens.set(conversation, conversationToken)
-      }
-      return { sessionRoot: conversation, sessionId: conversationToken }
-    }
-    let token = sessionTokens.get(selectedRow)
-    if (token === undefined) { token = `stock-${String(++nextSessionToken)}`; sessionTokens.set(selectedRow, token) }
-    const identity = selectedRow.getAttribute('data-session-id')
-      ?? selectedRow.getAttribute('aria-label')
-      ?? selectedRow.textContent?.trim()
-      ?? ''
-    return { sessionRoot: selectedRow, sessionId: `${token}:${identity}` }
+    return resolveComposerSessionOrigin(boundComposer, selectedRow, row => {
+      let token = sessionTokens.get(row)
+      if (token === undefined) { token = `stock-${String(++nextSessionToken)}`; sessionTokens.set(row, token) }
+      return token
+    })
   }
   const mediaRequestContext = (): MediaRequestContext => {
     const session = currentSessionOrigin()
@@ -969,7 +971,7 @@ export function installNativeMobileSurface(): () => void {
       editable: editor.isConnected && editor.getAttribute('contenteditable') === 'true'
         && editor.getAttribute('aria-disabled') !== 'true' && editor.getAttribute('aria-haspopup') !== 'menu'
         && composerCard.getAttribute('aria-busy') !== 'true',
-      activeSession: currentSessionOrigin().sessionId !== null,
+      activeSession: activeSessionForSoftEnter(composerCard, currentSessionOrigin().sessionId),
       commandMenuOpen: composerCard.querySelector('[data-trigger-menu],button[aria-haspopup="listbox"][aria-expanded="true"]') !== null,
     }))
   }
