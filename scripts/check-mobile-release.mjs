@@ -169,10 +169,9 @@ async function checkAndroid() {
   if (!manifest.includes('android.permission.RECORD_AUDIO')) {
     fail('Android manifest must declare RECORD_AUDIO for in-app voice input')
   }
-  // Chromium's AudioManagerAndroid needs both permissions to open an input stream
-  // in communication mode, which DSH's echoCancellation constraint selects.
+  // Keep communication-audio support available to WebView voice input.
   if (!manifest.includes('android.permission.MODIFY_AUDIO_SETTINGS')) {
-    fail('Android manifest must declare MODIFY_AUDIO_SETTINGS or voice input fails with NotReadableError')
+    fail('Android manifest must declare MODIFY_AUDIO_SETTINGS for WebView communication audio support')
   }
   for (const marker of ['WebViewPermissionPolicy.shouldGrantAudioCapture', 'VOICE_PERMISSION_REQUEST']) {
     if (!mainActivity.includes(marker)) fail(`Android WebView microphone grant is missing ${marker}`)

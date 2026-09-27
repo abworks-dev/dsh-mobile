@@ -7,10 +7,9 @@
     <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES" android:usesPermissionFlags="neverForLocation" />
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
-    <!-- DSH voice input asks for echoCancellation, which opens the microphone in
-         communication mode. Chromium's AudioManagerAndroid skips that setup without
-         this normal permission, leaving no input stream for getUserMedia to open
-         (NotReadableError). It is granted at install, so no prompt is added. -->
+    <!-- DSH voice input requests echo cancellation. Chromium may need this normal
+         permission for communication-audio handling in WebView; Android grants it
+         at install, while RECORD_AUDIO still controls microphone access. -->
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-feature
