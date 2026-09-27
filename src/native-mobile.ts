@@ -218,6 +218,21 @@ function firstByClassSuffix(root: ParentNode, suffix: string): HTMLElement | und
   return Array.from(root.querySelectorAll<HTMLElement>('[class]')).find(element => classToken(element, suffix))
 }
 
+/**
+ * Whether this composer is the landing hero rather than the composer of an open
+ * conversation. DSH marks the hero composer's root with a `_hero` class and drops
+ * it once a session owns the surface, which is the only difference available
+ * without the layout's session id.
+ */
+export function composerIsLandingHero(composer: Element | null, depth = 4): boolean {
+  let node: Element | null = composer
+  for (let step = 0; step < depth && node !== null; step += 1) {
+    if (classToken(node, '_hero')) return true
+    node = node.parentElement
+  }
+  return false
+}
+
 /** Find the stock DSH application frame without mistaking a feature card for the shell. */
 export function resolveNativeMobileFrame(root: ParentNode, dedicatedCenter: HTMLElement | undefined): HTMLElement | undefined {
   if (dedicatedCenter !== undefined) return undefined
@@ -577,7 +592,24 @@ export function installNativeMobileSurface(): () => void {
       return { sessionRoot: dedicatedRoot, sessionId: dedicatedId }
     }
     const selectedRow = document.querySelector<Element>('[role="treeitem"][aria-selected="true"]')
-    if (selectedRow === null) return { sessionRoot: null, sessionId: null }
+    if (selectedRow === null) {
+      // The mobile layout publishes a session id on the conversation only for a
+      // non-blank current session, and the sidebar row above is not rendered while
+      // the phone drawer is closed — so both signals can be missing while the user
+      // is plainly inside an open conversation. A composer that is not the landing
+      // hero is that conversation, and nothing else in this guard distinguishes the
+      // two, which left soft-keyboard Enter submitting instead of breaking the line.
+      const conversation = document.querySelector<Element>('.dshm-main')
+      if (conversation === null || composerIsLandingHero(boundComposer)) {
+        return { sessionRoot: null, sessionId: null }
+      }
+      let conversationToken = sessionTokens.get(conversation)
+      if (conversationToken === undefined) {
+        conversationToken = `conversation-${String(++nextSessionToken)}`
+        sessionTokens.set(conversation, conversationToken)
+      }
+      return { sessionRoot: conversation, sessionId: conversationToken }
+    }
     let token = sessionTokens.get(selectedRow)
     if (token === undefined) { token = `stock-${String(++nextSessionToken)}`; sessionTokens.set(selectedRow, token) }
     const identity = selectedRow.getAttribute('data-session-id')
