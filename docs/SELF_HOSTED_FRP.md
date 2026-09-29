@@ -45,7 +45,7 @@ SSH 用户、端口和私钥路径只保存在当前浏览器的 `localStorage`�
 
 ## 清理 VPS
 
-本机“彻底移除 FRP”只删除电脑端的 frpc、Token 与配置，不动 VPS。清理 VPS 有两种方式，都只删除 DSH Mobile 明确拥有的文件、服务与带标记的防火墙规则：
+本机“彻底移除 FRP”只删除电脑端的 frpc、Token 与配置，不动 VPS。不含密钥的插件 `installation-id` 会保留，方便以后重连时沿用同一代理名；清理全部 DSH Mobile 私有状态时也会移除它。清理 VPS 有两种方式，都只删除 DSH Mobile 明确拥有的文件、服务与带标记的防火墙规则：
 
 1. **复制卸载脚本**：点“复制 VPS 卸载脚本”，审阅后以 root 身份在 VPS 上执行。脚本会停用并删除 frps 服务与证书续期定时器、删除配置/二进制/证书文件与 Caddy 片段、从主 Caddyfile 里删掉那一行 import（你自己的内容原样保留；文件删空时留一句占位注释）、删除带 DSH Mobile 标记的 UFW 规则。只有本次部署创建的 `dsh-mobile` 系统用户才会被删除，之前就存在的会被保留并明确告知。
 2. **一键清理**：点“清理 VPS 上的 DSH Mobile”，同样先核对主机指纹，确认后通过 pinned SSH 执行同样的脚本。

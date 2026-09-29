@@ -76,6 +76,13 @@ async function invoke(
   }
 }
 
+async function frpProxyNameFromRoute(route: WebRoute): Promise<string> {
+  const result = await invoke(route, 'GET', '/api/mobile-access/remote/control')
+  expect(result.status).toBe(200)
+  const payload = JSON.parse(result.body) as { providers: { frp: { configuration: { proxyName: string } } } }
+  return payload.providers.frp.configuration.proxyName
+}
+
 async function mount(
   initiallyEnabled = false,
   webServerPort = 3080,
@@ -483,6 +490,7 @@ describe('stock DSH lifecycle', () => {
     const directory = await mkdtemp(join(tmpdir(), 'dsh-mobile-unconfigured-plugin-'))
     temporaryDirectories.push(directory)
     const mounted = await mount(false, 3080, { setupFile: join(directory, 'missing-setup.json') })
+    expect(await readFile(join(mounted.directory, 'installation-id'), 'utf8')).toMatch(/^[a-f0-9]{64}\n$/u)
 
     const status = await invoke(mounted.route, 'GET', '/api/mobile-access/lan/control')
     expect(status.status).toBe(200)
@@ -502,6 +510,7 @@ describe('stock DSH lifecycle', () => {
     const setupFile = await managedSetupFile('http://127.0.0.1:3080')
     const mounted = await mount(false, 43120, { setupFile })
     expect(mounted.upstreamBase).toBe('http://127.0.0.1:43120')
+    expect(await readFile(join(mounted.directory, 'installation-id'), 'utf8')).toMatch(/^[a-f0-9]{64}\n$/u)
   })
 
   it('ignores a legacy setup upstream snapshot when DSH selects another port', async () => {
@@ -672,6 +681,40 @@ describe('stock DSH lifecycle', () => {
         },
       },
     })
+  })
+
+  it('keeps distinct FRP proxy names when fixed setups provide the same gateway identity', async () => {
+    const instanceId = 'a'.repeat(64)
+    const first = await mount(false, 3080, { instanceId })
+    const second = await mount(false, 3080, { instanceId })
+    const firstName = await frpProxyNameFromRoute(first.route)
+    const secondName = await frpProxyNameFromRoute(second.route)
+    expect(firstName).toMatch(/^dsh-mobile-[a-f0-9]{12}$/u)
+    expect(secondName).not.toBe(firstName)
+    expect(await readFile(join(first.directory, 'installation-id'), 'utf8')).toMatch(/^[a-f0-9]{64}\n$/u)
+    expect(await readFile(join(second.directory, 'installation-id'), 'utf8')).toMatch(/^[a-f0-9]{64}\n$/u)
+
+    const purged = await invoke(first.route, 'POST', '/api/mobile-access/remote/frp/component/purge', '{"confirm":true}')
+    expect(purged.status).toBe(200)
+    expect(await frpProxyNameFromRoute(first.route)).toBe(firstName)
+    expect(await readFile(join(first.directory, 'installation-id'), 'utf8')).toMatch(/^[a-f0-9]{64}\n$/u)
+  })
+
+  it('keeps the FRP proxy name when an unconfigured setup becomes managed after restart', async () => {
+    const setupDirectory = await mkdtemp(join(tmpdir(), 'dsh-mobile-frp-setup-'))
+    temporaryDirectories.push(setupDirectory)
+    const setupFile = join(setupDirectory, 'setup.json')
+    const before = await mount(false, 3080, { setupFile })
+    const proxyName = await frpProxyNameFromRoute(before.route)
+    const marker = await readFile(join(before.directory, 'installation-id'), 'utf8')
+
+    await before.context.fiber.dispose()
+    contexts.splice(contexts.indexOf(before.context), 1)
+    const managed = await managedSetupFile('http://127.0.0.1:3080')
+    await writeFile(setupFile, await readFile(managed, 'utf8'))
+    const after = await mount(false, 3080, { setupFile, stateFile: join(before.directory, 'devices.json') })
+    expect(await frpProxyNameFromRoute(after.route)).toBe(proxyName)
+    expect(await readFile(join(before.directory, 'installation-id'), 'utf8')).toBe(marker)
   })
 
   it('registers a /mobile command that steers the agent with the customization guide', async () => {

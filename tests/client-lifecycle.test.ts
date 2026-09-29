@@ -9,6 +9,7 @@ import {
   combineClientSignals,
   CONTROL_STYLES,
   createFrpServerTemplateForClipboard,
+  createFrpAttachFrpcTomlForClipboard,
   createFrpAttachTemplateForClipboard,
   frpAttachFormErrorCode,
   clientReleaseInfo,
@@ -637,19 +638,26 @@ describe('mobile-control localization', () => {
   })
 
   it('builds attach runbooks in the loopback client and wires the new panel controls', () => {
-    const selfSigned = createFrpAttachTemplateForClipboard({
+    const selfSignedForm = {
       serverAddress: '1.2.3.4',
       serverPort: 7000,
       token: '0123456789abcdef0123456789abcdef',
       publicOrigin: 'https://1.2.3.4',
-      entryTls: 'self-signed',
+      entryTls: 'self-signed' as const,
       publicPort: 33_080,
-    })
+    }
+    const selfSigned = createFrpAttachTemplateForClipboard(selfSignedForm)
     // The token is part of the local half by design; the VPS half never installs frps.
     expect(selfSigned).toContain('type = "tcp"')
     expect(selfSigned).toContain('remotePort = 33080')
     expect(selfSigned).toContain('ufw allow 33080/tcp')
     expect(selfSigned.split('---- (a)')[1]!.split('---- (b)')[0]).not.toContain('auth.token')
+    const proxyName = 'dsh-mobile-0123456789ab'
+    const namedRunbook = createFrpAttachTemplateForClipboard(selfSignedForm, { proxyName })
+    expect(namedRunbook).toContain(`name = "${proxyName}"`)
+    expect(namedRunbook).not.toContain('name = "dsh-mobile"\n')
+    expect(createFrpAttachFrpcTomlForClipboard(selfSignedForm, { proxyName, revealToken: true }))
+      .toContain(`name = "${proxyName}"`)
     const http = createFrpAttachTemplateForClipboard({
       serverAddress: '1.2.3.4',
       serverPort: 7000,
@@ -686,6 +694,16 @@ describe('mobile-control localization', () => {
     expect(source).toContain("t('frpAttachPlanCopied')")
     expect(source).toContain("t('frpAttachSelfCheck')")
     expect(source).toContain("t('frpAttachTokenReenter')")
+    expect(source).toContain('frpCopyAttachPlan.hidden = true; frpCopyAttachPlan.disabled = true')
+    expect(source).toContain('frpCopyAttachToken.hidden = true; frpCopyAttachToken.disabled = true')
+    expect(source).toContain('frpStep2Text.textContent = attachSelected && configuredFrpProxyName === undefined')
+    expect(source).toContain('frpCopyAttachPlan.disabled = remoteProviderBusy || configuredFrpProxyName === undefined')
+    expect(source).toContain('frpCopyAttachToken.disabled = remoteProviderBusy || configuredFrpProxyName === undefined')
+    expect(source).toContain('createFrpAttachTemplateForClipboard(attachForm, { proxyName })')
+    expect(source).toContain('createFrpAttachFrpcTomlForClipboard(attachForm, {')
+    expect(source.match(/const proxyName = frpClipboardProxyName\(\)/gu)).toHaveLength(2)
+    expect(source.match(/if \(proxyName === undefined\) return/gu)).toHaveLength(2)
+    expect(source).toContain("remoteStatus.textContent = t('loadingRemoteStatus')\n      loadRemote()")
     expect(source).not.toContain('body: JSON.stringify({ ...form, revealToken: true })')
     expect(source).toContain("t(selfSignedSelected ? 'frpAppRequirementSelfSigned' : 'frpAppRequirement')")
     expect(source).toContain('/api/mobile-access/remote/frp/attach-plan')

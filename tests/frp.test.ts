@@ -253,7 +253,7 @@ describe('FRP provider lifecycle', () => {
       probeVhostExposure: async () => false,
       verifyConfig: async () => undefined,
       launchClient: () => child as unknown as ChildProcessWithoutNullStreams,
-      probeDiscovery: vi.fn(async () => true),
+      probeDiscovery: vi.fn(async () => false),
       // A deadline far longer than the assertion below: only the diagnosis can
       // produce this error in time, so a regression fails instead of waiting.
       startTimeoutMs: 60_000,
@@ -262,7 +262,9 @@ describe('FRP provider lifecycle', () => {
     await controller.initialize()
     await controller.setEnabled(true)
     child.stdout.write('\u001b[1;34m2026-09-29 10:11:28.046 [W] [client/control.go:163] [97eb0b6686ede78b] '
-      + '[dsh-mobile-97eb0b6686ed] start error: proxy name [dsh-mobile-97eb0b6686ed] is already in use\n\u001b[0m')
+      + '[dsh-mobile-97eb0b6686ed] start error: ')
+    expect(controller.status().state).toBe('connecting')
+    child.stdout.write('proxy name [dsh-mobile-97eb0b6686ed] is already in use\n\u001b[0m')
     await vi.waitFor(() => { expect(controller.status().errorCode).toBe('frp_proxy_name_in_use') })
     expect(controller.status().state).toBe('error')
     await controller.close()
@@ -280,13 +282,15 @@ describe('FRP provider lifecycle', () => {
       probeVhostExposure: async () => false,
       verifyConfig: async () => undefined,
       launchClient: () => child as unknown as ChildProcessWithoutNullStreams,
-      probeDiscovery: vi.fn(async () => true),
+      probeDiscovery: vi.fn(async () => false),
       startTimeoutMs: 60_000,
       retryIntervalMs: 1,
     })
     await controller.initialize()
     await controller.setEnabled(true)
-    child.stderr.write('[dsh-mobile] start error: port already used\n')
+    child.stderr.write('[dsh-mobile] start error: ')
+    expect(controller.status().state).toBe('connecting')
+    child.stderr.write('port already used\n')
     await vi.waitFor(() => { expect(controller.status().errorCode).toBe('frp_remote_port_in_use') })
     await controller.close()
   })

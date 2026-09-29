@@ -73,6 +73,7 @@ import { OriginConfigStore, parseOriginSettings, validateOriginListenPort, type 
 import { OriginController } from './origin-proxy.js'
 import { PluginReleaseManager, releaseProfileDirectory } from './release-update.js'
 import { installMobileFileLogger } from './file-logger.js'
+import { loadOrCreateInstallationId } from './installation-id.js'
 import {
   configuredRemoteProvider,
   JsonRemoteProviderStore,
@@ -497,10 +498,10 @@ export async function apply(ctx: Context, config: PluginConfig): Promise<void> {
   await cloudflaredComponent.initialize()
   const frpComponent = new FrpComponentManager({ stateDirectory })
   await frpComponent.initialize()
-  // One frps can serve several DSH computers, and frps accepts each proxy name
-  // only once across all of them: the installation-derived name keeps this
-  // machine's registration from colliding with another installation's.
-  const frpConfig = new FrpConfigStore(join(remoteDirectory, 'frp', 'config'), frpProxyName(instanceId))
+  // FRP registration persists across LAN setup changes, while the gateway's
+  // pairing identity may change when an unconfigured setup becomes managed.
+  const frpIdentity = await loadOrCreateInstallationId(join(stateDirectory, 'installation-id'))
+  const frpConfig = new FrpConfigStore(join(remoteDirectory, 'frp', 'config'), frpProxyName(frpIdentity))
   await frpConfig.initialize()
   const originConfig = new OriginConfigStore(join(remoteDirectory, 'origin', 'config'))
   await originConfig.initialize()

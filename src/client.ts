@@ -1057,10 +1057,10 @@ function installControl(): { remove: () => void; toggle: () => void; isOpen: () 
   const frpStep2Title = element('strong'); frpStep2Title.textContent = t('frpStep2Title')
   const frpStep2Text = element('p'); frpStep2Text.textContent = t('frpStep2Text')
   const frpCopyTemplate = element('button', 'dsh-mobile-control__secondary dsh-mobile-control__frp-action'); frpCopyTemplate.type = 'button'; frpCopyTemplate.textContent = t('copyServerTemplate')
-  const frpCopyAttachPlan = element('button', 'dsh-mobile-control__secondary dsh-mobile-control__frp-action'); frpCopyAttachPlan.type = 'button'; frpCopyAttachPlan.textContent = t('frpAttachPlan'); frpCopyAttachPlan.hidden = true
+  const frpCopyAttachPlan = element('button', 'dsh-mobile-control__secondary dsh-mobile-control__frp-action'); frpCopyAttachPlan.type = 'button'; frpCopyAttachPlan.textContent = t('frpAttachPlan'); frpCopyAttachPlan.hidden = true; frpCopyAttachPlan.disabled = true
   // The only path that puts a plaintext token on the clipboard, and only after a
   // deliberate click; the default copy button above always stays masked.
-  const frpCopyAttachToken = element('button', 'dsh-mobile-control__secondary dsh-mobile-control__frp-action'); frpCopyAttachToken.type = 'button'; frpCopyAttachToken.textContent = t('frpAttachToken'); frpCopyAttachToken.hidden = true
+  const frpCopyAttachToken = element('button', 'dsh-mobile-control__secondary dsh-mobile-control__frp-action'); frpCopyAttachToken.type = 'button'; frpCopyAttachToken.textContent = t('frpAttachToken'); frpCopyAttachToken.hidden = true; frpCopyAttachToken.disabled = true
   const frpSelfCheckButton = element('button', 'dsh-mobile-control__secondary dsh-mobile-control__frp-action'); frpSelfCheckButton.type = 'button'; frpSelfCheckButton.textContent = t('frpAttachSelfCheck'); frpSelfCheckButton.hidden = true
   const frpSelfCheckStatus = element('p', 'dsh-mobile-control__component-status'); frpSelfCheckStatus.textContent = ''; frpSelfCheckStatus.hidden = true
   const vpsDeployText = element('p'); vpsDeployText.textContent = t('vpsDeployText')
@@ -1833,12 +1833,15 @@ function installControl(): { remove: () => void; toggle: () => void; isOpen: () 
     const attachSelected = frpMode.value === 'attach'
     const selfSignedSelected = attachSelected && frpEntryTls.value === 'self-signed'
     frpStep2Title.textContent = t(attachSelected ? 'frpStep2TitleAttach' : 'frpStep2Title')
-    frpStep2Text.textContent = t(attachSelected ? 'frpStep2TextAttach' : 'frpStep2Text')
+    frpStep2Text.textContent = attachSelected && configuredFrpProxyName === undefined
+      ? t('loadingRemoteStatus') : t(attachSelected ? 'frpStep2TextAttach' : 'frpStep2Text')
     frpStep4Text.textContent = t(attachSelected ? 'frpStep4TextAttach' : 'frpStep4Text')
     frpAppRequirement.textContent = t(selfSignedSelected ? 'frpAppRequirementSelfSigned' : 'frpAppRequirement')
     frpCopyTemplate.hidden = attachSelected
     frpCopyAttachPlan.hidden = !attachSelected
     frpCopyAttachToken.hidden = !attachSelected
+    frpCopyAttachPlan.disabled = remoteProviderBusy || configuredFrpProxyName === undefined
+    frpCopyAttachToken.disabled = remoteProviderBusy || configuredFrpProxyName === undefined
     frpSelfCheckButton.hidden = !frpConfigured
     frpVhostPort.disabled = selfSignedSelected
     frpVhostLabel.hidden = selfSignedSelected
@@ -2275,6 +2278,13 @@ function installControl(): { remove: () => void; toggle: () => void; isOpen: () 
     }
     remoteStatus.textContent = message
   }
+  const frpClipboardProxyName = (): string | undefined => {
+    if (configuredFrpProxyName === undefined) {
+      remoteStatus.textContent = t('loadingRemoteStatus')
+      loadRemote()
+    }
+    return configuredFrpProxyName
+  }
   frpCopyAttachPlan.addEventListener('click', () => {
     const form = frpForm()
     if (!validFrpServer(form.serverAddress) || !Number.isSafeInteger(form.serverPort)
@@ -2290,7 +2300,9 @@ function installControl(): { remove: () => void; toggle: () => void; isOpen: () 
         showFrpAttachError(code)
         return
       }
-      void navigator.clipboard.writeText(createFrpAttachTemplateForClipboard(attachForm))
+      const proxyName = frpClipboardProxyName()
+      if (proxyName === undefined) return
+      void navigator.clipboard.writeText(createFrpAttachTemplateForClipboard(attachForm, { proxyName }))
         .then(() => { remoteStatus.textContent = t('frpAttachPlanCopied') },
           () => { remoteStatus.textContent = t('frpAttachPlanFailed', { error: t('templateCopyFailed') }) })
       return
@@ -2310,7 +2322,7 @@ function installControl(): { remove: () => void; toggle: () => void; isOpen: () 
         return navigator.clipboard.writeText(text).then(() => { remoteStatus.textContent = t('frpAttachPlanCopied') })
       }, error => { remoteStatus.textContent = frpAttachErrorText(String(error)); return undefined })
       .catch(error => { remoteStatus.textContent = t('frpAttachPlanFailed', { error: String(error) }) })
-      .finally(() => { remoteProviderBusy = false; frpCopyAttachPlan.disabled = false })
+      .finally(() => { remoteProviderBusy = false; frpCopyAttachPlan.disabled = configuredFrpProxyName === undefined })
   })
   /** Copy a token-bearing frpc.toml only from the token the user just typed. */
   frpCopyAttachToken.addEventListener('click', () => {
@@ -2328,9 +2340,11 @@ function installControl(): { remove: () => void; toggle: () => void; isOpen: () 
         showFrpAttachError(code)
         return
       }
+      const proxyName = frpClipboardProxyName()
+      if (proxyName === undefined) return
       void navigator.clipboard.writeText(createFrpAttachFrpcTomlForClipboard(attachForm, {
         revealToken: true,
-        ...(configuredFrpProxyName === undefined ? {} : { proxyName: configuredFrpProxyName }),
+        proxyName,
       }))
         .then(() => { remoteStatus.textContent = t('frpAttachTokenCopied') },
           () => { remoteStatus.textContent = t('frpAttachTokenFailed', { error: t('templateCopyFailed') }) })

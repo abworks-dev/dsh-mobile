@@ -499,29 +499,35 @@ export class FrpController implements RemoteProviderController {
       return
     }
     this.child = child
-    // frpc keeps running after a refused proxy registration, so its output is the
-    // only evidence of a name or port conflict on the shared frps. Drain both
-    // streams (as before) while scanning the tail for those signatures: the first
-    // match fails this generation immediately instead of waiting out the deadline.
-    let diagnosis = ''
+    // frpc can keep running after a refused proxy registration. Buffer each
+    // stream separately so a partial `start error:` chunk cannot hide the more
+    // specific name or port conflict later on the same line.
+    const pending = { stdout: '', stderr: '' }
     let diagnosed = false
-    const inspect = (chunk: Buffer | string): void => {
+    const inspectLine = (line: string): void => {
       if (diagnosed) return
-      diagnosis = (diagnosis + String(chunk)).slice(-MAX_CLIENT_DIAGNOSIS_CHARS)
-      const code = frpcDiagnosisCode(diagnosis)
+      const code = frpcDiagnosisCode(line)
       if (code === undefined) return
       diagnosed = true
       void this.enqueue(() => this.failGeneration(generation, code))
     }
-    child.stdout.on('data', inspect)
-    child.stderr.on('data', inspect)
+    const inspect = (stream: 'stdout' | 'stderr', chunk: Buffer | string): void => {
+      if (diagnosed) return
+      const lines = (pending[stream] + String(chunk)).split(/\r\n|\r|\n/u)
+      pending[stream] = (lines.pop() ?? '').slice(-MAX_CLIENT_DIAGNOSIS_CHARS)
+      for (const line of lines) inspectLine(line.slice(-MAX_CLIENT_DIAGNOSIS_CHARS))
+    }
+    child.stdout.on('data', chunk => inspect('stdout', chunk))
+    child.stderr.on('data', chunk => inspect('stderr', chunk))
     child.stdout.resume()
     child.stderr.resume()
     child.once('error', () => { void this.enqueue(() => this.failGeneration(generation, 'frp_launch_failed')) })
     child.once('close', code => {
+      inspectLine(pending.stdout)
+      inspectLine(pending.stderr)
       if (generation !== this.generation || this.child !== child) return
       this.child = undefined
-      if (this.enabled) void this.enqueue(() => this.failGeneration(generation, code === 0 ? 'frp_stopped' : 'frp_exited'))
+      if (this.enabled && !diagnosed) void this.enqueue(() => this.failGeneration(generation, code === 0 ? 'frp_stopped' : 'frp_exited'))
     })
     this.publish({ enabled: true, state: 'connecting', origin: entryOrigin })
     // The probe target is derived from the effective entry *before* the abort
