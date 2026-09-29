@@ -299,6 +299,8 @@ flowchart LR
 
 下表记录已验证的 DSH 与插件版本组合，不表示其他版本自动兼容。0.3.6 起插件不会仅凭版本号拒绝启动；升级 DSH 后若遇到移动端异常，请先核对兼容表并更新插件。历史记录见 [CHANGELOG.md](CHANGELOG.md)。
 
+未发布的开发分支保留 DSH 宿主依赖名称，但不按 DSH 版本号拦截安装。新版本仍需经过下方的源码契约与配对启动检查；不在表中的版本不代表已验证。
+
 ### 系统支持矩阵
 
 | 通道 | Windows x64 | Linux x64 | Linux arm64 | macOS |
@@ -314,6 +316,7 @@ macOS 上局域网、自建 FRP 与自有反向代理可用；三个托管组件
 
 | DSH Mobile 插件                         | 验证支持的 DeepSeek Harness 版本                             |
 | ----------------------------------------- | -------------------------------------------------------------- |
+| 待发布候选 | `0.2.0-rc.2`（源码契约、隔离配对、移动页面启动和 WebSocket 工作区读取）；延续 `0.5.1` 的已验证版本 |
 | `0.5.1` | `0.1.7-alpha.2`、`0.1.7-rc.1`、`0.1.7-rc.2`、`0.2.0-rc.1`；官方 Desktop `0.1.7-rc.2`（桌面管理入口） |
 | `0.5.0` | `0.1.7-alpha.2`、`0.1.7-rc.1`、`0.1.7-rc.2`；官方 Desktop `0.1.7-rc.2`（桌面管理入口） |
 | `0.4.7` | `0.1.7-alpha.2`、`0.1.7-rc.1`、`0.1.7-rc.2`（源码契约、隔离配对及 WebSocket 工作区读取） |
@@ -365,11 +368,11 @@ npm ci
 npm run verify
 ```
 
-真实启动冒烟另用临时 DSH Home、随机回环端口和 Chromium 配对，不访问现有用户配置，也不发送模型请求。CI 分别测试 DSH `0.1.7-alpha.2`、`0.1.7-rc.1`、`0.1.7-rc.2` 与 `0.2.0-rc.1`；本机可把 rc.2 装在独立目录，避免替换插件的开发依赖：
+真实启动冒烟另用临时 DSH Home、随机回环端口和 Chromium 配对，不访问现有用户配置，也不发送模型请求。开发分支的 CI 分别测试 DSH `0.1.7-alpha.2`、`0.1.7-rc.1`、`0.1.7-rc.2`、`0.2.0-rc.1` 与 `0.2.0-rc.2`；本机可把 DSH `0.2.0-rc.2` 装在独立目录，避免替换插件的开发依赖：
 
 ```powershell
 $dshMobileTestRuntime = Join-Path $env:TEMP 'dsh-mobile-test-runtime'
-npm install --prefix $dshMobileTestRuntime --no-save --package-lock=false @deepseek-ai/dsh@0.1.7-rc.2
+npm install --prefix $dshMobileTestRuntime --no-save --package-lock=false @deepseek-ai/dsh@0.2.0-rc.2
 $env:DSH_BOOT_SMOKE_BIN = Join-Path $dshMobileTestRuntime 'node_modules/@deepseek-ai/dsh/lib/bin.js'
 npx playwright install chromium --only-shell
 npm run smoke:dsh-boot

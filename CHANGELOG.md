@@ -2,6 +2,10 @@
 
 Notable changes to DSH Mobile are recorded here. GitHub Releases remain the source for downloadable packages and complete generated commit notes.
 
+## Unreleased
+
+- Keep the four DSH peer names for host-side module resolution, but remove their per-release version ranges so a newly published DSH prerelease is not rejected solely by plugin metadata. The compatibility checks and isolated browser-startup matrix now include DSH `0.2.0-rc.2`.
+
 ## 0.5.1 - 2026-09-29
 
 - Restore the Android system Back key on devices that deliver the legacy Activity callback even on Android 13 and later. The DSH page still uses its WebView history when available and exits the app at the root.

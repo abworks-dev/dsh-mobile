@@ -298,6 +298,8 @@ See [SECURITY.md](SECURITY.md).
 
 The table records tested DSH and plugin version combinations; it does not imply automatic compatibility with other versions. Since 0.3.6 the plugin has not rejected DSH solely by version number. If mobile access breaks after upgrading DSH, check this table and update the plugin first. History lives in [CHANGELOG.md](CHANGELOG.md).
 
+The unreleased development branch keeps the DSH host peer names but does not block installation by DSH version. New releases still need the source-contract and paired-browser checks below; an unlisted version is not automatically verified.
+
 ### OS support matrix
 
 | Channel | Windows x64 | Linux x64 | Linux arm64 | macOS |
@@ -313,6 +315,7 @@ On macOS, local network, self-hosted FRP, and the own reverse proxy work; the th
 
 | DSH Mobile plugin | Verified DeepSeek Harness version |
 | --- | --- |
+| Unreleased candidate | `0.2.0-rc.2` (source contract, isolated pairing, mobile-page boot, and WebSocket Workspace baseline); retains the verified `0.5.1` versions |
 | `0.5.1` | `0.1.7-alpha.2`, `0.1.7-rc.1`, `0.1.7-rc.2`, and `0.2.0-rc.1`; official Desktop `0.1.7-rc.2` (administration surface) |
 | `0.5.0` | `0.1.7-alpha.2`, `0.1.7-rc.1`, and `0.1.7-rc.2`; official Desktop `0.1.7-rc.2` (administration surface) |
 | `0.4.7` | `0.1.7-alpha.2`, `0.1.7-rc.1`, and `0.1.7-rc.2` (source contract, isolated pairing, and workspace baseline over WebSocket) |
@@ -364,11 +367,11 @@ npm ci
 npm run verify
 ```
 
-The real browser-startup smoke uses a temporary DSH home, OS-assigned loopback ports, and Chromium pairing. It neither reads an existing user profile nor sends a model request. CI tests DSH `0.1.7-alpha.2`, `0.1.7-rc.1`, `0.1.7-rc.2`, and `0.2.0-rc.1`; install rc.2 in a separate directory locally so it does not replace the plugin's development dependencies:
+The real browser-startup smoke uses a temporary DSH home, OS-assigned loopback ports, and Chromium pairing. It neither reads an existing user profile nor sends a model request. Development-branch CI tests DSH `0.1.7-alpha.2`, `0.1.7-rc.1`, `0.1.7-rc.2`, `0.2.0-rc.1`, and `0.2.0-rc.2`; install DSH `0.2.0-rc.2` in a separate directory so it does not replace the plugin's development dependencies:
 
 ```powershell
 $dshMobileTestRuntime = Join-Path $env:TEMP 'dsh-mobile-test-runtime'
-npm install --prefix $dshMobileTestRuntime --no-save --package-lock=false @deepseek-ai/dsh@0.1.7-rc.2
+npm install --prefix $dshMobileTestRuntime --no-save --package-lock=false @deepseek-ai/dsh@0.2.0-rc.2
 $env:DSH_BOOT_SMOKE_BIN = Join-Path $dshMobileTestRuntime 'node_modules/@deepseek-ai/dsh/lib/bin.js'
 npx playwright install chromium --only-shell
 npm run smoke:dsh-boot
