@@ -7,7 +7,7 @@ import type { ChildProcessWithoutNullStreams } from 'node:child_process'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { MobileAccessControlState, MobileAccessControlStore } from '../src/control.js'
 import { FrpConfigStore } from '../src/frp-config.js'
-import { FrpController } from '../src/frp.js'
+import { FrpController, frpcDiagnosisCode } from '../src/frp.js'
 import type { MobileAccessGateway } from '../src/gateway.js'
 
 const temporaryDirectories: string[] = []
@@ -234,5 +234,69 @@ describe('FRP provider lifecycle', () => {
       errorCode: 'frp_attach_cert_unknown',
     })
     await controller.close()
+  })
+
+  it('fails fast with the frps conflict frpc reports instead of the start timeout', async () => {
+    // frpc logs a refused proxy registration as a warning and keeps running, so
+    // the controller sees a healthy child and an entry port nobody published.
+    // Before the output diagnosis this only ever ended in `frp_start_timeout`
+    // after the full deadline, which pointed users at DNS, Caddy, and firewalls
+    // while the real cause was another machine owning the proxy name.
+    const { executable, config } = await fixture()
+    const child = new FakeChild()
+    const controller = new FrpController({
+      store: new MemoryControlStore(),
+      executable,
+      config,
+      instanceId: 'f'.repeat(64),
+      createGateway: async () => gateway(),
+      probeVhostExposure: async () => false,
+      verifyConfig: async () => undefined,
+      launchClient: () => child as unknown as ChildProcessWithoutNullStreams,
+      probeDiscovery: vi.fn(async () => true),
+      // A deadline far longer than the assertion below: only the diagnosis can
+      // produce this error in time, so a regression fails instead of waiting.
+      startTimeoutMs: 60_000,
+      retryIntervalMs: 1,
+    })
+    await controller.initialize()
+    await controller.setEnabled(true)
+    child.stdout.write('\u001b[1;34m2026-09-29 10:11:28.046 [W] [client/control.go:163] [97eb0b6686ede78b] '
+      + '[dsh-mobile-97eb0b6686ed] start error: proxy name [dsh-mobile-97eb0b6686ed] is already in use\n\u001b[0m')
+    await vi.waitFor(() => { expect(controller.status().errorCode).toBe('frp_proxy_name_in_use') })
+    expect(controller.status().state).toBe('error')
+    await controller.close()
+  })
+
+  it('reports a taken entry port separately and keeps the proxy name case distinct', async () => {
+    const { executable, config } = await fixture()
+    const child = new FakeChild()
+    const controller = new FrpController({
+      store: new MemoryControlStore(),
+      executable,
+      config,
+      instanceId: 'a'.repeat(64),
+      createGateway: async () => gateway(),
+      probeVhostExposure: async () => false,
+      verifyConfig: async () => undefined,
+      launchClient: () => child as unknown as ChildProcessWithoutNullStreams,
+      probeDiscovery: vi.fn(async () => true),
+      startTimeoutMs: 60_000,
+      retryIntervalMs: 1,
+    })
+    await controller.initialize()
+    await controller.setEnabled(true)
+    child.stderr.write('[dsh-mobile] start error: port already used\n')
+    await vi.waitFor(() => { expect(controller.status().errorCode).toBe('frp_remote_port_in_use') })
+    await controller.close()
+  })
+
+  it('maps every other frpc start failure to the generic registration code', () => {
+    // frps refusals that are neither a name nor a port conflict keep the child
+    // alive for the same reason, so the generic signature must still match.
+    expect(frpcDiagnosisCode('xxx [I] login to server success')).toBeUndefined()
+    expect(frpcDiagnosisCode('[W] [dsh-mobile] start error: type [tcp] is not supported')).toBe('frp_proxy_start_failed')
+    expect(frpcDiagnosisCode('start error: port already used')).toBe('frp_remote_port_in_use')
+    expect(frpcDiagnosisCode('start error: proxy name [x] is already in use')).toBe('frp_proxy_name_in_use')
   })
 })

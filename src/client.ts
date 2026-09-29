@@ -594,6 +594,15 @@ export interface FrpAttachClipboardForm {
  */
 export interface FrpAttachClipboardOptions {
   readonly revealToken?: boolean
+  /**
+   * Installation-derived proxy name reported by the host's FRP configuration.
+   *
+   * The panel rebuilds the token-bearing frpc.toml locally (the saved token never
+   * leaves the host), so it needs the same name the provider writes; without it
+   * the copied file would register the legacy fixed name and collide on a shared
+   * frps. Omitted only by legacy callers.
+   */
+  readonly proxyName?: string
 }
 
 /**
@@ -734,6 +743,9 @@ const REMOTE_ERROR_MESSAGE_KEYS: Readonly<Record<string, string>> = {
   frp_vhost_probe_failed: 'frpVhostProbeFailed',
   frp_launch_failed: 'frpLaunchFailed',
   frp_start_timeout: 'frpTimeout',
+  frp_proxy_name_in_use: 'frpProxyNameInUse',
+  frp_remote_port_in_use: 'frpRemotePortInUse',
+  frp_proxy_start_failed: 'frpProxyStartFailed',
   frp_discovery_mismatch: 'frpDiscoveryMismatch',
   frp_discovery_invalid: 'frpDiscoveryInvalid',
   frp_stopped: 'frpStopped',
@@ -770,6 +782,7 @@ const DIAGNOSTIC_CONTROLLER_ACTION_CODES: ReadonlySet<string> = new Set([
   'cloudflared_download_hash_mismatch', 'cloudflared_download_size_mismatch', 'cloudflared_executable_hash_mismatch',
   'frp_component_missing', 'frp_component_invalid', 'frp_config_missing', 'frp_config_verify_failed',
   'frp_vhost_publicly_reachable', 'frp_vhost_probe_failed', 'frp_launch_failed', 'frp_start_timeout',
+  'frp_proxy_name_in_use', 'frp_remote_port_in_use', 'frp_proxy_start_failed',
   'frp_discovery_mismatch', 'frp_discovery_invalid', 'frp_stopped', 'frp_exited',
   'frp_attach_mode_requires_vhost_port', 'frp_attach_cert_unknown', 'frp_entry_tls_invalid',
   'frp_self_signed_requires_public_ipv4', 'frp_ingress_ca_expired', 'frp_ingress_ca_invalid',
@@ -1397,6 +1410,8 @@ function installControl(): { remove: () => void; toggle: () => void; isOpen: () 
   let configuredFrpOrigin = ''
   let configuredFrpVhostPort = 7080
   let configuredFrpPublicPort = 33_080
+  /** Proxy name the host writes into its frpc.toml; the local clipboard copy must match. */
+  let configuredFrpProxyName: string | undefined
   let frpConfiguredMode: 'deploy' | 'attach' = 'deploy'
   let frpConfiguredEntryTls: 'public-ip-cert' | 'self-signed' = 'public-ip-cert'
   let frpModeDraft = false
@@ -1801,6 +1816,9 @@ function installControl(): { remove: () => void; toggle: () => void; isOpen: () 
     if (frpConfigured && !frpEntryTlsDraft) frpEntryTls.value = configuredFrpEntryTls
     if (typeof frpConfiguration.vhostHttpPort === 'number') configuredFrpVhostPort = frpConfiguration.vhostHttpPort
     if (typeof frpConfiguration.publicPort === 'number') configuredFrpPublicPort = frpConfiguration.publicPort
+    configuredFrpProxyName = typeof frpConfiguration.proxyName === 'string' && frpConfiguration.proxyName !== ''
+      ? frpConfiguration.proxyName
+      : undefined
     if (!frpVhostDraft) {
       if (frpMode.value === 'attach' && configuredFrpMode === 'attach' && configuredFrpEntryTls === 'public-ip-cert') {
         frpVhostPort.value = String(configuredFrpVhostPort)
@@ -2310,7 +2328,10 @@ function installControl(): { remove: () => void; toggle: () => void; isOpen: () 
         showFrpAttachError(code)
         return
       }
-      void navigator.clipboard.writeText(createFrpAttachFrpcTomlForClipboard(attachForm, { revealToken: true }))
+      void navigator.clipboard.writeText(createFrpAttachFrpcTomlForClipboard(attachForm, {
+        revealToken: true,
+        ...(configuredFrpProxyName === undefined ? {} : { proxyName: configuredFrpProxyName }),
+      }))
         .then(() => { remoteStatus.textContent = t('frpAttachTokenCopied') },
           () => { remoteStatus.textContent = t('frpAttachTokenFailed', { error: t('templateCopyFailed') }) })
       return

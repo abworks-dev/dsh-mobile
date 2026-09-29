@@ -56,6 +56,7 @@ import {
 import { FrpComponentManager, type FrpComponentStatus } from './frp-component.js'
 import {
   FrpConfigStore,
+  frpProxyName,
   isFrpSelfSignedIngress,
   mergeSavedFrpSettings,
   mergeSavedFrpTarget,
@@ -496,7 +497,10 @@ export async function apply(ctx: Context, config: PluginConfig): Promise<void> {
   await cloudflaredComponent.initialize()
   const frpComponent = new FrpComponentManager({ stateDirectory })
   await frpComponent.initialize()
-  const frpConfig = new FrpConfigStore(join(remoteDirectory, 'frp', 'config'))
+  // One frps can serve several DSH computers, and frps accepts each proxy name
+  // only once across all of them: the installation-derived name keeps this
+  // machine's registration from colliding with another installation's.
+  const frpConfig = new FrpConfigStore(join(remoteDirectory, 'frp', 'config'), frpProxyName(instanceId))
   await frpConfig.initialize()
   const originConfig = new OriginConfigStore(join(remoteDirectory, 'origin', 'config'))
   await originConfig.initialize()
@@ -1030,7 +1034,9 @@ export async function apply(ctx: Context, config: PluginConfig): Promise<void> {
           const settings = mergeSavedFrpSettings(body, frpConfig.settings())
           // This route is callable by any same-origin client script. Never return
           // the saved token, even if a caller asks for an unmasked preview.
-          const options = { configFile: frpConfig.runtimeConfigFile }
+          // The preview must carry the same proxy name the provider writes, so a
+          // copied frpc.toml registers exactly like the managed one.
+          const options = { configFile: frpConfig.runtimeConfigFile, proxyName: frpConfig.proxyName }
           logger.info('frp attach plan requested mode=%s entryTls=%s vhostHttpPort=%d',
             settings.mode ?? 'deploy', settings.entryTls ?? 'public-ip-cert', resolveFrpVhostHttpPort(settings))
           sendJson(response, 200, {

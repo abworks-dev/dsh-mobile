@@ -63,6 +63,8 @@ Only public IPv4 mode installs `dsh-mobile-cert-renew.timer`; in that mode, also
 
 On the computer, start with the plugin log at `$DSH_HOME/mobile-access/logs/dsh-mobile.log` (JSONL, 5 MB rotation, tokens and keys redacted) and the panel diagnostic report. Windows antivirus software can quarantine frpc; if it does, create the smallest possible exception for the verified component directory only.
 
+When several computers share one frps, remember that proxy names are unique across the **whole server** and entry ports are first-come, first-served. The plugin registers an installation-derived name (`dsh-mobile-<first 12 characters of the installation identity>`), so two computers no longer compete for the same name. "A proxy with this installation name is already in use" means that name belongs to another computer, or to this computer's previous session before the frps heartbeat expired it; "the entry port is already occupied" means another proxy holds that port, so give this computer a different one. In both cases frpc stays alive without ever publishing the entry port, which is why the panel previously reported only "the public endpoint did not become ready".
+
 ## Limits
 
 - An unregistered domain on a mainland-China VPS may be intercepted by the cloud provider; use public IPv4 mode in that case.

@@ -51,6 +51,8 @@ export interface FrpConfigurationStatus {
   readonly publicOrigin?: string
   readonly vhostHttpPort: number
   readonly storagePath: string
+  /** Proxy name frpc registers on the shared frps; unique per DSH installation. */
+  readonly proxyName: string
   readonly errorCode?: string
   /** Present only when the saved configuration leaves the upstream `deploy` default. */
   readonly mode?: FrpMode
@@ -272,13 +274,59 @@ function tomlString(value: string): string {
 }
 
 /**
+ * Legacy proxy name, kept only as the default of {@link createFrpcToml}.
+ *
+ * A shared frps accepts one proxy per name across *all* its clients, so a fixed
+ * name let any other DSH installation — or a not yet reaped session of this one —
+ * own `dsh-mobile` first. frpc then logged `start error: proxy name [dsh-mobile]
+ * is already in use`, kept running without publishing the entry port, and the
+ * start-up self-check ended in `frp_start_timeout` ("the public endpoint did not
+ * become ready"). Product callers therefore pass an installation-derived name
+ * from {@link frpProxyName}; this constant only keeps the exported API and the
+ * byte-for-byte compatibility test working for legacy callers.
+ */
+export const FRP_DEFAULT_PROXY_NAME = 'dsh-mobile'
+
+/**
+ * Validate a proxy name for the generated frpc configuration.
+ *
+ * frps accepts one proxy per name on the whole server, so the name must be a
+ * single safe token: no whitespace, no quotes, no path or bracket characters.
+ */
+export function validateFrpProxyName(value: unknown): string {
+  if (typeof value !== 'string' || value.length < 1 || value.length > 128
+    || !/^[A-Za-z0-9._-]+$/u.test(value)) throw new Error('frp_proxy_name_invalid')
+  return value
+}
+
+/**
+ * Proxy name for one DSH installation.
+ *
+ * Derived from the stable installation identity so two computers sharing one
+ * frps never register the same proxy, while a single installation keeps the
+ * same name across restarts (so its own stale registration is the only possible
+ * conflict, and that one expires with the frps heartbeat).
+ */
+export function frpProxyName(instanceId: string): string {
+  if (typeof instanceId !== 'string' || !/^[a-f0-9]{64}$/u.test(instanceId)) throw new Error('frp_instance_id_invalid')
+  return `${FRP_DEFAULT_PROXY_NAME}-${instanceId.slice(0, 12)}`
+}
+
+/**
  * Build the single-purpose frpc configuration for the current loopback gateway.
  *
  * The default (public-CA) entry is an HTTP vhost behind Caddy and is emitted byte
  * for byte as before. The self-signed entry cannot use a vhost at all: frps only
  * forwards raw TCP, and the gateway terminates TLS on that connection.
+ *
+ * `proxyName` defaults to the legacy fixed name only for legacy callers; the
+ * provider and the attach preview always pass {@link frpProxyName}.
  */
-export function createFrpcToml(settings: FrpSettings, localPort: number): string {
+export function createFrpcToml(
+  settings: FrpSettings,
+  localPort: number,
+  proxyName: string = FRP_DEFAULT_PROXY_NAME,
+): string {
   if (!Number.isSafeInteger(localPort) || localPort < 1 || localPort > 65_535) throw new Error('frp_local_port_invalid')
   const header = [
     `serverAddr = ${tomlString(settings.serverAddress)}`,
@@ -288,7 +336,7 @@ export function createFrpcToml(settings: FrpSettings, localPort: number): string
     'transport.tls.enable = true',
     '',
     '[[proxies]]',
-    'name = "dsh-mobile"',
+    `name = ${tomlString(validateFrpProxyName(proxyName))}`,
   ]
   if (isFrpSelfSignedIngress(settings)) {
     return [
@@ -351,14 +399,23 @@ export class FrpConfigStore {
   readonly stateRoot: string
   readonly settingsFile: string
   readonly runtimeConfigFile: string
+  /**
+   * Proxy name every generated frpc.toml registers.
+   *
+   * Injected by the composing plugin ({@link frpProxyName}) so one frps can
+   * serve several DSH installations; the legacy fixed name stays the default
+   * for direct constructions in tests and for the exported API.
+   */
+  readonly proxyName: string
   private settingsValue: FrpSettings | undefined
   private errorCode: string | undefined
 
-  constructor(stateDirectory: string) {
+  constructor(stateDirectory: string, proxyName: string = FRP_DEFAULT_PROXY_NAME) {
     if (!isAbsolute(stateDirectory)) throw new Error('frp config state directory must be absolute')
     this.stateRoot = resolve(stateDirectory)
     this.settingsFile = join(this.stateRoot, 'settings.json')
     this.runtimeConfigFile = join(this.stateRoot, 'frpc.toml')
+    this.proxyName = validateFrpProxyName(proxyName)
   }
 
   /** Load private settings while rejecting links, oversized files, and unknown fields. */
@@ -402,6 +459,7 @@ export class FrpConfigStore {
       }),
       vhostHttpPort: settings === undefined ? FRP_VHOST_HTTP_PORT : resolveFrpVhostHttpPort(settings),
       storagePath: this.stateRoot,
+      proxyName: this.proxyName,
       ...(this.errorCode === undefined ? {} : { errorCode: this.errorCode }),
       ...(mode === undefined || mode === 'deploy' ? {} : { mode }),
       ...(entryTls === undefined || entryTls === 'public-ip-cert' ? {} : { entryTls }),
@@ -428,7 +486,7 @@ export class FrpConfigStore {
   async writeRuntimeConfig(localPort: number): Promise<string> {
     const settings = this.settingsValue
     if (settings === undefined) throw new Error('frp_config_missing')
-    await atomicPrivateWrite(this.runtimeConfigFile, createFrpcToml(settings, localPort))
+    await atomicPrivateWrite(this.runtimeConfigFile, createFrpcToml(settings, localPort, this.proxyName))
     return this.runtimeConfigFile
   }
 

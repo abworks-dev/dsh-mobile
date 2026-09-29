@@ -178,6 +178,21 @@ describe('attach token masking, explicit reveal, and the self-signed transport s
     expect(createFrpAttachFrpcToml(settings, { localPort: 3443 })).toContain('auth.token = "***"')
   })
 
+  it('previews the installation-derived proxy name, not the legacy fixed one', () => {
+    // A copied runbook is used by hand, so its frpc.toml must register exactly
+    // what the provider writes: the legacy name would collide on a shared frps.
+    const settings = attachSettings({ entryTls: 'self-signed' })
+    const derived = 'dsh-mobile-0123456789ab'
+    const parts = createFrpAttachTemplateParts(settings, { configFile: '/tmp/frpc.toml', proxyName: derived })
+    expect(parts.local).toContain(`name = "${derived}"`)
+    expect(parts.text).not.toContain('name = "dsh-mobile"\n')
+    const plan = createFrpAttachPlan(settings, { configFile: '/tmp/frpc.toml', proxyName: derived })
+    expect(plan.local.frpcToml).toContain(`name = "${derived}"`)
+    // Legacy callers keep the byte-identical upstream artefact.
+    expect(createFrpAttachFrpcToml(settings, { localPort: 3443 })).toContain('name = "dsh-mobile"')
+    expect(() => createFrpAttachFrpcToml(settings, { proxyName: 'bad name' })).toThrow('frp_proxy_name_invalid')
+  })
+
   it('reveals the token only when the caller explicitly asks for it', () => {
     const settings = attachSettings({ entryTls: 'self-signed' })
     const revealed = createFrpAttachTemplateParts(settings, { configFile: '/tmp/frpc.toml', revealToken: true })

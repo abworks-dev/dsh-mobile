@@ -17,6 +17,34 @@ const DISCOVERY_RETRY_MS = 1_000
 const MAX_DISCOVERY_BYTES = 16 * 1024
 const VHOST_PROBE_TIMEOUT_MS = 1_500
 const INGRESS_CERT_CHECK_MS = 12 * 60 * 60_000
+/** Cap on the frpc output retained for start-failure diagnosis. */
+const MAX_CLIENT_DIAGNOSIS_CHARS = 8 * 1024
+
+/**
+ * frpc start-failure signatures, most specific first.
+ *
+ * frpc reports a refused proxy registration as a warning and keeps running, so
+ * without this mapping the controller only ever saw a healthy child process and
+ * an entry port nobody published: the start-up self-check burned its full 45s
+ * deadline and reported `frp_start_timeout` ("the public endpoint did not become
+ * ready"), which sent users looking at DNS, Caddy, and firewalls.
+ *
+ * The two real conflicts are a proxy name another client of the same frps holds
+ * and an entry port another proxy already owns. Both are reported directly.
+ */
+const CLIENT_FAILURE_CODES: readonly (readonly [RegExp, string])[] = Object.freeze([
+  [/proxy name \[[^\]]*\] is already in use/iu, 'frp_proxy_name_in_use'],
+  [/(?:remote )?port (?:\[?[0-9]+\]? )?already (?:used|in use)/iu, 'frp_remote_port_in_use'],
+  [/start error:/iu, 'frp_proxy_start_failed'],
+])
+
+/**
+ * Stable error code for a chunk of frpc output, or undefined when it reports no
+ * start failure. Exported for the conflict tests.
+ */
+export function frpcDiagnosisCode(output: string): string | undefined {
+  return CLIENT_FAILURE_CODES.find(([pattern]) => pattern.test(output))?.[1]
+}
 
 /** Product-facing states for the restricted self-hosted FRP transport. */
 export type FrpState = 'off' | 'unavailable' | 'starting' | 'connecting' | 'ready' | 'error'
@@ -471,6 +499,22 @@ export class FrpController implements RemoteProviderController {
       return
     }
     this.child = child
+    // frpc keeps running after a refused proxy registration, so its output is the
+    // only evidence of a name or port conflict on the shared frps. Drain both
+    // streams (as before) while scanning the tail for those signatures: the first
+    // match fails this generation immediately instead of waiting out the deadline.
+    let diagnosis = ''
+    let diagnosed = false
+    const inspect = (chunk: Buffer | string): void => {
+      if (diagnosed) return
+      diagnosis = (diagnosis + String(chunk)).slice(-MAX_CLIENT_DIAGNOSIS_CHARS)
+      const code = frpcDiagnosisCode(diagnosis)
+      if (code === undefined) return
+      diagnosed = true
+      void this.enqueue(() => this.failGeneration(generation, code))
+    }
+    child.stdout.on('data', inspect)
+    child.stderr.on('data', inspect)
     child.stdout.resume()
     child.stderr.resume()
     child.once('error', () => { void this.enqueue(() => this.failGeneration(generation, 'frp_launch_failed')) })
@@ -491,6 +535,10 @@ export class FrpController implements RemoteProviderController {
       return
     }
     if (generation !== this.generation || !this.enabled) return
+    // A conflict reported while the ingress material was being resolved already
+    // failed this generation; continuing would overwrite that diagnosis with the
+    // generic deadline code.
+    if (diagnosed) return
     const controller = new AbortController()
     this.startupAbort = controller
     // The self-check must compare the public advertisement against the identity
