@@ -30,6 +30,7 @@
     "bin/dsh-mobile-funnel-win32-x64.exe",
     "bin/dsh-mobile-funnel-linux-x64",
     "bin/dsh-mobile-funnel-linux-arm64",
+    "packages/**",
     "cordis.patch.yml",
     "README.md",
     "README.en.md",
@@ -144,6 +145,7 @@
   "dependencies": {
     "@deepseek-ai/schemastery": "^3.18.1",
     "bonjour-service": "1.4.4",
+    "dsh-mobile-question-fixes": "file:packages/question-fixes",
     "qrcode": "^1.5.4",
     "selfsigned": "^5.5.0"
   },

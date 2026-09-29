@@ -1,0 +1,25 @@
+{
+  "name": "dsh-mobile-question-fixes",
+  "version": "0.5.2",
+  "private": true,
+  "description": "Experimental question-card layout fixes for DSH Web: let a long ask_user_question card show the whole question and keep its options reachable.",
+  "type": "module",
+  "exports": {
+    ".": {
+      "default": "./lib/index.mjs"
+    },
+    "./client": {
+      "default": "./lib/client.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib"
+  ],
+  "dsh": {
+    "client": {
+      "platform": "web",
+      "immediately": true
+    }
+  }
+}
