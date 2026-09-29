@@ -2,6 +2,16 @@
 
 Notable changes to DSH Mobile are recorded here. GitHub Releases remain the source for downloadable packages and complete generated commit notes.
 
+## 0.5.1 - 2026-09-29
+
+- Restore the Android system Back key on devices that deliver the legacy Activity callback even on Android 13 and later. The DSH page still uses its WebView history when available and exits the app at the root.
+- On the dedicated mobile page, route Android Back through visible extension pages, supported DSH dialogs and menus, the details panel, narrow-screen drawer, and selected main panel before WebView navigation or app exit. Unknown dialogs stay in place instead of exposing a lower layer.
+- Keep Android soft-keyboard Enter as a draft newline when an active conversation temporarily lacks a mobile-layout session ID. Camera results still require a matching session and composer origin, and a late result is discarded after navigation (thanks @ayiejosh for [PR #124](https://github.com/saya-ch/dsh-mobile/pull/124)).
+- Declare Android's normal `MODIFY_AUDIO_SETTINGS` permission for WebView communication audio setup (thanks @ayiejosh for [PR #125](https://github.com/saya-ch/dsh-mobile/pull/125)). Microphone capture still requires the user's `RECORD_AUDIO` approval; recognition also depends on the device WebView and speech service.
+- Accept DSH `0.2.0-rc.1` in the plugin's peer ranges and browser-startup checks. The paired mobile page and Workspace baseline were verified against the released runtime while retaining the tested `0.1.7` series.
+- Avoid creating disabled control files for remote providers that have never been enabled, removing unnecessary file-permission work on first configuration. Existing private files retain their previous ACL-before-use handling; this does not remove the `whoami.exe`/`icacls.exe` waits reported in [#128](https://github.com/saya-ch/dsh-mobile/issues/128).
+- Guide `/mobile` to inspect the running DSH page and, when available, matching frontend source before changing built-in controls, and to disclose when the result could not be checked on a phone. Shorten its command-menu description and refine the bilingual setup and remote-access guides.
+
 ## 0.5.0 - 2026-09-26
 
 - Recognize the official DSH Desktop `dsh-app://app` page as a Mobile administration surface, while requiring its signed DSH browser session for forwarded management requests (thanks @Sanksu for [PR #118](https://github.com/saya-ch/dsh-mobile/pull/118) and @up-and-down-0618 for [#115](https://github.com/saya-ch/dsh-mobile/issues/115)).

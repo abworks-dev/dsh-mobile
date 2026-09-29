@@ -120,6 +120,7 @@ class MainActivity : Activity() {
     private val recoveryHandler = Handler(Looper.getMainLooper())
     private val restoreUiHandler = Handler(Looper.getMainLooper())
     private val deviceStatusHandler = Handler(Looper.getMainLooper())
+    private val backUiHandler = Handler(Looper.getMainLooper())
     private var webView: WebView? = null
     private var secureWebViewClient: SecureWebViewClient? = null
     private var nativeBridge: NativeBridge? = null
@@ -161,6 +162,8 @@ class MainActivity : Activity() {
     private var deviceUndoPopup: PopupWindow? = null
     private var deviceListVisible = false
     private var rendererCrashTimes: List<Long> = emptyList()
+    private var backRequestGeneration = 0
+    private var backRequestPending = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -225,9 +228,9 @@ class MainActivity : Activity() {
         pendingDownload = pendingDownload?.let { it.copy(caCertificate = it.caCertificate?.copyOf()) },
     )
 
-    @Deprecated("Activity back dispatch is retained for Android 12 and earlier.")
+    @Deprecated("Activity back dispatch remains a fallback when the platform callback is not delivered.")
     override fun onBackPressed() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) handleBack()
+        handleBack()
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
@@ -254,6 +257,7 @@ class MainActivity : Activity() {
 
     override fun onPause() {
         pauseDeviceListRefresh()
+        cancelPendingWebBack()
         nativeBridge?.updateKeyboardState(NativeKeyboardState(false, false))
         webView?.onPause()
         CookieManager.getInstance().flush()
@@ -282,14 +286,59 @@ class MainActivity : Activity() {
     }
 
     private fun handleBack() {
-        val currentWebView = webView
-        if (currentWebView != null && currentWebView.canGoBack()) {
-            currentWebView.goBack()
+        if (isFinishing || isDestroyed) return
+        val browser = webView
+        if (browser == null) {
+            handleNativeBack(null)
+            return
+        }
+        if (backRequestPending) return
+        backRequestPending = true
+        val generation = ++backRequestGeneration
+        val url = browser.url
+        val completed = AtomicBoolean(false)
+        lateinit var timeout: Runnable
+        val complete = { evaluation: MobileBackEvaluation ->
+            if (completed.compareAndSet(false, true)) {
+                backUiHandler.removeCallbacks(timeout)
+                if (generation == backRequestGeneration) backRequestPending = false
+                when (mobileBackAction(
+                    generation,
+                    backRequestGeneration,
+                    webView === browser,
+                    webView === browser && browser.url == url,
+                    !isFinishing && !isDestroyed,
+                    evaluation,
+                )) {
+                    MobileBackAction.NATIVE_BACK -> handleNativeBack(browser)
+                    MobileBackAction.RETRY -> toast(R.string.back_page_unresponsive)
+                    MobileBackAction.PAGE_HANDLED, MobileBackAction.IGNORE -> Unit
+                }
+            }
+        }
+        timeout = Runnable { complete(MobileBackEvaluation.UNAVAILABLE) }
+        backUiHandler.postDelayed(timeout, MOBILE_BACK_TIMEOUT_MS)
+        try {
+            browser.evaluateJavascript(MOBILE_BACK_SCRIPT) { result -> complete(mobileBackEvaluation(result)) }
+        } catch (error: RuntimeException) {
+            complete(MobileBackEvaluation.UNAVAILABLE)
+        }
+    }
+
+    private fun handleNativeBack(browser: WebView?) {
+        if (browser?.canGoBack() == true) {
+            browser.goBack()
         } else if (setupBackAction != null) {
             setupBackAction?.invoke()
         } else {
             finish()
         }
+    }
+
+    private fun cancelPendingWebBack() {
+        backRequestGeneration++
+        backRequestPending = false
+        backUiHandler.removeCallbacksAndMessages(null)
     }
 
     /** Convert the legacy one-LAN/one-remote stores into the encrypted device list once. */
@@ -2121,6 +2170,7 @@ class MainActivity : Activity() {
             onFailure = ::showLoadFailure,
             onRendererGone = { handleRendererGone(browser) },
             onTopLevelUrlChanged = {
+                cancelPendingWebBack()
                 pendingAudioPermission = null
                 nativeBridge?.onTopLevelNavigation(it)
             },
@@ -2461,6 +2511,7 @@ class MainActivity : Activity() {
     }
 
     private fun destroyWebView(changingConfigurations: Boolean = false, rendererGone: Boolean = false) {
+        cancelPendingWebBack()
         secureWebViewClient?.dispose()
         secureWebViewClient = null
         pendingAudioPermission = null
@@ -2627,6 +2678,7 @@ class MainActivity : Activity() {
         const val DEVICE_STATUS_REFRESH_MS = 20_000L
         const val DEVICE_UNDO_TIMEOUT_MS = 6_000L
         const val LIVE_DOCUMENT_PROBE_TIMEOUT_MS = 2_000L
+        const val MOBILE_BACK_TIMEOUT_MS = 1_500L
         const val RESTORE_ESCAPE_DELAY_MS = 12_000L
         const val APP_RELEASES_URL = "https://github.com/saya-ch/dsh-mobile/releases/latest"
         val RECOVERY_DELAYS_MS = longArrayOf(0L, 1_000L, 3_000L, 8_000L)

@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { activeSessionForSoftEnter, applyNativeMobileLanguageMarker, bindComposerSoftEnter, composerIsLandingHero, createHeaderStripPanController, dispatchComposerImageDrop, drawerScrimVisible, installNativeMobileSurface, isComposerMediaOriginCurrent, isSoftKeyboardEnterLineBreak, markNativeMobileSettings, measureHeaderStripOverflow, NATIVE_MOBILE_OVERLAY_QUERY, NATIVE_MOBILE_STYLES, preflightComposerImageDrop, resolveComposerSessionOrigin, resolveNativeMobileFrame, resolveNativeMobileLanguage, shouldAutoLoadEarlier } from '../src/native-mobile.js'
+import { activeSessionForSoftEnter, applyNativeMobileLanguageMarker, bindComposerSoftEnter, composerIsLandingHero, createHeaderStripPanController, dispatchComposerImageDrop, drawerScrimVisible, installNativeMobileSurface, installStockMobileBack, isComposerMediaOriginCurrent, isSoftKeyboardEnterLineBreak, markNativeMobileSettings, measureHeaderStripOverflow, NATIVE_MOBILE_OVERLAY_QUERY, NATIVE_MOBILE_STYLES, preflightComposerImageDrop, resolveComposerSessionOrigin, resolveNativeMobileFrame, resolveNativeMobileLanguage, shouldAutoLoadEarlier, stockMainPanelOpen } from '../src/native-mobile.js'
 
 interface FakeElementOptions {
   readonly children?: readonly HTMLElement[]
@@ -82,6 +82,71 @@ describe('native mobile presentation', () => {
     expect(source).toContain('overlayQuery.removeEventListener("change", schedule)')
     expect(source).toContain('disposed = true')
     expect(source).toContain('completionFallback: false')
+  })
+
+  it('returns from stock details, narrow drawer, and selected main panel in order', () => {
+    const view = new EventTarget()
+    const layers = { detailsOpen: true, drawerOpen: true, mainPanelOpen: true }
+    const closeDetails = vi.fn(() => { layers.detailsOpen = false })
+    const closeDrawer = vi.fn(() => { layers.drawerOpen = false })
+    const closeMainPanel = vi.fn(() => { layers.mainPanelOpen = false })
+    const stop = installStockMobileBack(view as never, () => layers, { closeDetails, closeDrawer, closeMainPanel })
+    const back = (): Event => {
+      const event = new Event('dsh-mobile:native-back', { cancelable: true })
+      view.dispatchEvent(event)
+      return event
+    }
+
+    expect(back().defaultPrevented).toBe(true)
+    expect(closeDetails).toHaveBeenCalledOnce()
+    expect(closeDrawer).not.toHaveBeenCalled()
+    expect(back().defaultPrevented).toBe(true)
+    expect(closeDrawer).toHaveBeenCalledOnce()
+    expect(closeMainPanel).not.toHaveBeenCalled()
+    expect(back().defaultPrevented).toBe(true)
+    expect(closeMainPanel).toHaveBeenCalledOnce()
+    expect(back().defaultPrevented).toBe(false)
+    stop()
+  })
+
+  it('does not claim noncancelable, already claimed, absent-stock, or disposed Back requests', () => {
+    const view = new EventTarget()
+    const closeDetails = vi.fn()
+    const closeDrawer = vi.fn()
+    const closeMainPanel = vi.fn()
+    let stock = true
+    const stop = installStockMobileBack(view as never,
+      () => stock ? { detailsOpen: true, drawerOpen: true, mainPanelOpen: true } : null,
+      { closeDetails, closeDrawer, closeMainPanel })
+    const noncancelable = new Event('dsh-mobile:native-back')
+    view.dispatchEvent(noncancelable)
+    const claimed = new Event('dsh-mobile:native-back', { cancelable: true })
+    claimed.preventDefault()
+    view.dispatchEvent(claimed)
+    stock = false
+    const absent = new Event('dsh-mobile:native-back', { cancelable: true })
+    view.dispatchEvent(absent)
+    stock = true
+    stop()
+    const disposed = new Event('dsh-mobile:native-back', { cancelable: true })
+    view.dispatchEvent(disposed)
+    expect(absent.defaultPrevented).toBe(false)
+    expect(disposed.defaultPrevented).toBe(false)
+    expect(closeDetails).not.toHaveBeenCalled()
+    expect(closeDrawer).not.toHaveBeenCalled()
+    expect(closeMainPanel).not.toHaveBeenCalled()
+  })
+
+  it('reads a selected stock panel only through available layout features', () => {
+    expect(stockMainPanelOpen(undefined)).toBe(false)
+    expect(stockMainPanelOpen({})).toBe(false)
+    expect(stockMainPanelOpen({ selectPanel() {}, panelInfo: {} })).toBe(false)
+    let activePanelId: string | null = null
+    const panelInfo = { getSnapshot: () => ({ activePanelId }) }
+    const layout = { selectPanel: vi.fn(), panelInfo }
+    expect(stockMainPanelOpen(layout)).toBe(false)
+    activePanelId = 'plugins'
+    expect(stockMainPanelOpen(layout)).toBe(true)
   })
 
   it('stacks narrow settings and conversation metadata instead of squeezing text', () => {

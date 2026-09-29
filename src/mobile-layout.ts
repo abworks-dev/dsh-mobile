@@ -713,6 +713,9 @@ export function apply(ctx: MobileClientContext): void {
     const disposePanelInfo = typeof ctx.slots.provideRoot === 'function'
       ? ctx.slots.provideRoot({ hooks: { panelInfo: controller.panelInfo } })
       : () => {}
+    const requestDetailsClose = (): void => {
+      closeDetailsFromScrim(ctx.get('sidebarRight'), () => { controller.closeDetails() })
+    }
     const disposeRoot = ctx.slots.register({
       name: 'root',
       children: {
@@ -730,10 +733,23 @@ export function apply(ctx: MobileClientContext): void {
       controller,
       // sidebarRight is registered after the layout it depends on, so resolve
       // the optional service at gesture time rather than caching it at boot.
-      requestDetailsClose: () => {
-        closeDetailsFromScrim(ctx.get('sidebarRight'), () => { controller.closeDetails() })
-      },
+      requestDetailsClose,
     }))
+    const onNativeBack = (event: Event): void => {
+      if (!event.cancelable || event.defaultPrevented) return
+      const state = controller.getSnapshot()
+      if (state.detailsOpen) {
+        event.preventDefault()
+        requestDetailsClose()
+      } else if (!viewportIsWide() && state.sidebarOpen) {
+        event.preventDefault()
+        controller.closeSidebar()
+      } else if (state.panelInfo.activePanelId !== null) {
+        event.preventDefault()
+        controller.selectPanel(null)
+      }
+    }
+    window.addEventListener('dsh-mobile:native-back', onNativeBack)
     const retainMainPanels = (): void => {
       controller.retainMainPanels(ctx.slots.entries('main').flatMap(entry =>
         entry.options.key === undefined ? [] : [entry.options.key]))
@@ -741,6 +757,7 @@ export function apply(ctx: MobileClientContext): void {
     const disposePanels = ctx.slots.subscribe('main', retainMainPanels)
     retainMainPanels()
     return () => {
+      window.removeEventListener('dsh-mobile:native-back', onNativeBack)
       controller.dispose()
       disposePanels()
       disposeRoot()

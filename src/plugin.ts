@@ -1216,7 +1216,7 @@ export async function apply(ctx: Context, config: PluginConfig): Promise<void> {
     const unregister = ctx.webServer.register(adminRoute)
     const disposeMobileCommand = ctx.commands.register({
       name: 'mobile',
-      description: '按需求修改 DSH Mobile 的手机端界面或添加电脑端能力',
+      description: '定制手机界面或添加电脑能力',
       input: { hint: '<要做什么>' },
       handler: async ({ agent, rawInput }) => {
         const task = rawInput.trim()
@@ -1261,7 +1261,7 @@ export async function apply(ctx: Context, config: PluginConfig): Promise<void> {
       }
       await Promise.all((Object.keys(stores) as RemoteProvider[])
         .filter(provider => provider !== remoteProviders.selected)
-        .map(provider => stores[provider].save({ version: 1, enabled: false })))
+        .map(provider => stores[provider].disableIfPresent()))
       for (const provider of REMOTE_PROVIDERS) await remoteControllers[provider].initialize()
       // Broadcast discovery degrades silently when its UDP port cannot be bound, which
       // otherwise leaves "the phone cannot find this computer" with no visible cause.

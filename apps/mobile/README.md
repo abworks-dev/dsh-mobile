@@ -6,7 +6,7 @@ DeepSeek Harness is the display name of this lightweight, community-maintained A
 
 Android is the only supported native target. The iOS client remains an unpublished local experiment and is outside the build, release, and support scope.
 
-Version 0.5.0 keeps paired computers in one device list and supports choosing whether launch opens the last-used DSH or the list. The self-signed HTTPS entry for an existing frps requires Android app 0.4.6 or later to pin the remote gateway CA; older apps cannot use that entry but can continue using their existing LAN and publicly trusted remote connections.
+Version 0.5.1 retains the paired-device list and startup choice, and adds an Android system permission for WebView communication audio. Microphone capture still requires user approval; speech recognition also depends on the device WebView and speech service. The self-signed HTTPS entry for an existing frps requires Android app 0.4.6 or later to pin the remote gateway CA; older apps cannot use that entry but can continue using their existing LAN and publicly trusted remote connections.
 
 ## Use the app
 
