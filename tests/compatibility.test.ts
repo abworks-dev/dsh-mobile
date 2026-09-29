@@ -2,15 +2,21 @@ import { readFile } from 'node:fs/promises'
 import { describe, expect, it } from 'vitest'
 
 describe('DeepSeek Harness compatibility', () => {
-  it('declares DSH host families without enumerating individual prereleases', async () => {
+  it('retains host peer names without blocking new DSH versions', async () => {
     const manifest = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'))
     const lock = JSON.parse(await readFile(new URL('../package-lock.json', import.meta.url), 'utf8'))
     expect(lock.packages[''].peerDependencies).toEqual(manifest.peerDependencies)
-    for (const [name, range] of Object.entries(manifest.peerDependencies)) {
-      if (!name.startsWith('@deepseek-ai/dsh-')) continue
-      expect(range).toContain('^0.1.2-0')
-      expect(range).toContain('^0.1.3-0')
-      expect(range).not.toMatch(/0\.1\.2-alpha\.\d/u)
+    const hostPeers = Object.entries(manifest.peerDependencies)
+      .filter(([name]) => name.startsWith('@deepseek-ai/dsh-'))
+    expect(hostPeers.map(([name]) => name).sort()).toEqual([
+      '@deepseek-ai/dsh-client-connection',
+      '@deepseek-ai/dsh-commands',
+      '@deepseek-ai/dsh-host-webserver',
+      '@deepseek-ai/dsh-llm',
+    ])
+    for (const [name, range] of hostPeers) {
+      expect(range).toBe('*')
+      expect(manifest.peerDependenciesMeta[name]?.optional).toBe(true)
     }
   })
 
