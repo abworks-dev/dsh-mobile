@@ -2,9 +2,11 @@
 
 Notable changes to DSH Mobile are recorded here. GitHub Releases remain the source for downloadable packages and complete generated commit notes.
 
-## Unreleased
+## 0.5.2 - 2026-09-29
 
-- Keep the four DSH peer names for host-side module resolution, but remove their per-release version ranges so a newly published DSH prerelease is not rejected solely by plugin metadata. The compatibility checks and isolated browser-startup matrix now include DSH `0.2.0-rc.2`.
+- Give each DSH Mobile installation a stable FRP proxy name on a shared frps and report proxy-name or entry-port conflicts directly instead of waiting for a generic timeout (thanks @liudasheng for [PR #130](https://github.com/saya-ch/dsh-mobile/pull/130)). Keep that name through first-time setup and restarts, and use it in copied attach instructions.
+- Keep the four DSH peer names for host-side module resolution, but remove their per-release version ranges so a newly published DSH prerelease is not rejected solely by plugin metadata. Source-contract and isolated browser-startup checks now include DSH `0.2.0-rc.2`.
+- Synchronize Android App version metadata with the plugin; native behavior and the pairing protocol are unchanged from 0.5.1.
 
 ## 0.5.1 - 2026-09-29
 

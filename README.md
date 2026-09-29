@@ -31,14 +31,14 @@
 
 > DSH Mobile 是 DeepSeek Harness 社区插件，原生 App 仅支持 Android。
 >
-> **当前版本：0.5.1**。修复 Android 返回键，使专用移动页面的常用面板逐层返回；改进输入栏软回车与 WebView 音频权限，完善 `/mobile` 定制指引。[更新记录](CHANGELOG.md#051---2026-09-29)。
+> **当前版本：0.5.2**。共享 frps 时使用稳定的独立代理名，并明确提示代理名或端口冲突；解除 DSH 预发布版的依赖版本拦截。[更新记录](CHANGELOG.md#052---2026-09-29)。
 >
-> **升级提醒**：建议插件与 Android App 同步更新至 0.5.1；补充的 WebView 音频权限需要新版 APK。旧版 App 的既有连接方式不受插件更新影响。[兼容说明](#兼容性)。
+> **升级提醒**：插件与 Android App 可同步更新至 0.5.2。App 本次只同步版本信息；0.5.1 App 与现有配对无需重装或重新配对。[兼容说明](#兼容性)。
 
 <p align="center">
-  <a href="https://github.com/saya-ch/dsh-mobile/releases/download/v0.5.1/dsh-mobile-android-v0.5.1.apk"><img src="assets/brand/app-icon-rounded.svg" alt="DSH Mobile 安卓应用图标" width="72" height="72"></a><br>
-  <a href="https://github.com/saya-ch/dsh-mobile/releases/download/v0.5.1/dsh-mobile-android-v0.5.1.apk"><strong>下载 Android App 0.5.1</strong></a><br>
-  <sub><a href="https://github.com/saya-ch/dsh-mobile/releases/tag/v0.5.1">版本说明与校验文件</a></sub>
+  <a href="https://github.com/saya-ch/dsh-mobile/releases/download/v0.5.2/dsh-mobile-android-v0.5.2.apk"><img src="assets/brand/app-icon-rounded.svg" alt="DSH Mobile 安卓应用图标" width="72" height="72"></a><br>
+  <a href="https://github.com/saya-ch/dsh-mobile/releases/download/v0.5.2/dsh-mobile-android-v0.5.2.apk"><strong>下载 Android App 0.5.2</strong></a><br>
+  <sub><a href="https://github.com/saya-ch/dsh-mobile/releases/tag/v0.5.2">版本说明与校验文件</a></sub>
 </p>
 
 DSH Mobile 是一个 DeepSeek Harness 插件，让手机浏览器或 Android App 通过局域网，或可选的 Tailscale Funnel、cpolar、cloudflared、自建 FRP 或自有反向代理远程通道连接电脑，继续使用同一份会话、工作区、消息和工具。电脑端分别启停局域网与远程访问、分别管理配对授权；Android App 统一显示已配对电脑。插件不修改 DeepSeek Harness 源码。
@@ -218,7 +218,8 @@ Android App 用一个“已配对设备”列表同时显示多台电脑：局�
 
 代理页面为兼容部分社区插件允许嵌入 HTTP 页面；这类内容未加密，可能被篡改，浏览器也可能因混合内容策略拦截。处理敏感内容时请使用 HTTPS。通过 HTTPS 管理入口打开远程面板时，页面顶部会显示相同提醒。
 
-- 0.5.1 延续对 DSH `0.1.7-alpha.2`、`0.1.7-rc.1` 和 `0.1.7-rc.2` 的契约及启动检查，并适配 `0.2.0-rc.1`。官方 DSH Desktop `0.1.7-rc.2` 使用 `dsh-app://app/` 页面；移动访问管理入口仍要求桌面端转发的已认证 DSH 会话，不放宽普通 Web 页面的管理请求。
+- 0.5.2 不再因 DSH 版本号未列入依赖范围而阻止安装；已对 `0.2.0-rc.2` 进行源码契约、隔离配对、页面启动及工作区读取检查。未来新版本仍需实际验证。官方 DSH Desktop 的移动访问管理入口继续要求已认证的 DSH 会话，不放宽普通 Web 页面的管理请求。
+- 0.5.1 延续对 DSH `0.1.7-alpha.2`、`0.1.7-rc.1` 和 `0.1.7-rc.2` 的契约及启动检查，并适配 `0.2.0-rc.1`。官方 DSH Desktop `0.1.7-rc.2` 使用 `dsh-app://app/` 页面。
 - 网关默认只允许 DSH 内置的第一方 WebSocket 路径，包括 `/sidebar/ws/terminal`。社区侧边栏插件使用的其他路径默认拦截，通常会在诊断页显示为待处理项目；截图中的 `/sidebar/ws/agent-opens` 和 `/sidebar/ws/agent-terminals` 就属于这类需要按实际插件确认的路径。
 - 在 **连接诊断 → 第三方 WebSocket 路径** 中，只对确认过的精确路径点击 **允许**。系统不接受带查询字符串或模糊前缀的路径；不建议使用“全部允许”。已允许的路径可以随时移除，局域网和远程连接使用同一套规则。
 - 放行只代表该路径可以通过已认证、同源的 DSH Mobile 网关，不会开放任意 TCP/UDP 端口，也不会绕过设备配对。若社区插件仍然连接失败，先看诊断页的实际拦截路径，再按一条路径放行。
@@ -299,7 +300,7 @@ flowchart LR
 
 下表记录已验证的 DSH 与插件版本组合，不表示其他版本自动兼容。0.3.6 起插件不会仅凭版本号拒绝启动；升级 DSH 后若遇到移动端异常，请先核对兼容表并更新插件。历史记录见 [CHANGELOG.md](CHANGELOG.md)。
 
-未发布的开发分支保留 DSH 宿主依赖名称，但不按 DSH 版本号拦截安装。新版本仍需经过下方的源码契约与配对启动检查；不在表中的版本不代表已验证。
+0.5.2 保留 DSH 宿主依赖名称，但不按 DSH 版本号拦截安装。新版本仍需经过下方的源码契约与配对启动检查；不在表中的版本不代表已验证。
 
 ### 系统支持矩阵
 
@@ -316,7 +317,7 @@ macOS 上局域网、自建 FRP 与自有反向代理可用；三个托管组件
 
 | DSH Mobile 插件                         | 验证支持的 DeepSeek Harness 版本                             |
 | ----------------------------------------- | -------------------------------------------------------------- |
-| 待发布候选 | `0.2.0-rc.2`（源码契约、隔离配对、移动页面启动和 WebSocket 工作区读取）；延续 `0.5.1` 的已验证版本 |
+| `0.5.2` | `0.1.7-alpha.2`、`0.1.7-rc.1`、`0.1.7-rc.2`、`0.2.0-rc.1`（延续既有验证）；`0.2.0-rc.2`（源码契约、隔离配对、移动页面启动和 WebSocket 工作区读取） |
 | `0.5.1` | `0.1.7-alpha.2`、`0.1.7-rc.1`、`0.1.7-rc.2`、`0.2.0-rc.1`；官方 Desktop `0.1.7-rc.2`（桌面管理入口） |
 | `0.5.0` | `0.1.7-alpha.2`、`0.1.7-rc.1`、`0.1.7-rc.2`；官方 Desktop `0.1.7-rc.2`（桌面管理入口） |
 | `0.4.7` | `0.1.7-alpha.2`、`0.1.7-rc.1`、`0.1.7-rc.2`（源码契约、隔离配对及 WebSocket 工作区读取） |
