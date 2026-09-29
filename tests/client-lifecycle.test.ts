@@ -703,7 +703,7 @@ describe('mobile-control localization', () => {
     expect(source).toContain('createFrpAttachFrpcTomlForClipboard(attachForm, {')
     expect(source.match(/const proxyName = frpClipboardProxyName\(\)/gu)).toHaveLength(2)
     expect(source.match(/if \(proxyName === undefined\) return/gu)).toHaveLength(2)
-    expect(source).toContain("remoteStatus.textContent = t('loadingRemoteStatus')\n      loadRemote()")
+    expect(source).toMatch(/remoteStatus\.textContent = t\('loadingRemoteStatus'\)\r?\n\s+loadRemote\(\)/u)
     expect(source).not.toContain('body: JSON.stringify({ ...form, revealToken: true })')
     expect(source).toContain("t(selfSignedSelected ? 'frpAppRequirementSelfSigned' : 'frpAppRequirement')")
     expect(source).toContain('/api/mobile-access/remote/frp/attach-plan')
