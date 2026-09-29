@@ -2,7 +2,7 @@
 
 GitHub 的 [Contributors 图表](https://github.com/saya-ch/dsh-mobile/graphs/contributors) 按进入默认分支的提交自动统计，无法手动加入仅提交 issue 或 PR 提案的成员。本页按实际参与方式感谢社区成员；仓库维护者与自动依赖更新仍可在 GitHub 历史记录中查看。
 
-GitHub's Contributors graph counts commits on the default branch; issue reports and PR proposals cannot be manually added to it. This page credits community members by how they contributed, through 2026-09-28. The repository maintainer and automated dependency updates remain visible in GitHub's history.
+GitHub's Contributors graph counts commits on the default branch; issue reports and PR proposals cannot be manually added to it. This page credits community members by how they contributed, through 2026-09-29. The repository maintainer and automated dependency updates remain visible in GitHub's history.
 
 ## 已合并 PR / Merged PRs
 
@@ -14,7 +14,7 @@ GitHub's Contributors graph counts commits on the default branch; issue reports 
 | [@chintoleung](https://github.com/chintoleung) | [#104](https://github.com/saya-ch/dsh-mobile/pull/104) |
 | [@idoall](https://github.com/idoall) | [#61](https://github.com/saya-ch/dsh-mobile/pull/61), [#66](https://github.com/saya-ch/dsh-mobile/pull/66), [#67](https://github.com/saya-ch/dsh-mobile/pull/67), [#77](https://github.com/saya-ch/dsh-mobile/pull/77) |
 | [@JackRushante](https://github.com/JackRushante) | [#16](https://github.com/saya-ch/dsh-mobile/pull/16) |
-| [@liudasheng](https://github.com/liudasheng) | [#100](https://github.com/saya-ch/dsh-mobile/pull/100) |
+| [@liudasheng](https://github.com/liudasheng) | [#100](https://github.com/saya-ch/dsh-mobile/pull/100), [#130](https://github.com/saya-ch/dsh-mobile/pull/130) |
 | [@longisland-icetea](https://github.com/longisland-icetea) | [#59](https://github.com/saya-ch/dsh-mobile/pull/59), [#60](https://github.com/saya-ch/dsh-mobile/pull/60), [#63](https://github.com/saya-ch/dsh-mobile/pull/63) |
 | [@qzyqmzn](https://github.com/qzyqmzn) | [#38](https://github.com/saya-ch/dsh-mobile/pull/38), [#75](https://github.com/saya-ch/dsh-mobile/pull/75) |
 | [@Sanksu](https://github.com/Sanksu) | [#118](https://github.com/saya-ch/dsh-mobile/pull/118) |

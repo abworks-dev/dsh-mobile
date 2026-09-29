@@ -45,7 +45,7 @@ SSH 用户、端口和私钥路径只保存在当前浏览器的 `localStorage`�
 
 ## 清理 VPS
 
-本机“彻底移除 FRP”只删除电脑端的 frpc、Token 与配置，不动 VPS。清理 VPS 有两种方式，都只删除 DSH Mobile 明确拥有的文件、服务与带标记的防火墙规则：
+本机“彻底移除 FRP”只删除电脑端的 frpc、Token 与配置，不动 VPS。不含密钥的插件 `installation-id` 会保留，方便以后重连时沿用同一代理名；清理全部 DSH Mobile 私有状态时也会移除它。清理 VPS 有两种方式，都只删除 DSH Mobile 明确拥有的文件、服务与带标记的防火墙规则：
 
 1. **复制卸载脚本**：点“复制 VPS 卸载脚本”，审阅后以 root 身份在 VPS 上执行。脚本会停用并删除 frps 服务与证书续期定时器、删除配置/二进制/证书文件与 Caddy 片段、从主 Caddyfile 里删掉那一行 import（你自己的内容原样保留；文件删空时留一句占位注释）、删除带 DSH Mobile 标记的 UFW 规则。只有本次部署创建的 `dsh-mobile` 系统用户才会被删除，之前就存在的会被保留并明确告知。
 2. **一键清理**：点“清理 VPS 上的 DSH Mobile”，同样先核对主机指纹，确认后通过 pinned SSH 执行同样的脚本。
@@ -66,6 +66,8 @@ curl -v https://PUBLIC_HOST/mobile-access/discovery
 只有公网 IPv4 模式会安装 `dsh-mobile-cert-renew.timer`，该模式另查 `sudo systemctl status dsh-mobile-cert-renew.timer`。将 `PUBLIC_HOST` 换成实际域名或公网 IPv4；不加 `-k`，以便同时验证公开证书。还应从独立外部网络检查同一地址，并确认 discovery 返回当前电脑的安装标识；只在 VPS 本机成功不代表手机网络可达。
 
 本机优先看插件日志（`$DSH_HOME/mobile-access/logs/dsh-mobile.log`，JSONL，超 5 MB 轮转，自动脱敏 Token 与密钥）与面板诊断报告。Windows 杀毒软件可能隔离 frpc；如确有拦截，只为已校验的组件目录设置最小范围例外。
+
+一台 frps 被多台电脑共用时：代理名在**整台服务器**内唯一，公网入口端口同样先到先得。插件按本机安装标识注册代理名（`dsh-mobile-<安装标识前 12 位>`），不同电脑之间不会再抢同一个名字；若报「已有本机安装名对应的 FRP 代理在使用中」，说明该名字被另一台电脑占用，或本机上一次连接尚未等到 frps 心跳超时，处理后再重连；若报「入口端口已被占用」，为这台电脑换一个入口端口即可。frpc 遇到这两种冲突时并不会退出，只是入口端口从未发布，修复前面板只会显示「公网端点未能就绪」。
 
 ## 限制
 

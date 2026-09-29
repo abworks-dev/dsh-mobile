@@ -41,7 +41,7 @@ The SSH user, port, and private-key path are kept only in this browser's `localS
 
 ## Clean up the VPS
 
-The local **Remove FRP completely** action removes only the computer's managed frpc, token, and configuration; it does not touch the VPS. Server cleanup has two equivalent paths, and both remove only DSH Mobile-owned files, services, and tagged firewall rules:
+The local **Remove FRP completely** action removes only the computer's managed frpc, token, and configuration; it does not touch the VPS. The non-secret plugin `installation-id` remains so a later FRP connection keeps the same proxy name; removing all DSH Mobile private state removes that identifier too. Server cleanup has two equivalent paths, and both remove only DSH Mobile-owned files, services, and tagged firewall rules:
 
 1. **Copy the uninstall script**: select **Copy VPS uninstall script**, review it, and run it as root on the VPS. The script stops and removes the frps service and certificate-renewal timer, deletes DSH Mobile configuration, binaries, certificates, and the Caddy snippet, removes the import line from the main Caddyfile while preserving your content, and removes UFW rules carrying the DSH Mobile marker. It deletes the `dsh-mobile` system user only when this deployment created it; an existing user is kept and reported.
 2. **One-click cleanup**: select **Remove DSH Mobile from the VPS**. The panel verifies the host keys again and runs the same script over pinned SSH after confirmation.
@@ -62,6 +62,8 @@ curl -v https://PUBLIC_HOST/mobile-access/discovery
 Only public IPv4 mode installs `dsh-mobile-cert-renew.timer`; in that mode, also run `sudo systemctl status dsh-mobile-cert-renew.timer`. Replace `PUBLIC_HOST` with your actual domain or public IPv4 address. Do not add `-k`: verify the public certificate as well as the response. Check the same address from an independent external network and confirm discovery reports this computer's installation identifier; success on the VPS alone does not prove the phone's network can reach it.
 
 On the computer, start with the plugin log at `$DSH_HOME/mobile-access/logs/dsh-mobile.log` (JSONL, 5 MB rotation, tokens and keys redacted) and the panel diagnostic report. Windows antivirus software can quarantine frpc; if it does, create the smallest possible exception for the verified component directory only.
+
+When several computers share one frps, remember that proxy names are unique across the **whole server** and entry ports are first-come, first-served. The plugin registers an installation-derived name (`dsh-mobile-<first 12 characters of the installation identity>`), so two computers no longer compete for the same name. "A proxy with this installation name is already in use" means that name belongs to another computer, or to this computer's previous session before the frps heartbeat expired it; "the entry port is already occupied" means another proxy holds that port, so give this computer a different one. In both cases frpc stays alive without ever publishing the entry port, which is why the panel previously reported only "the public endpoint did not become ready".
 
 ## Limits
 

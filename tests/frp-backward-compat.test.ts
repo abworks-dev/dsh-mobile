@@ -63,18 +63,24 @@ describe('FRP default artefacts stay byte-identical to upstream', () => {
     // here would assert nothing and could never fail. The expected string keeps
     // the upstream field order and values; only the state directory is real, so
     // one byte of drift in `status()` now breaks this test.
+    //
+    // `proxyName` is the one deliberate addition: the panel rebuilds the
+    // token-bearing frpc.toml in the browser (the saved token never leaves the
+    // host), and it must register the same installation-derived proxy name the
+    // provider writes. A store constructed without one still reports the legacy
+    // fixed name, so this literal pins the default.
     const directory = await mkdtemp(join(tmpdir(), 'dsh-mobile-frp-compat-'))
     temporaryDirectories.push(directory)
     const stateRoot = join(directory, 'frp')
     const store = new FrpConfigStore(stateRoot)
     await store.initialize()
     expect(JSON.stringify(store.status())).toBe(
-      `{"configured":false,"vhostHttpPort":7080,"storagePath":${JSON.stringify(stateRoot)}}`,
+      `{"configured":false,"vhostHttpPort":7080,"storagePath":${JSON.stringify(stateRoot)},"proxyName":"dsh-mobile"}`,
     )
     await store.configure(DOMAIN_INPUT)
     expect(JSON.stringify(store.status())).toBe(
       '{"configured":true,"serverAddress":"frp.example.com","serverPort":7000,'
-      + `"publicOrigin":"https://dsh.example.com","vhostHttpPort":7080,"storagePath":${JSON.stringify(stateRoot)}}`,
+      + `"publicOrigin":"https://dsh.example.com","vhostHttpPort":7080,"storagePath":${JSON.stringify(stateRoot)},"proxyName":"dsh-mobile"}`,
     )
     // A legacy file written by the previous version must round-trip byte for byte.
     expect(await readFile(store.settingsFile, 'utf8')).toBe(`${JSON.stringify(parseFrpSettings(DOMAIN_INPUT))}\n`)

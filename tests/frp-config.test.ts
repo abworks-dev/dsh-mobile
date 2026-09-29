@@ -6,9 +6,11 @@ import {
   FrpConfigStore,
   createFrpServerTemplate,
   createFrpcToml,
+  frpProxyName,
   mergeSavedFrpSettings,
   mergeSavedFrpTarget,
   parseFrpSettings,
+  validateFrpProxyName,
 } from '../src/frp-config.js'
 
 const temporaryDirectories: string[] = []
@@ -191,5 +193,55 @@ describe('attach mode and entry TLS settings', () => {
     expect(store.status()).toMatchObject({ mode: 'attach', entryTls: 'self-signed', publicPort: 34_443 })
     expect(JSON.stringify(store.status())).not.toContain(input.token)
     await store.purge()
+  })
+})
+
+/*
+ * Shared-frps proxy naming.
+ *
+ * frps accepts one proxy per name across every client, so the fixed upstream
+ * name let any other DSH installation own `dsh-mobile` first: frpc then kept
+ * running without publishing the entry port and the start-up self-check ended in
+ * `frp_start_timeout`. The product therefore derives the name from the
+ * installation identity while the legacy default stays available to callers that
+ * cannot supply one.
+ */
+describe('FRP proxy naming', () => {
+  it('derives a stable installation name and validates its inputs', () => {
+    expect(frpProxyName('0123456789abcdef'.repeat(4))).toBe('dsh-mobile-0123456789ab')
+    // The same installation keeps its name across restarts, so its own stale
+    // registration is the only conflict it can ever meet.
+    expect(frpProxyName('a'.repeat(64))).toBe(frpProxyName('a'.repeat(64)))
+    expect(frpProxyName('a'.repeat(64))).not.toBe(frpProxyName('b'.repeat(64)))
+    for (const invalid of ['', 'not-a-fingerprint', 'A'.repeat(64), 'a'.repeat(63), 'a'.repeat(65), 42, undefined]) {
+      expect(() => frpProxyName(invalid as unknown as string)).toThrow('frp_instance_id_invalid')
+    }
+  })
+
+  it('rejects names frps could not register as one token', () => {
+    expect(validateFrpProxyName('dsh-mobile-0123456789ab')).toBe('dsh-mobile-0123456789ab')
+    for (const invalid of ['', 'has space', 'quote"d', 'a/b', 'line\nbreak', 'x'.repeat(129), 7, undefined]) {
+      expect(() => validateFrpProxyName(invalid as unknown as string)).toThrow('frp_proxy_name_invalid')
+    }
+  })
+
+  it('writes the derived name into frpc.toml and reports it to the panel', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'dsh-mobile-frp-name-'))
+    temporaryDirectories.push(directory)
+    const settings = parseFrpSettings(input)
+    expect(createFrpcToml(settings, 42123, 'dsh-mobile-abc123abc123'))
+      .toContain('name = "dsh-mobile-abc123abc123"')
+    // The legacy default is what the exported API and the compatibility gate pin.
+    expect(createFrpcToml(settings, 42123)).toContain('name = "dsh-mobile"')
+    expect(() => createFrpcToml(settings, 42123, 'bad name')).toThrow('frp_proxy_name_invalid')
+
+    const store = new FrpConfigStore(join(directory, 'frp'), 'dsh-mobile-abc123abc123')
+    await store.initialize()
+    await store.configure(input)
+    expect(store.status().proxyName).toBe('dsh-mobile-abc123abc123')
+    await store.writeRuntimeConfig(42123)
+    const written = await readFile(store.runtimeConfigFile, 'utf8')
+    expect(written).toContain('name = "dsh-mobile-abc123abc123"')
+    expect(() => new FrpConfigStore(join(directory, 'other'), 'bad name')).toThrow('frp_proxy_name_invalid')
   })
 })

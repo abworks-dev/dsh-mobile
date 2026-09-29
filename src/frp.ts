@@ -17,6 +17,34 @@ const DISCOVERY_RETRY_MS = 1_000
 const MAX_DISCOVERY_BYTES = 16 * 1024
 const VHOST_PROBE_TIMEOUT_MS = 1_500
 const INGRESS_CERT_CHECK_MS = 12 * 60 * 60_000
+/** Cap on the frpc output retained for start-failure diagnosis. */
+const MAX_CLIENT_DIAGNOSIS_CHARS = 8 * 1024
+
+/**
+ * frpc start-failure signatures, most specific first.
+ *
+ * frpc reports a refused proxy registration as a warning and keeps running, so
+ * without this mapping the controller only ever saw a healthy child process and
+ * an entry port nobody published: the start-up self-check burned its full 45s
+ * deadline and reported `frp_start_timeout` ("the public endpoint did not become
+ * ready"), which sent users looking at DNS, Caddy, and firewalls.
+ *
+ * The two real conflicts are a proxy name another client of the same frps holds
+ * and an entry port another proxy already owns. Both are reported directly.
+ */
+const CLIENT_FAILURE_CODES: readonly (readonly [RegExp, string])[] = Object.freeze([
+  [/proxy name \[[^\]]*\] is already in use/iu, 'frp_proxy_name_in_use'],
+  [/(?:remote )?port (?:\[?[0-9]+\]? )?already (?:used|in use)/iu, 'frp_remote_port_in_use'],
+  [/start error:/iu, 'frp_proxy_start_failed'],
+])
+
+/**
+ * Stable error code for a chunk of frpc output, or undefined when it reports no
+ * start failure. Exported for the conflict tests.
+ */
+export function frpcDiagnosisCode(output: string): string | undefined {
+  return CLIENT_FAILURE_CODES.find(([pattern]) => pattern.test(output))?.[1]
+}
 
 /** Product-facing states for the restricted self-hosted FRP transport. */
 export type FrpState = 'off' | 'unavailable' | 'starting' | 'connecting' | 'ready' | 'error'
@@ -471,13 +499,35 @@ export class FrpController implements RemoteProviderController {
       return
     }
     this.child = child
+    // frpc can keep running after a refused proxy registration. Buffer each
+    // stream separately so a partial `start error:` chunk cannot hide the more
+    // specific name or port conflict later on the same line.
+    const pending = { stdout: '', stderr: '' }
+    let diagnosed = false
+    const inspectLine = (line: string): void => {
+      if (diagnosed) return
+      const code = frpcDiagnosisCode(line)
+      if (code === undefined) return
+      diagnosed = true
+      void this.enqueue(() => this.failGeneration(generation, code))
+    }
+    const inspect = (stream: 'stdout' | 'stderr', chunk: Buffer | string): void => {
+      if (diagnosed) return
+      const lines = (pending[stream] + String(chunk)).split(/\r\n|\r|\n/u)
+      pending[stream] = (lines.pop() ?? '').slice(-MAX_CLIENT_DIAGNOSIS_CHARS)
+      for (const line of lines) inspectLine(line.slice(-MAX_CLIENT_DIAGNOSIS_CHARS))
+    }
+    child.stdout.on('data', chunk => inspect('stdout', chunk))
+    child.stderr.on('data', chunk => inspect('stderr', chunk))
     child.stdout.resume()
     child.stderr.resume()
     child.once('error', () => { void this.enqueue(() => this.failGeneration(generation, 'frp_launch_failed')) })
     child.once('close', code => {
+      inspectLine(pending.stdout)
+      inspectLine(pending.stderr)
       if (generation !== this.generation || this.child !== child) return
       this.child = undefined
-      if (this.enabled) void this.enqueue(() => this.failGeneration(generation, code === 0 ? 'frp_stopped' : 'frp_exited'))
+      if (this.enabled && !diagnosed) void this.enqueue(() => this.failGeneration(generation, code === 0 ? 'frp_stopped' : 'frp_exited'))
     })
     this.publish({ enabled: true, state: 'connecting', origin: entryOrigin })
     // The probe target is derived from the effective entry *before* the abort
@@ -491,6 +541,10 @@ export class FrpController implements RemoteProviderController {
       return
     }
     if (generation !== this.generation || !this.enabled) return
+    // A conflict reported while the ingress material was being resolved already
+    // failed this generation; continuing would overwrite that diagnosis with the
+    // generic deadline code.
+    if (diagnosed) return
     const controller = new AbortController()
     this.startupAbort = controller
     // The self-check must compare the public advertisement against the identity

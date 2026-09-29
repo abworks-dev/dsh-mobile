@@ -56,6 +56,7 @@ import {
 import { FrpComponentManager, type FrpComponentStatus } from './frp-component.js'
 import {
   FrpConfigStore,
+  frpProxyName,
   isFrpSelfSignedIngress,
   mergeSavedFrpSettings,
   mergeSavedFrpTarget,
@@ -72,6 +73,7 @@ import { OriginConfigStore, parseOriginSettings, validateOriginListenPort, type 
 import { OriginController } from './origin-proxy.js'
 import { PluginReleaseManager, releaseProfileDirectory } from './release-update.js'
 import { installMobileFileLogger } from './file-logger.js'
+import { loadOrCreateInstallationId } from './installation-id.js'
 import {
   configuredRemoteProvider,
   JsonRemoteProviderStore,
@@ -496,7 +498,10 @@ export async function apply(ctx: Context, config: PluginConfig): Promise<void> {
   await cloudflaredComponent.initialize()
   const frpComponent = new FrpComponentManager({ stateDirectory })
   await frpComponent.initialize()
-  const frpConfig = new FrpConfigStore(join(remoteDirectory, 'frp', 'config'))
+  // FRP registration persists across LAN setup changes, while the gateway's
+  // pairing identity may change when an unconfigured setup becomes managed.
+  const frpIdentity = await loadOrCreateInstallationId(join(stateDirectory, 'installation-id'))
+  const frpConfig = new FrpConfigStore(join(remoteDirectory, 'frp', 'config'), frpProxyName(frpIdentity))
   await frpConfig.initialize()
   const originConfig = new OriginConfigStore(join(remoteDirectory, 'origin', 'config'))
   await originConfig.initialize()
@@ -1030,7 +1035,9 @@ export async function apply(ctx: Context, config: PluginConfig): Promise<void> {
           const settings = mergeSavedFrpSettings(body, frpConfig.settings())
           // This route is callable by any same-origin client script. Never return
           // the saved token, even if a caller asks for an unmasked preview.
-          const options = { configFile: frpConfig.runtimeConfigFile }
+          // The preview must carry the same proxy name the provider writes, so a
+          // copied frpc.toml registers exactly like the managed one.
+          const options = { configFile: frpConfig.runtimeConfigFile, proxyName: frpConfig.proxyName }
           logger.info('frp attach plan requested mode=%s entryTls=%s vhostHttpPort=%d',
             settings.mode ?? 'deploy', settings.entryTls ?? 'public-ip-cert', resolveFrpVhostHttpPort(settings))
           sendJson(response, 200, {

@@ -92,6 +92,8 @@ curl -k -sS -o /dev/null -w '%{http_code}\n' https://YOUR_PUBLIC_IPV4:33080/mobi
 | `frp_ingress_ca_expired` | 自签 CA 已过期，插件不会静默替换受信任 CA；重新生成 CA 后，手机须核对新指纹并重新配对。 |
 | 手机浏览器提示证书不受信任 | 自签档的正常现象；请在 App 内配对使用 |
 | 自检显示「公网入口不可达」 | 端口未放行、frpc 未启动，或 frps 未把该 `remotePort` 转发出来 |
+| `frp_proxy_name_in_use` | frps 的代理名在**整台服务器**上唯一。本机安装名（`dsh-mobile-<安装标识前 12 位>`）已被占用：多半是另一台 DSH 电脑，或本机上一次连接尚未等到 frps 心跳超时。到那台机器上关闭自建 FRP，或在 frps 上移除该代理。frpc 此时仍在运行、只是入口端口没被发布，所以在此之前只会表现为「公网端点未能就绪」。 |
+| `frp_remote_port_in_use` | 同一台 frps 上该入口端口已被别的代理占用（端口先到先得）。给这台电脑换一个 `publicPort`，并在防火墙/安全组放行。 |
 | App 报「连接到另一台 DSH」 | 公网入口指向了别的 DSH：检查 `remotePort` 与 frpc 是否在本机运行 |
 
 ## 与其他通道的关系
@@ -99,4 +101,4 @@ curl -k -sS -o /dev/null -w '%{http_code}\n' https://YOUR_PUBLIC_IPV4:33080/mobi
 - **`origin` 自有反代通道**（默认 3444）是另一条独立路径，TLS 由**你自己的外部反代**终止，与本档互不影响。
 - **deploy 模式**（由插件安装 frps + Caddy）保持不变，仍需要 SSH；attach 模式**零 SSH**。
 
-本机的「彻底移除 FRP」只清理插件管理的 frpc、私有配置和自签入口材料，不会删除或重启 VPS 上你已有的 frps、Caddy、证书或防火墙规则。托管部署及其独立的服务器清理步骤见[自建 FRP 使用指南](SELF_HOSTED_FRP.md)。
+本机的「彻底移除 FRP」只清理插件管理的 FRP 文件，包括 frpc、私有配置和自签入口材料。不含密钥的插件 `installation-id` 会保留，以便以后重连时沿用同一代理名；清理全部 DSH Mobile 私有状态时也会移除它。此操作不会删除或重启 VPS 上你已有的 frps、Caddy、证书或防火墙规则。托管部署及其独立的服务器清理步骤见[自建 FRP 使用指南](SELF_HOSTED_FRP.md)。

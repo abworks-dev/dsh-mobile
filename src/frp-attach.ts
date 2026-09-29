@@ -1,6 +1,7 @@
 import { isIP } from './ip.js'
 import {
   createFrpcToml,
+  FRP_DEFAULT_PROXY_NAME,
   isFrpSelfSignedIngress,
   resolveFrpMode,
   resolveFrpPublicPort,
@@ -36,6 +37,14 @@ export interface FrpAttachOptions {
   readonly certDir?: string
   /** Absolute path of the plugin-written frpc.toml, used for the `frpc verify` self-check. */
   readonly configFile?: string
+  /**
+   * Proxy name the previewed frpc.toml registers.
+   *
+   * Defaults to the legacy fixed name; the panel and the provider pass the
+   * installation-derived {@link frpProxyName} so a preview never describes a
+   * registration that would collide on a shared frps.
+   */
+  readonly proxyName?: string
   /** Loopback port the gateway will listen on; only a placeholder inside the copied runbook. */
   readonly localPort?: number
   /**
@@ -93,7 +102,11 @@ export function redactFrpcTomlToken(frpcToml: string): string {
  * the provider writes stays byte-for-byte identical to the upstream output.
  */
 export function createFrpAttachFrpcToml(settings: FrpSettings, options: FrpAttachOptions = {}): string {
-  const frpcToml = createFrpcToml(settings, attachLocalPort(options))
+  const frpcToml = createFrpcToml(
+    settings,
+    attachLocalPort(options),
+    options.proxyName ?? FRP_DEFAULT_PROXY_NAME,
+  )
   return options.revealToken === true ? frpcToml : redactFrpcTomlToken(frpcToml)
 }
 

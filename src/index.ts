@@ -92,11 +92,13 @@ export type { BlockedUpgradePathEntry } from './websocket-paths.js'
 export type { FrpComponentStatus } from './frp-component.js'
 export {
   DEFAULT_VHOST_HTTP_PORT,
+  FRP_DEFAULT_PROXY_NAME,
   FRP_DEFAULT_PUBLIC_PORT,
   FRP_RESERVED_PORTS,
   FrpConfigStore,
   createFrpServerTemplate,
   createFrpcToml,
+  frpProxyName,
   isFrpSelfSignedIngress,
   mergeSavedFrpSettings,
   mergeSavedFrpTarget,
@@ -107,6 +109,7 @@ export {
   resolveFrpVhostHttpPort,
   validateFrpEntryTls,
   validateFrpMode,
+  validateFrpProxyName,
   validateFrpPublicOrigin,
   validateFrpPublicPort,
   validateFrpServerAddress,
