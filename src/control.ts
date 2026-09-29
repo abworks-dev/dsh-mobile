@@ -113,6 +113,20 @@ export function parseMobileAccessControlState(value: unknown): MobileAccessContr
 export class JsonMobileAccessControlStore implements MobileAccessControlStore {
   constructor(private readonly file: string, private readonly initiallyEnabled: boolean) {}
 
+  /** Avoid writing an absent already-disabled state without changing recovery of existing files. */
+  async disableIfPresent(): Promise<void> {
+    try {
+      await lstat(this.file)
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        if (this.initiallyEnabled) await this.save({ version: 1, enabled: false })
+        return
+      }
+      throw error
+    }
+    await this.save({ version: 1, enabled: false })
+  }
+
   async load(): Promise<MobileAccessControlState> {
     let stat
     try {

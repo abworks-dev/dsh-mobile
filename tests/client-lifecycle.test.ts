@@ -25,7 +25,9 @@ import {
   failClosedExtensionGenerationReplacement,
   handleMissingExtensionManifest,
   installDshLanguageBoundSurface,
+  installMobileNativeBack,
   MOBILE_CONTROL_MESSAGES,
+  mobileBackBlockedMessage,
   normalizeDiagnosticOverall,
   normalizeDiagnosticStatus,
   parseMobileExtensionManifest,
@@ -35,6 +37,7 @@ import {
   registerUniqueDisposable,
   renderDiagnosticPayloadSafely,
   selectMobileControlLocale,
+  setMobileSurfaceOpen,
   parseMobileRemoteProvider,
   startExtensionChangeStream,
   startLifecycleRefreshScheduler,
@@ -50,9 +53,207 @@ class FakeWindow extends EventTarget {
   clearTimeout = ((id: number) => globalThis.clearTimeout(id)) as Window['clearTimeout']
 }
 
+class BackNode {
+  hidden = false
+  inert = false
+  display = 'block'
+  visibility = 'visible'
+  rects = 1
+  parentElement: BackNode | null = null
+  readonly children: BackNode[] = []
+  readonly attributes = new Map<string, string>()
+  readonly dataset: Record<string, string> = {}
+  clicks = 0
+  onClick?: () => void
+
+  constructor(readonly tagName = 'DIV', private readonly root = false) {}
+
+  get isConnected(): boolean { return this.root || this.parentElement?.isConnected === true }
+  get firstElementChild(): BackNode | null { return this.children[0] ?? null }
+  get lastElementChild(): BackNode | null { return this.children.at(-1) ?? null }
+  getClientRects(): readonly object[] { return this.rects > 0 ? [{}] : [] }
+  getAttribute(name: string): string | null { return this.attributes.get(name) ?? null }
+  setAttribute(name: string, value: string): void { this.attributes.set(name, value) }
+  append(child: BackNode): void {
+    if (child.parentElement !== null) child.parentElement.children.splice(child.parentElement.children.indexOf(child), 1)
+    child.parentElement = this
+    this.children.push(child)
+  }
+  remove(): void {
+    if (this.parentElement === null) return
+    this.parentElement.children.splice(this.parentElement.children.indexOf(this), 1)
+    this.parentElement = null
+  }
+  closest(_selector: string): BackNode | null {
+    for (let node: BackNode | null = this; node !== null; node = node.parentElement) {
+      if (node.hidden || node.inert || node.getAttribute('aria-hidden') === 'true') return node
+    }
+    return null
+  }
+  click(): void { this.clicks += 1; this.onClick?.() }
+}
+
+class BackDocument extends EventTarget {
+  readonly body = new BackNode('BODY', true)
+
+  querySelectorAll(selector: string): BackNode[] {
+    const all: BackNode[] = []
+    const visit = (node: BackNode): void => { for (const child of node.children) { all.push(child); visit(child) } }
+    visit(this.body)
+    if (selector.includes('dsh-mobile-surface-placement')) {
+      return all.filter(node => node.dataset.dshMobileSurfacePlacement === 'page' || node.dataset.dshMobileSurfacePlacement === 'overlay')
+    }
+    return all.filter(node => (node.getAttribute('role') === 'dialog' && node.getAttribute('aria-modal') === 'true')
+      || node.getAttribute('role') === 'menu')
+  }
+}
+
+class BackWindow extends EventTarget {
+  getComputedStyle(node: BackNode): { display: string; visibility: string } {
+    return { display: node.display, visibility: node.visibility }
+  }
+}
+
+function backEvent(cancelable = true): Event { return new Event('dsh-mobile:native-back', { cancelable, bubbles: true }) }
+
 afterEach(() => {
   vi.useRealTimers()
   vi.unstubAllGlobals()
+})
+
+describe('mobile native Back before layout navigation', () => {
+  it('closes only visible page and overlay surfaces in visual order', () => {
+    const view = new BackWindow()
+    const page = new BackDocument()
+    const host = new BackNode()
+    page.body.append(host)
+    const action = new BackNode(); action.dataset.dshMobileSurfacePlacement = 'sidebar-action'
+    const first = new BackNode(); first.dataset.dshMobileSurfacePlacement = 'page'; first.hidden = true
+    const second = new BackNode(); second.dataset.dshMobileSurfacePlacement = 'overlay'; second.hidden = true
+    host.append(action); host.append(first); host.append(second)
+    setMobileSurfaceOpen(action as never, true)
+    expect(host.firstElementChild).toBe(action)
+    setMobileSurfaceOpen(first as never, true)
+    setMobileSurfaceOpen(second as never, true)
+    setMobileSurfaceOpen(first as never, true)
+    expect(host.lastElementChild).toBe(first)
+
+    const blocked = vi.fn()
+    const stop = installMobileNativeBack(view as never, page as never, blocked)
+    const layoutBack = vi.fn()
+    view.addEventListener('dsh-mobile:native-back', layoutBack)
+    const firstBack = backEvent()
+    view.dispatchEvent(firstBack)
+    expect(firstBack.defaultPrevented).toBe(true)
+    expect(first.hidden).toBe(true)
+    expect(second.hidden).toBe(false)
+    expect(action.hidden).toBe(false)
+    expect(layoutBack).not.toHaveBeenCalled()
+
+    const secondBack = backEvent()
+    view.dispatchEvent(secondBack)
+    expect(secondBack.defaultPrevented).toBe(true)
+    expect(second.hidden).toBe(true)
+    const unhandled = backEvent()
+    view.dispatchEvent(unhandled)
+    expect(unhandled.defaultPrevented).toBe(false)
+    expect(layoutBack).toHaveBeenCalledOnce()
+    expect(blocked).not.toHaveBeenCalled()
+    stop()
+  })
+
+  it('ignores hidden surfaces, requires a cancelable request, and removes the capture listener', () => {
+    const view = new BackWindow()
+    const page = new BackDocument()
+    const surface = new BackNode(); surface.dataset.dshMobileSurfacePlacement = 'page'
+    page.body.append(surface)
+    const blocked = vi.fn()
+    const stop = installMobileNativeBack(view as never, page as never, blocked)
+
+    const notCancelable = backEvent(false)
+    view.dispatchEvent(notCancelable)
+    expect(surface.hidden).toBe(false)
+    surface.visibility = 'hidden'
+    const hiddenBack = backEvent()
+    view.dispatchEvent(hiddenBack)
+    expect(hiddenBack.defaultPrevented).toBe(false)
+    surface.visibility = 'visible'
+    stop()
+    view.dispatchEvent(backEvent())
+    expect(surface.hidden).toBe(false)
+  })
+
+  it('uses the direct presentation mask to close a DSH dialog, not a dialog action', () => {
+    const view = new BackWindow()
+    const page = new BackDocument()
+    const wrapper = new BackNode(); wrapper.setAttribute('role', 'presentation')
+    const mask = new BackNode(); mask.setAttribute('aria-hidden', 'true')
+    const dialog = new BackNode(); dialog.setAttribute('role', 'dialog'); dialog.setAttribute('aria-modal', 'true')
+    const action = new BackNode('BUTTON')
+    mask.onClick = () => { wrapper.remove() }
+    page.body.append(wrapper); wrapper.append(mask); wrapper.append(dialog); dialog.append(action)
+    const blocked = vi.fn()
+    const stop = installMobileNativeBack(view as never, page as never, blocked)
+    const event = backEvent()
+    view.dispatchEvent(event)
+    expect(event.defaultPrevented).toBe(true)
+    expect(mask.clicks).toBe(1)
+    expect(wrapper.isConnected).toBe(false)
+    expect(action.clicks).toBe(0)
+    expect(blocked).not.toHaveBeenCalled()
+    stop()
+  })
+
+  it('uses only the single visible DSH menu outside-pointerdown path', () => {
+    const view = new BackWindow()
+    const page = new BackDocument()
+    const menu = new BackNode(); menu.setAttribute('role', 'menu'); menu.setAttribute('data-menu-material', 'translucent')
+    page.body.append(menu)
+    const outside = vi.fn()
+    page.addEventListener('pointerdown', outside)
+    const blocked = vi.fn()
+    const stop = installMobileNativeBack(view as never, page as never, blocked)
+    const event = backEvent()
+    view.dispatchEvent(event)
+    expect(event.defaultPrevented).toBe(true)
+    expect(outside).toHaveBeenCalledOnce()
+    expect(blocked).not.toHaveBeenCalled()
+
+    const otherMenu = new BackNode(); otherMenu.setAttribute('role', 'menu')
+    page.body.append(otherMenu)
+    view.dispatchEvent(backEvent())
+    expect(outside).toHaveBeenCalledOnce()
+    expect(blocked).toHaveBeenCalledOnce()
+    stop()
+  })
+
+  it('holds unknown dialogs and menus above the layout with localized feedback', () => {
+    const view = new BackWindow()
+    const page = new BackDocument()
+    const unknown = new BackNode(); unknown.setAttribute('role', 'dialog'); unknown.setAttribute('aria-modal', 'true')
+    const button = new BackNode('BUTTON'); unknown.append(button); page.body.append(unknown)
+    const blocked = vi.fn()
+    const stop = installMobileNativeBack(view as never, page as never, blocked)
+    const layoutBack = vi.fn()
+    view.addEventListener('dsh-mobile:native-back', layoutBack)
+    const event = backEvent()
+    view.dispatchEvent(event)
+    expect(event.defaultPrevented).toBe(true)
+    expect(button.clicks).toBe(0)
+    expect(blocked).toHaveBeenCalledOnce()
+    expect(layoutBack).not.toHaveBeenCalled()
+    unknown.remove()
+    const menu = new BackNode(); menu.setAttribute('role', 'menu'); page.body.append(menu)
+    const menuBack = backEvent()
+    view.dispatchEvent(menuBack)
+    expect(menuBack.defaultPrevented).toBe(true)
+    expect(blocked).toHaveBeenCalledTimes(2)
+    expect(layoutBack).not.toHaveBeenCalled()
+    expect(mobileBackBlockedMessage('en')).toBe('Close the open panel first.')
+    expect(mobileBackBlockedMessage('it')).toBe('Chiudi prima il pannello aperto.')
+    expect(mobileBackBlockedMessage('zh')).toBe('请先关闭当前弹层。')
+    stop()
+  })
 })
 
 describe('mobile-control localization', () => {

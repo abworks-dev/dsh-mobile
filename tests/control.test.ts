@@ -69,6 +69,13 @@ describe('mobile-access control state', () => {
     await writeFile(file, '{"version":1,"enabled":false,"extra":true}\n')
     await expect(new JsonMobileAccessControlStore(file, false).load()).rejects.toThrow(/unsupported format/)
   })
+
+  it('persists disabled state when an absent provider would otherwise start by default', async () => {
+    const file = await controlFile()
+    const store = new JsonMobileAccessControlStore(file, true)
+    await store.disableIfPresent()
+    await expect(store.load()).resolves.toEqual({ version: 1, enabled: false })
+  })
 })
 
 describe('MobileAccessGatewayController', () => {

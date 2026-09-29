@@ -2,10 +2,10 @@ import { Context } from '@deepseek-ai/cordis'
 import type { WebRoute, WebServer } from '@deepseek-ai/dsh-host-webserver'
 import type { CommandDefinition } from '@deepseek-ai/dsh-commands'
 import { createServer, request as requestHttp, type IncomingMessage } from 'node:http'
-import { lstat, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { lstat, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { generate } from 'selfsigned'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Config, parseGatewayConfig, type PluginConfig } from '../src/config.js'
@@ -537,6 +537,30 @@ describe('stock DSH lifecycle', () => {
     expect(JSON.parse(lan.body)).toEqual({ running: false })
   })
 
+  it('does not create control files for remote providers that were never enabled', async () => {
+    const mounted = await mount()
+    for (const provider of ['cpolar', 'cloudflared', 'frp', 'origin']) {
+      await expect(lstat(join(mounted.directory, 'remote', provider, 'control.json')))
+        .rejects.toMatchObject({ code: 'ENOENT' })
+    }
+  })
+
+  it.each([
+    { kind: 'enabled', contents: '{"version":1,"enabled":true}' },
+    { kind: 'malformed', contents: 'invalid JSON' },
+    { kind: 'oversized', contents: 'x'.repeat(4097) },
+  ])('disables an existing $kind nonselected provider before initialization', async ({ contents }) => {
+    const directory = await mkdtemp(join(tmpdir(), 'dsh-mobile-stale-remote-'))
+    temporaryDirectories.push(directory)
+    const file = join(directory, 'remote', 'cpolar', 'control.json')
+    await mkdir(dirname(file), { recursive: true })
+    await writeFile(file, contents)
+    const mounted = await mount(false, 3080, { stateFile: join(directory, 'devices.json') })
+    expect(JSON.parse(await readFile(file, 'utf8'))).toEqual({ version: 1, enabled: false })
+    const status = await invoke(mounted.route, 'GET', '/api/mobile-access/remote/control')
+    expect(JSON.parse(status.body)).toMatchObject({ provider: 'tailscale', providers: { cpolar: { running: false, state: 'off' } } })
+  })
+
   it('runs and purges the origin independently of LAN while keeping shared remote pairings', async () => {
     const mounted = await mount(true)
     const lanBefore = JSON.parse((await invoke(mounted.route, 'GET', '/api/mobile-access/lan/control')).body)
@@ -654,7 +678,7 @@ describe('stock DSH lifecycle', () => {
     const mounted = await mount()
     expect(mounted.command).toMatchObject({
       name: 'mobile',
-      description: expect.any(String),
+      description: '定制手机界面或添加电脑能力',
       input: { hint: expect.any(String) },
     })
     const steered: { text: string; source: unknown }[] = []

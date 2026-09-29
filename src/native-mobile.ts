@@ -438,6 +438,67 @@ export function drawerScrimVisible(sidebarCollapsed: boolean, overlayActive: boo
   return !sidebarCollapsed && overlayActive
 }
 
+interface StockMobileBackLayers {
+  readonly detailsOpen: boolean
+  readonly drawerOpen: boolean
+  readonly mainPanelOpen: boolean
+}
+
+interface StockMobileBackActions {
+  closeDetails(): void
+  closeDrawer(): void
+  closeMainPanel(): void
+}
+
+/** Let the stock page close one visible layer before Android navigates its WebView. */
+export function installStockMobileBack(
+  view: Window,
+  current: () => StockMobileBackLayers | null,
+  actions: StockMobileBackActions,
+): () => void {
+  const onBack = (event: Event): void => {
+    if (!event.cancelable || event.defaultPrevented) return
+    const layers = current()
+    if (layers === null) return
+    if (layers.detailsOpen) {
+      event.preventDefault()
+      actions.closeDetails()
+    } else if (layers.drawerOpen) {
+      event.preventDefault()
+      actions.closeDrawer()
+    } else if (layers.mainPanelOpen) {
+      event.preventDefault()
+      actions.closeMainPanel()
+    }
+  }
+  view.addEventListener('dsh-mobile:native-back', onBack)
+  return () => { view.removeEventListener('dsh-mobile:native-back', onBack) }
+}
+
+interface StockLayoutBackControl {
+  closeRightbar?: () => void
+  selectPanel?: (panelId: null) => void
+  panelInfo?: { getSnapshot?: () => unknown }
+}
+
+function stockLayoutBackControl(value: unknown): StockLayoutBackControl | undefined {
+  return typeof value === 'object' && value !== null ? value as StockLayoutBackControl : undefined
+}
+
+/** Whether the stock layout can return from a selected main panel. */
+export function stockMainPanelOpen(value: unknown): boolean {
+  const layout = stockLayoutBackControl(value)
+  if (typeof layout?.selectPanel !== 'function' || typeof layout.panelInfo?.getSnapshot !== 'function') return false
+  const snapshot = layout.panelInfo.getSnapshot()
+  return typeof snapshot === 'object' && snapshot !== null
+    && typeof (snapshot as { activePanelId?: unknown }).activePanelId === 'string'
+}
+
+interface NativeMobileBackServices {
+  getLayout(): unknown
+  getSidebarRight(): unknown
+}
+
 interface SoftEnterContext {
   readonly nativeState: { readonly imeVisible: boolean; readonly noHardwareKeyboard: boolean } | null | undefined
   readonly editable: boolean
@@ -512,7 +573,7 @@ export function isComposerMediaOriginCurrent(
 }
 
 /** Add mobile semantics without replacing feature trees. */
-export function installNativeMobileSurface(): () => void {
+export function installNativeMobileSurface(backServices: NativeMobileBackServices): () => void {
   document.documentElement.classList.add('dsh-native-mobile-active')
   const browserLanguages = navigator.languages.length > 0 ? navigator.languages : [navigator.language]
   const language = resolveNativeMobileLanguage(document.documentElement.lang, browserLanguages)
@@ -1118,6 +1179,34 @@ export function installNativeMobileSurface(): () => void {
   overlayQuery.addEventListener('change', schedule)
   backdrop.addEventListener('click', () => { if (sidebar?.dataset.open === 'true') toggle?.click() })
   sync()
+  const stopStockBack = installStockMobileBack(window, () => {
+    if (frame?.isConnected !== true) return null
+    const lastColumn = frame.style.gridTemplateColumns.trim().split(/\s+/).at(-1)
+    return {
+      detailsOpen: overlayQuery.matches && lastColumn !== undefined && lastColumn !== ''
+        && lastColumn !== '0px' && lastColumn !== '0',
+      drawerOpen: overlayQuery.matches && sidebarRoot?.isConnected === true
+        && toggle?.isConnected === true && !classToken(sidebarRoot, '_collapsed'),
+      mainPanelOpen: stockMainPanelOpen(backServices.getLayout()),
+    }
+  }, {
+    closeDetails: () => {
+      const layout = stockLayoutBackControl(backServices.getLayout())
+      if (typeof layout?.closeRightbar !== 'function') return
+      const sidebarRight = backServices.getSidebarRight()
+      if (typeof sidebarRight === 'object' && sidebarRight !== null) {
+        const control = sidebarRight as { isExpanded?: () => boolean; toggleExpanded?: () => void }
+        if (typeof control.isExpanded === 'function' && typeof control.toggleExpanded === 'function'
+          && control.isExpanded()) control.toggleExpanded()
+      }
+      layout.closeRightbar()
+    },
+    closeDrawer: () => { toggle?.click() },
+    closeMainPanel: () => {
+      const layout = stockLayoutBackControl(backServices.getLayout())
+      if (typeof layout?.selectPanel === 'function') layout.selectPanel(null)
+    },
+  })
   const disposeTaskWatcher = installTaskCompletionWatcher({
     // Current gateways announce exact root turn completion. The DOM watcher
     // remains only for explicit pending-input cards, avoiding false completion
@@ -1137,6 +1226,7 @@ export function installNativeMobileSurface(): () => void {
   })
   return () => {
     disposed = true
+    stopStockBack()
     disposeTaskWatcher()
     mediaRequestGeneration += 1
     mediaPickerAbortController.abort()

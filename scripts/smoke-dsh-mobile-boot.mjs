@@ -6,6 +6,9 @@ import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
 
 const repository = fileURLToPath(new URL('..', import.meta.url))
+const mobileRoot = process.env.DSH_BOOT_SMOKE_MOBILE_ROOT === undefined
+  ? repository
+  : resolve(process.env.DSH_BOOT_SMOKE_MOBILE_ROOT)
 const dshBin = process.env.DSH_BOOT_SMOKE_BIN
   ?? fileURLToPath(new URL('../node_modules/@deepseek-ai/dsh/lib/bin.js', import.meta.url))
 const injectedFailure = process.argv.includes('--negative-control')
@@ -95,7 +98,7 @@ async function createProfile(root) {
   await writeFile(join(profile, 'package.json'), JSON.stringify({
     name: 'dsh-profile-web',
     private: true,
-    dependencies: { 'dsh-mobile': `file:${repository}` },
+    dependencies: { 'dsh-mobile': `file:${mobileRoot}` },
     dsh: { profile: { bundles: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', 'dsh-mobile'] } },
   }, null, 2) + '\n')
   await writeFile(join(profile, 'cordis.patch.yml'), JSON.stringify([{
@@ -115,7 +118,7 @@ async function createProfile(root) {
     },
   }]) + '\n')
   await writeFile(join(profile, 'pnpm-workspace.yaml'), 'packages:\n  - .\n\nnodeLinker: hoisted\nautoInstallPeers: false\n')
-  await symlink(repository, join(profile, 'node_modules', 'dsh-mobile'), process.platform === 'win32' ? 'junction' : 'dir')
+  await symlink(mobileRoot, join(profile, 'node_modules', 'dsh-mobile'), process.platform === 'win32' ? 'junction' : 'dir')
   await writeFile(join(mobileState, 'setup.json'), JSON.stringify({
     version: 1,
     listenHost: '127.0.0.1',
@@ -192,19 +195,25 @@ async function inspectBrowser(baseUrl, logs) {
     const stockBatches = await desktop.evaluate(() => window.__DSH_BOOT__?.batches ?? [])
     const control = await desktop.evaluate(async () => {
       const response = await fetch('/api/mobile-access/lan/control')
-      return { status: response.status, body: await response.json() }
+      const text = await response.text()
+      let body
+      try { body = JSON.parse(text) } catch { body = undefined }
+      return { status: response.status, body }
     })
-    if (control.status !== 200 || control.body.running !== true || typeof control.body.origin !== 'string') {
-      throw new Error(`Mobile plugin did not start through DSH Loader: status=${control.status} running=${String(control.body.running)}\n${logs()}`)
+    if (control.status !== 200 || control.body?.running !== true || typeof control.body?.origin !== 'string') {
+      throw new Error(`Mobile plugin did not start through DSH Loader: status=${control.status} json=${String(control.body !== undefined)}\n${logs()}`)
     }
     const pairing = await desktop.evaluate(async () => {
       const response = await fetch('/api/mobile-access/pairing/open', {
         method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}',
       })
-      return { status: response.status, body: await response.json() }
+      const text = await response.text()
+      let body
+      try { body = JSON.parse(text) } catch { body = undefined }
+      return { status: response.status, body }
     })
-    if (pairing.status !== 201 || typeof pairing.body.pairUrl !== 'string') {
-      throw new Error(`Pairing could not open: status=${pairing.status}\n${logs()}`)
+    if (pairing.status !== 201 || typeof pairing.body?.pairUrl !== 'string') {
+      throw new Error(`Pairing could not open: status=${pairing.status} json=${String(pairing.body !== undefined)}\n${logs()}`)
     }
 
     const phone = await browser.newPage({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true })
@@ -291,6 +300,51 @@ async function inspectBrowser(baseUrl, logs) {
     }
     const mobileFrontend = await phone.evaluate(() => window.__DSH_MOBILE_FRONTEND__)
     if (mobileFrontend !== 'dedicated') throw new Error('Mobile gateway did not select the dedicated frontend')
+    const back = () => phone.evaluate(() => {
+      const event = new Event('dsh-mobile:native-back', { cancelable: true })
+      window.dispatchEvent(event)
+      return event.defaultPrevented
+    })
+    const onboarding = phone.locator('[role="dialog"][aria-modal="true"]').first()
+    for (let step = 0; step < 3; step++) {
+      await onboarding.waitFor({ state: 'visible', timeout: 3_000 }).catch(() => {})
+      if (await onboarding.count() === 0) break
+      const label = await onboarding.getAttribute('aria-label')
+      const choices = await onboarding.locator('button').allTextContents()
+      const skip = choices.findIndex(value => /稍后|later|skip|not now/iu.test(value))
+      const choice = skip >= 0 ? skip : choices.length === 1 ? 0 : -1
+      if (choice < 0) throw new Error('Unexpected initial DSH dialog choices')
+      await onboarding.locator('button').nth(choice).click()
+      await phone.waitForFunction(previous => document.querySelector('[role="dialog"][aria-modal="true"]')?.getAttribute('aria-label') !== previous, label)
+    }
+    if (await back()) throw new Error('Mobile Back consumed the root conversation without an open layer')
+    const drawer = phone.locator('.dshm-drawer')
+    await drawer.locator('button[aria-label]').first().click()
+    await phone.waitForFunction(() => document.querySelector('.dshm-drawer')?.getAttribute('data-open') === 'true')
+    if (!await back()) throw new Error('Mobile Back did not consume the open drawer')
+    await phone.waitForFunction(() => document.querySelector('.dshm-drawer')?.getAttribute('data-open') === 'false')
+    await drawer.locator('button[aria-label]').first().click()
+    await phone.waitForFunction(() => document.querySelector('.dshm-drawer')?.getAttribute('data-open') === 'true')
+    await drawer.locator('button[aria-haspopup="dialog"]').first().click()
+    const settingsDialog = phone.locator('[role="dialog"][aria-modal="true"]').first()
+    await settingsDialog.waitFor({ state: 'visible' })
+    if (!await back()) throw new Error('Mobile Back did not consume the settings dialog')
+    await settingsDialog.waitFor({ state: 'detached' })
+    if (!await back()) throw new Error('Mobile Back did not consume the drawer below settings')
+    await phone.waitForFunction(() => document.querySelector('.dshm-drawer')?.getAttribute('data-open') === 'false')
+    if (await back()) throw new Error('Mobile Back consumed the conversation after settings closed')
+    const extensionBack = await phone.evaluate(() => {
+      const layer = document.createElement('section')
+      layer.dataset.dshMobileSurfacePlacement = 'overlay'
+      layer.style.cssText = 'position:fixed;inset:0;z-index:1300'
+      document.body.append(layer)
+      const event = new Event('dsh-mobile:native-back', { cancelable: true })
+      window.dispatchEvent(event)
+      const result = event.defaultPrevented && layer.hidden
+      layer.remove()
+      return result
+    })
+    if (!extensionBack) throw new Error('Mobile Back did not close a visible extension overlay')
     console.log(`Mobile client mounted through DSH Loader and read ${String(workspace.workspaces)} Workspaces over /api/remote.mux (${String(plan.entries.length)} plugin entries, ${Date.now() - startedAt} ms)`)
   } finally {
     await browser.close()
@@ -298,7 +352,7 @@ async function inspectBrowser(baseUrl, logs) {
 }
 
 async function main() {
-  await readFile(join(repository, 'lib', 'index.mjs'))
+  await readFile(join(mobileRoot, 'lib', 'index.mjs'))
   await readFile(dshBin)
   const root = await mkdtemp(join(tmpdir(), 'dsh-mobile-boot-smoke-'))
   let dsh

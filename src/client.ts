@@ -35,6 +35,7 @@ export function parseMobileRemoteProvider(value: unknown): MobileRemoteProvider 
 interface ClientContext {
   effect(effect: () => void | (() => void), label?: string): void
   get(name: 'connection'): MobileConnectionHandle
+  get(name: string): unknown
   slots: {
     inject(key: string, callback: () => (() => void)): () => void
     register<Props>(options: { name: string; id: string; order?: number; label?: string }, component: (props: Props) => unknown): () => void
@@ -54,6 +55,75 @@ interface MobileExtensionContext {
 
 type MobileExtensionMount = (context: MobileExtensionContext) => void | (() => void)
 type MobileSurfacePlacement = 'page' | 'sidebar-action' | 'header-action' | 'composer-dock' | 'settings-section' | 'overlay'
+
+/**
+ * Set a surface's visibility; opening a page or overlay brings it to the front.
+ * @param container - the registered surface element.
+ * @param open - whether to show it.
+ */
+export function setMobileSurfaceOpen(container: HTMLElement, open: boolean): void {
+  container.hidden = !open
+  if (open && container.isConnected
+    && (container.dataset.dshMobileSurfacePlacement === 'page' || container.dataset.dshMobileSurfacePlacement === 'overlay')) {
+    container.parentElement?.append(container)
+  }
+}
+
+function visibleBackLayer(view: Window, element: HTMLElement): boolean {
+  if (!element.isConnected || element.hidden || element.closest('[hidden],[inert],[aria-hidden="true"]') !== null) return false
+  const style = view.getComputedStyle(element)
+  return style.display !== 'none' && style.visibility !== 'hidden' && element.getClientRects().length > 0
+}
+
+/**
+ * Consume page-level surfaces and dismissible DSH overlays before layout navigation.
+ * @param view - the page window receiving the native Back request.
+ * @param page - the current DSH document.
+ * @param blocked - feedback for a foreground layer without a safe close action.
+ * @returns a disposer for the capture listener.
+ */
+export function installMobileNativeBack(view: Window, page: Document, blocked: () => void): () => void {
+  const onBack = (event: Event): void => {
+    if (!event.cancelable || event.defaultPrevented) return
+    const claim = (): void => { event.preventDefault(); event.stopImmediatePropagation() }
+    const surfaces = [...page.querySelectorAll<HTMLElement>('[data-dsh-mobile-surface-placement="page"], [data-dsh-mobile-surface-placement="overlay"]')]
+    const surface = surfaces.filter(element => visibleBackLayer(view, element)).at(-1)
+    if (surface !== undefined) {
+      setMobileSurfaceOpen(surface, false)
+      claim()
+      return
+    }
+
+    const modalSelector = '[role="dialog"][aria-modal="true"], [role="menu"]'
+    const layers = [...page.querySelectorAll<HTMLElement>(modalSelector)].filter(element => visibleBackLayer(view, element))
+    const top = layers.at(-1)
+    if (top === undefined) return
+    claim()
+    if (top.getAttribute('role') === 'dialog') {
+      const wrapper = top.parentElement
+      const mask = wrapper?.firstElementChild as HTMLElement | null | undefined
+      const maskStyle = mask === undefined || mask === null ? undefined : view.getComputedStyle(mask)
+      if (wrapper?.getAttribute('role') === 'presentation' && wrapper.children.length === 2
+        && wrapper.lastElementChild === top && mask?.tagName === 'DIV'
+        && mask.getAttribute('aria-hidden') === 'true' && mask.isConnected && !mask.hidden
+        && maskStyle?.display !== 'none' && maskStyle?.visibility !== 'hidden' && mask.getClientRects().length > 0) {
+        mask.click()
+        return
+      }
+    } else if (top.getAttribute('data-menu-material') === 'translucent'
+      && layers.filter(layer => layer.getAttribute('role') === 'menu').length === 1) {
+      // DSH Menu closes on an outside pointerdown. Dispatch on the document,
+      // never on an arbitrary menu item or third-party action.
+      page.dispatchEvent(new Event('pointerdown', { bubbles: true }))
+      return
+    }
+    blocked()
+  }
+  const capture = { capture: true }
+  view.addEventListener('dsh-mobile:native-back', onBack, capture)
+  return () => { view.removeEventListener('dsh-mobile:native-back', onBack, capture) }
+}
+
 interface MobileSurface {
   readonly id: string
   readonly placement: MobileSurfacePlacement
@@ -120,6 +190,20 @@ export function selectMobileControlLocale(documentLanguage = '', navigatorLangua
 
 export function selectedMobileControlLocale(): MobileControlLocale {
   return selectMobileControlLocale(document.documentElement.lang, navigator.languages?.length ? navigator.languages : [navigator.language])
+}
+
+/**
+ * Guidance when an open third-party layer has no safe close action.
+ * @param locale - current Mobile UI language.
+ * @returns localized guidance.
+ */
+export function mobileBackBlockedMessage(locale: MobileControlLocale): string {
+  const messages: Record<MobileControlLocale, string> = {
+    en: 'Close the open panel first.',
+    it: 'Chiudi prima il pannello aperto.',
+    zh: '请先关闭当前弹层。',
+  }
+  return messages[locale]
 }
 
 /** Remount one plugin-owned surface when DSH changes the document language. */
@@ -3579,6 +3663,7 @@ function installCustomAssets(): () => void {
     const node = element('div'); node.textContent = message; node.style.cssText = 'position:absolute;top:16px;left:50%;transform:translateX(-50%);padding:9px 14px;border-radius:999px;background:#1f2937;color:white;font:14px system-ui;pointer-events:auto;box-shadow:0 8px 24px #0003'
     shellLayer().append(node); window.setTimeout(() => node.remove(), 2600)
   }
+  const stopNativeBack = installMobileNativeBack(window, document, () => { toast(mobileBackBlockedMessage(selectedMobileControlLocale())) })
   const materializeNativeFile = (value: unknown): unknown => {
     if (typeof value !== 'object' || value === null || !('base64' in value) || !('name' in value)) return value
     const candidate = value as { base64?: unknown; name?: unknown; type?: unknown }
@@ -3664,7 +3749,7 @@ function installCustomAssets(): () => void {
       ensureCurrent()
       if (!/^[a-z][a-z0-9-]{0,63}$/u.test(surface.id) || surface.label.length > 120) throw new Error('invalid mobile surface')
       return registerUniqueDisposable(surfaces, surfaceIds, surface.id, () => {
-        const container = element('section'); container.dataset.dshMobileSurface = surface.id; container.hidden = surface.placement === 'page' || surface.placement === 'overlay'; container.style.cssText = surface.placement === 'page' || surface.placement === 'overlay' ? 'position:absolute;inset:0;overflow:auto;background:var(--dsw-alias-bg-layer-1,#fff);padding:16px;pointer-events:auto' : 'pointer-events:auto'
+        const container = element('section'); container.dataset.dshMobileSurface = surface.id; container.dataset.dshMobileSurfacePlacement = surface.placement; container.hidden = surface.placement === 'page' || surface.placement === 'overlay'; container.style.cssText = surface.placement === 'page' || surface.placement === 'overlay' ? 'position:absolute;inset:0;overflow:auto;background:var(--dsw-alias-bg-layer-1,#fff);padding:16px;pointer-events:auto' : 'pointer-events:auto'
         const host = (): HTMLElement => surface.placement === 'page' || surface.placement === 'overlay' ? shellLayer() : surfaceHost(surface.placement) ?? shellLayer()
         const mounted = surface.mount(container)
         const dispose = (): void => { try { if (typeof mounted === 'function') mounted() } finally { container.remove() } }
@@ -3691,8 +3776,8 @@ function installCustomAssets(): () => void {
       },
       ui: {
         registerSurface: mountSurface,
-        open: surfaceId => { ensureCurrent(); const entry = surfaces.get(surfaceId); if (entry !== undefined) entry.container.hidden = false },
-        close: surfaceId => { ensureCurrent(); const entry = surfaces.get(surfaceId); if (entry !== undefined) entry.container.hidden = true },
+        open: surfaceId => { ensureCurrent(); const entry = surfaces.get(surfaceId); if (entry !== undefined) setMobileSurfaceOpen(entry.container, true) },
+        close: surfaceId => { ensureCurrent(); const entry = surfaces.get(surfaceId); if (entry !== undefined) setMobileSurfaceOpen(entry.container, false) },
         toast: message => { ensureCurrent(); toast(message) },
       },
       native: {
@@ -3976,7 +4061,7 @@ function installCustomAssets(): () => void {
     },
     () => { fireDeviceRevoked() },
   )
-  return () => { disposed = true; stopEvents(); stopRefresh(); started = false; legacyDispose?.(); legacyDispose = undefined; legacyRoot?.remove(); legacyRoot = undefined; legacyStyle.remove(); activations.dispose(); for (const node of styleNodes.values()) node.remove(); styleNodes.clear(); const layer = document.querySelector('[data-dsh-mobile-extension-layer]'); layer?.remove(); for (const host of document.querySelectorAll('[data-dsh-mobile-surface-host]')) host.remove(); if (previous === undefined) delete window.dshMobile; else window.dshMobile = previous }
+  return () => { disposed = true; stopNativeBack(); stopEvents(); stopRefresh(); started = false; legacyDispose?.(); legacyDispose = undefined; legacyRoot?.remove(); legacyRoot = undefined; legacyStyle.remove(); activations.dispose(); for (const node of styleNodes.values()) node.remove(); styleNodes.clear(); const layer = document.querySelector('[data-dsh-mobile-extension-layer]'); layer?.remove(); for (const host of document.querySelectorAll('[data-dsh-mobile-surface-host]')) host.remove(); if (previous === undefined) delete window.dshMobile; else window.dshMobile = previous }
 }
 
 interface LegacyCssState { etag: string; modified: string }
@@ -4071,7 +4156,10 @@ export function apply(ctx: ClientContext): void {
         return () => { removeTaskNotifications(); removeSwitchComputer() }
       })
       const removeCustom = installCustomAssets()
-      const removeSurface = installDshLanguageBoundSurface(installNativeMobileSurface)
+      const removeSurface = installDshLanguageBoundSurface(() => installNativeMobileSurface({
+        getLayout: () => ctx.get('layout'),
+        getSidebarRight: () => ctx.get('sidebarRight'),
+      }))
       return () => { removeSettingsAction(); removeCustom(); removeSurface(); style.remove() }
     }
     const removeControl = installDshLanguageBoundSurface(() => {

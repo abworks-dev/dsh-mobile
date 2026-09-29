@@ -31,14 +31,14 @@
 
 > DSH Mobile is a DeepSeek Harness community plugin; the native app supports Android only.
 >
-> **Current version: 0.5.0**. It supports the official DSH Desktop, paired-page file uploads and microphone permissions for voice input, with improved narrow-screen controls and remote diagnostics. [Release notes](CHANGELOG.md#050---2026-09-26).
+> **Current version: 0.5.1**. It fixes Android Back and lets it dismiss common layers of the dedicated mobile page first, improves soft-keyboard Enter handling and WebView audio permissions, and guides `/mobile` customization. [Release notes](CHANGELOG.md#051---2026-09-29).
 >
-> **Upgrade reminder**: update both the plugin and Android app to 0.5.0 when practical. Existing pairings remain intact. App microphone permission support requires 0.5.0; older apps keep their existing connection methods. [Compatibility notes](#compatibility).
+> **Upgrade reminder**: update both the plugin and Android app to 0.5.1 when practical. The added WebView audio permission requires the new APK; older apps keep their existing connection methods. [Compatibility notes](#compatibility).
 
 <p align="center">
-  <a href="https://github.com/saya-ch/dsh-mobile/releases/download/v0.5.0/dsh-mobile-android-v0.5.0.apk"><img src="assets/brand/app-icon-rounded.svg" alt="DSH Mobile Android app icon" width="72" height="72"></a><br>
-  <a href="https://github.com/saya-ch/dsh-mobile/releases/download/v0.5.0/dsh-mobile-android-v0.5.0.apk"><strong>Download Android app 0.5.0</strong></a><br>
-  <sub><a href="https://github.com/saya-ch/dsh-mobile/releases/tag/v0.5.0">Release notes and checksums</a></sub>
+  <a href="https://github.com/saya-ch/dsh-mobile/releases/download/v0.5.1/dsh-mobile-android-v0.5.1.apk"><img src="assets/brand/app-icon-rounded.svg" alt="DSH Mobile Android app icon" width="72" height="72"></a><br>
+  <a href="https://github.com/saya-ch/dsh-mobile/releases/download/v0.5.1/dsh-mobile-android-v0.5.1.apk"><strong>Download Android app 0.5.1</strong></a><br>
+  <sub><a href="https://github.com/saya-ch/dsh-mobile/releases/tag/v0.5.1">Release notes and checksums</a></sub>
 </p>
 
 DSH Mobile is a DeepSeek Harness plugin that lets a mobile browser or the Android app connect over a protected LAN or an optional Tailscale Funnel, cpolar, cloudflared, self-hosted FRP, or own reverse-proxy remote path. Both routes reach the same sessions, Workspaces, messages, and tools. The computer manages their switches and pairing authorizations separately; the Android app lists paired computers together. The plugin does not modify DeepSeek Harness source.
@@ -50,7 +50,7 @@ It also lets you customize the phone from a DSH conversation: `/mobile <what you
 ## What it does
 
 - **Continue DSH work from a phone**: the same sessions, Workspaces, messages, and tools, in real time.
-- **Customize the phone UI by talking to DSH**: change the mobile layout, interactions, and features from a conversation; open pages refresh within seconds.
+- **Customize the phone UI by talking to DSH**: request layout, interaction, or feature changes in a conversation; open pages usually refresh after the files have been changed.
 - **A dedicated touch layout**: session drawer, tool details, settings, question cards, and composer reorganized for phones; the app follows the system locale (Chinese/English/Italian), plugin UI follows DSH's locale.
 - **Several remote options**: Tailscale, cpolar, cloudflared quick/named tunnels, self-hosted FRP, or your own reverse proxy.
 - **Pairing and multi-device**: pair once via QR code, link, or key; Wi-Fi, hotspot, or IP changes normally recover automatically; the app lists LAN and remote paired computers together, checks their reachability periodically, and lets you switch, re-pair, or delete a local record.
@@ -153,7 +153,7 @@ The public remote origin still requires DSH device pairing. The bundled Funnel a
 
 ## Extend and customize
 
-Type `/mobile <what you want>` in a DSH conversation, and DSH edits the phone client's files for you; changes apply within a few seconds. For example:
+Type `/mobile <what you want>` in a DSH conversation to hand the request to the current agent. Once the files have been changed, the phone page usually refreshes within a few seconds. For example:
 
 ```text
 /mobile turn the phone UI into an old CRT terminal, with messages scrolling like terminal output
@@ -218,7 +218,7 @@ Compatibility and WebSocket rules:
 
 Proxied pages allow HTTP frames for compatibility with some community plugins; those pages are unencrypted and can be altered, and browsers may still block them as mixed content. Use HTTPS for sensitive work. The same warning appears at the top of the remote panel when it is opened over HTTPS.
 
-- Version 0.5.0 continues contract and boot checks against DSH `0.1.7-alpha.2`, `0.1.7-rc.1`, and `0.1.7-rc.2`. Official DSH Desktop `0.1.7-rc.2` uses a `dsh-app://app/` page; the Mobile administration surface still requires Desktop's forwarded authenticated DSH session and does not loosen ordinary Web administration requests.
+- Version 0.5.1 continues contract and boot checks against DSH `0.1.7-alpha.2`, `0.1.7-rc.1`, and `0.1.7-rc.2`, and supports `0.2.0-rc.1`. Official DSH Desktop `0.1.7-rc.2` uses a `dsh-app://app/` page; the Mobile administration surface still requires Desktop's forwarded authenticated DSH session and does not loosen ordinary Web administration requests.
 - The gateway allows first-party DSH WebSocket paths by default, including `/sidebar/ws/terminal`. Other paths used by community sidebar plugins are blocked by default and appear in Diagnostics; the `/sidebar/ws/agent-opens` and `/sidebar/ws/agent-terminals` paths in the image are examples that must be reviewed for the actual plugin.
 - In **Connection diagnostics → Third-party WebSocket paths**, select **Allow** only for an exact path you have verified. Query strings and fuzzy prefixes are rejected; **Allow all** is not recommended. Approved paths can be removed at any time, and the same policy applies to LAN and remote connections.
 - Approval only lets that path pass through the authenticated, same-origin DSH Mobile gateway. It does not open arbitrary TCP/UDP ports or bypass device pairing. If a community plugin still fails, check the path recorded by Diagnostics and approve one path at a time.
@@ -313,6 +313,7 @@ On macOS, local network, self-hosted FRP, and the own reverse proxy work; the th
 
 | DSH Mobile plugin | Verified DeepSeek Harness version |
 | --- | --- |
+| `0.5.1` | `0.1.7-alpha.2`, `0.1.7-rc.1`, `0.1.7-rc.2`, and `0.2.0-rc.1`; official Desktop `0.1.7-rc.2` (administration surface) |
 | `0.5.0` | `0.1.7-alpha.2`, `0.1.7-rc.1`, and `0.1.7-rc.2`; official Desktop `0.1.7-rc.2` (administration surface) |
 | `0.4.7` | `0.1.7-alpha.2`, `0.1.7-rc.1`, and `0.1.7-rc.2` (source contract, isolated pairing, and workspace baseline over WebSocket) |
 | `0.4.6` | `0.1.7-alpha.2` and `0.1.7-rc.1` (source contract, isolated pairing, and workspace baseline over WebSocket) |
@@ -363,7 +364,7 @@ npm ci
 npm run verify
 ```
 
-The real browser-startup smoke uses a temporary DSH home, OS-assigned loopback ports, and Chromium pairing. It neither reads an existing user profile nor sends a model request. CI tests DSH `0.1.7-alpha.2`, `0.1.7-rc.1`, and `0.1.7-rc.2`; install rc.2 in a separate directory locally so it does not replace the plugin's development dependencies:
+The real browser-startup smoke uses a temporary DSH home, OS-assigned loopback ports, and Chromium pairing. It neither reads an existing user profile nor sends a model request. CI tests DSH `0.1.7-alpha.2`, `0.1.7-rc.1`, `0.1.7-rc.2`, and `0.2.0-rc.1`; install rc.2 in a separate directory locally so it does not replace the plugin's development dependencies:
 
 ```powershell
 $dshMobileTestRuntime = Join-Path $env:TEMP 'dsh-mobile-test-runtime'

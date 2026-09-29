@@ -46,6 +46,17 @@ describe('buildMobileGuide', () => {
     expect(text).toContain('删除 mobile.css 与 mobile.js')
   })
 
+  it('uses the running DSH frontend as a read-only reference for existing UI changes', () => {
+    const text = guide()
+    expect(text).toContain('若要调整 DSH 自带的输入框、侧栏或设置等现有界面')
+    expect(text).toContain('专用移动页面或 ?frontend=stock')
+    expect(text).toContain('只读核对运行页面的 DOM')
+    expect(text).toContain('同版本前端源码')
+    expect(text).toContain('没有源码时可查看已安装的客户端产物，不必下载源码')
+    expect(text).toContain('只读查看不改变前述写入范围')
+    expect(text).toContain('无法观察运行页面时，明确告诉用户尚未实测')
+  })
+
   it('retains the static customization body', () => {
     const text = guide()
     expect(text).toContain('window.dshMobile.register')

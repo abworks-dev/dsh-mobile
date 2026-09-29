@@ -50,6 +50,32 @@ internal enum class RenewedDocumentAction { IGNORE, KEEP, RELOAD }
 internal const val MOUNTED_DSH_PROBE = "document.querySelector('.dshm-shell') !== null"
 internal fun mountedDshProbeResult(result: String?): Boolean = result == "true"
 
+/** Ask the current page to close one mobile-owned layer before native navigation. */
+internal const val MOBILE_BACK_SCRIPT = "(() => { const event = new Event('dsh-mobile:native-back', { cancelable: true }); window.dispatchEvent(event); return event.defaultPrevented })()"
+internal enum class MobileBackEvaluation { CONSUMED, UNHANDLED, UNAVAILABLE }
+internal fun mobileBackEvaluation(result: String?): MobileBackEvaluation = when (result) {
+    "true" -> MobileBackEvaluation.CONSUMED
+    "false" -> MobileBackEvaluation.UNHANDLED
+    else -> MobileBackEvaluation.UNAVAILABLE
+}
+
+internal enum class MobileBackAction { IGNORE, PAGE_HANDLED, NATIVE_BACK, RETRY }
+
+/** A late page response cannot navigate a replacement WebView or document. */
+internal fun mobileBackAction(
+    expectedGeneration: Int,
+    currentGeneration: Int,
+    sameWebView: Boolean,
+    sameDocument: Boolean,
+    activityActive: Boolean,
+    evaluation: MobileBackEvaluation,
+): MobileBackAction = when {
+    expectedGeneration != currentGeneration || !sameWebView || !sameDocument || !activityActive -> MobileBackAction.IGNORE
+    evaluation == MobileBackEvaluation.CONSUMED -> MobileBackAction.PAGE_HANDLED
+    evaluation == MobileBackEvaluation.UNHANDLED -> MobileBackAction.NATIVE_BACK
+    else -> MobileBackAction.RETRY
+}
+
 internal fun renewedDocumentAction(
     expectedGeneration: Int,
     currentGeneration: Int,

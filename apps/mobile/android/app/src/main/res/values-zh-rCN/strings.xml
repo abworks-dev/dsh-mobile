@@ -168,4 +168,5 @@
     <string name="skip">跳过</string>
     <string name="save_and_connect">保存并连接</string>
     <string name="device_revoked_message">这台电脑已从电脑端的配对设备中移除本 App。</string>
+    <string name="back_page_unresponsive">页面暂未响应，请再试一次返回。</string>
 </resources>

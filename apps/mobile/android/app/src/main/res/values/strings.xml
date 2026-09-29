@@ -169,4 +169,5 @@
     <string name="skip">Skip</string>
     <string name="save_and_connect">Save and connect</string>
     <string name="device_revoked_message">This computer removed the app from its paired devices.</string>
+    <string name="back_page_unresponsive">Page is not responding. Try Back again.</string>
 </resources>

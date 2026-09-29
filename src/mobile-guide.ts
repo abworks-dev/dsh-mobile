@@ -39,7 +39,7 @@ export function buildMobileGuide(state: MobileGuideState): string {
   const failureLine = state.failedExtensionCount > 0
     ? `注意：${state.failedExtensionCount} 个扩展的电脑端 host 激活失败，如改动相关扩展请先检查其 host.mjs 与 extension.json。`
     : ''
-  const currentState = `## 手机端当前状态（改名前必读，避免覆盖已有定制）
+  const currentState = `## 手机端当前状态（改动前必读，避免覆盖已有定制）
 
 - 定制目录：${state.directory}（所有改动只允许在这里进行）
 - mobile.css：${styleLine}
@@ -68,6 +68,8 @@ const MOBILE_CUSTOMIZATION_GUIDE_BODY = `你在为用户定制 DSH Mobile 的手
    - $DSH_HOME/mobile-access/mobile.js：手机端脚本，用 window.dshMobile.register(({ root }) => { ... }) 把内容挂载到 root，返回清理函数
    - 保存后手机端几秒内自动应用，无需重启
 
+动手前先读已有的定制文件。若要调整 DSH 自带的输入框、侧栏或设置等现有界面，先确认当前 DSH 版本与手机页面模式（专用移动页面或 ?frontend=stock），只读核对运行页面的 DOM、属性和样式；本机有同版本前端源码时可参考相应组件，没有源码时可查看已安装的客户端产物，不必下载源码。优先使用扩展 API、插槽和稳定的 data-* 标记，不凭猜测依赖构建类名。只读查看不改变前述写入范围。
+
 2. 电脑端能力 —— 手机需要读电脑文件、执行命令或访问硬件时，创建扩展：
    - 目录：$DSH_HOME/mobile-access/extensions/<id>/，id 用小写字母数字和连字符（如 media-remote）
    - extension.json：{"schemaVersion":1,"id":"<id>","name":"显示名","version":"0.1.0","description":"说明"}
@@ -84,6 +86,7 @@ const MOBILE_CUSTOMIZATION_GUIDE_BODY = `你在为用户定制 DSH Mobile 的手
 
 完成前请自检：
 - 改动涉及 mobile.js 或扩展的 mobile.js / host.mjs 时，先做语法检查再保存（如 node --check <file>），确保没有语法错误
+- 改动 DSH 现有界面后尽可能在实际手机页面核对效果；无法观察运行页面时，明确告诉用户尚未实测
 - 创建或修改扩展后，确认 extension.json 的 schemaVersion 为 1、id 与目录名一致、且 id 只含小写字母数字和连字符
 - 扩展的 host.mjs 若在完成前无法激活，先修正而不是留下损坏的扩展
 - 完成后检查自己实际写入了哪些文件，向用户简要说明改了什么、手机端会有什么变化`

@@ -60,6 +60,23 @@ class WebViewDocumentStateTest {
     }
 
     @Test
+    fun onlyAnExplicitPageBackConsumptionStopsNativeNavigation() {
+        assertTrue(MOBILE_BACK_SCRIPT.contains("dsh-mobile:native-back"))
+        assertTrue(MOBILE_BACK_SCRIPT.contains("cancelable: true"))
+        assertTrue(mobileBackEvaluation("true") == MobileBackEvaluation.CONSUMED)
+        assertTrue(mobileBackEvaluation("false") == MobileBackEvaluation.UNHANDLED)
+        assertTrue(mobileBackEvaluation("null") == MobileBackEvaluation.UNAVAILABLE)
+        assertTrue(mobileBackEvaluation(null) == MobileBackEvaluation.UNAVAILABLE)
+        assertTrue(mobileBackAction(4, 4, true, true, true, MobileBackEvaluation.CONSUMED) == MobileBackAction.PAGE_HANDLED)
+        assertTrue(mobileBackAction(4, 4, true, true, true, MobileBackEvaluation.UNHANDLED) == MobileBackAction.NATIVE_BACK)
+        assertTrue(mobileBackAction(4, 4, true, true, true, MobileBackEvaluation.UNAVAILABLE) == MobileBackAction.RETRY)
+        assertTrue(mobileBackAction(4, 5, true, true, true, MobileBackEvaluation.UNHANDLED) == MobileBackAction.IGNORE)
+        assertTrue(mobileBackAction(4, 4, false, true, true, MobileBackEvaluation.UNHANDLED) == MobileBackAction.IGNORE)
+        assertTrue(mobileBackAction(4, 4, true, false, true, MobileBackEvaluation.UNHANDLED) == MobileBackAction.IGNORE)
+        assertTrue(mobileBackAction(4, 4, true, true, false, MobileBackEvaluation.UNHANDLED) == MobileBackAction.IGNORE)
+    }
+
+    @Test
     fun aFailedPageOrRendererIsReloadedAfterCookieRenewal() {
         assertFalse(mountedDshProbeResult("false"))
         assertFalse(mountedDshProbeResult(null))

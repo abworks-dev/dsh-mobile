@@ -33,7 +33,7 @@ function currentIndex(entries: unknown[]): string {
  * appends, the theme presenter's meta tag, and a narrow-viewport matchMedia.
  * @returns a disposer restoring every global it replaced.
  */
-function stubClientGlobals(): () => void {
+function stubClientGlobals(viewport = { wide: false }): () => void {
   const globals = globalThis as Record<string, unknown>
   const previous = new Map<string, unknown>()
   const define = (name: string, value: unknown): void => {
@@ -42,6 +42,7 @@ function stubClientGlobals(): () => void {
   }
   const style = { dataset: {}, style: {}, setAttribute() {}, remove() {} }
   const meta = { name: '', content: '', isConnected: false, append() {}, remove() {} }
+  const events = new EventTarget()
   define('document', {
     documentElement: { style: { setProperty() {}, removeProperty() {} }, lang: 'en' },
     body: { style: { setProperty() {}, removeProperty() {} }, toggleAttribute() {}, removeAttribute() {}, backgroundColor: '' },
@@ -52,8 +53,10 @@ function stubClientGlobals(): () => void {
   })
   define('window', {
     innerWidth: 390,
-    matchMedia: () => ({ matches: false, addEventListener() {}, removeEventListener() {} }),
-    addEventListener() {},
+    matchMedia: () => ({ matches: viewport.wide, addEventListener() {}, removeEventListener() {} }),
+    addEventListener: events.addEventListener.bind(events),
+    removeEventListener: events.removeEventListener.bind(events),
+    dispatchEvent: events.dispatchEvent.bind(events),
     setInterval: () => 0,
     clearInterval() {},
   })
@@ -881,6 +884,95 @@ describe('dedicated mobile layout boot', () => {
       expect(source).toContain("export const inject: readonly string[] = ['slots', 'theme']")
       expect(source).not.toMatch(/export const inject[^\n]*sidebarRight/u)
     } finally {
+      restore()
+    }
+  })
+
+  it('consumes native Back one visible mobile layer at a time', () => {
+    const viewport = { wide: false }
+    const restore = stubClientGlobals(viewport)
+    const cleanups: Array<() => void> = []
+    const toggleExpanded = vi.fn()
+    let layout: {
+      getSnapshot: () => { sidebarOpen: boolean; detailsOpen: boolean; panelInfo: { activePanelId: string | null } }
+      closeRightbar: () => void
+      openRightbar: (track?: boolean, fullscreen?: boolean) => void
+      selectPanel: (id: string | null) => void
+      toggleSidebar: () => void
+    } | undefined
+    const dispose = (): void => {
+      for (const cleanup of cleanups.reverse()) cleanup()
+      cleanups.length = 0
+    }
+    const back = (cancelable = true): Event => {
+      const event = new Event('dsh-mobile:native-back', { cancelable })
+      window.dispatchEvent(event)
+      return event
+    }
+    try {
+      applyMobileLayout({
+        effect: (effect: () => void | (() => void)) => {
+          const cleanup = effect()
+          if (typeof cleanup === 'function') cleanups.push(cleanup)
+        },
+        get: () => ({ isExpanded: () => true, toggleExpanded }),
+        on: () => () => {},
+        reflect: { provide: (name: string, value: unknown) => {
+          if (name === 'layout') layout = value as typeof layout
+          return () => {}
+        } },
+        slots: {
+          register: () => () => {},
+          entries: (name: string) => name === 'main' ? [{ options: { key: 'alpha' } }] : [],
+          subscribe: () => () => {},
+        },
+        theme: { getTheme: () => ({ active: { colorScheme: 'light' as const, tokens: {} } }) },
+      } as never)
+      const controller = layout
+      expect(controller).toBeDefined()
+      controller?.closeRightbar()
+      controller?.selectPanel(null)
+      if (controller?.getSnapshot().sidebarOpen) controller.toggleSidebar()
+      controller?.selectPanel('alpha')
+      controller?.toggleSidebar()
+      controller?.openRightbar(true, false)
+
+      const claimed = new Event('dsh-mobile:native-back', { cancelable: true })
+      claimed.preventDefault()
+      window.dispatchEvent(claimed)
+      expect(controller?.getSnapshot()).toMatchObject({ detailsOpen: true, sidebarOpen: true })
+      expect(back(false).defaultPrevented).toBe(false)
+      expect(controller?.getSnapshot()).toMatchObject({ detailsOpen: true, sidebarOpen: true })
+
+      expect(back().defaultPrevented).toBe(true)
+      expect(toggleExpanded).toHaveBeenCalledOnce()
+      expect(controller?.getSnapshot()).toMatchObject({
+        detailsOpen: false, sidebarOpen: true, panelInfo: { activePanelId: 'alpha' },
+      })
+      expect(back().defaultPrevented).toBe(true)
+      expect(controller?.getSnapshot()).toMatchObject({ sidebarOpen: false, panelInfo: { activePanelId: 'alpha' } })
+      expect(back().defaultPrevented).toBe(true)
+      expect(controller?.getSnapshot().panelInfo.activePanelId).toBeNull()
+      expect(back().defaultPrevented).toBe(false)
+
+      controller?.toggleSidebar()
+      viewport.wide = true
+      expect(back().defaultPrevented).toBe(false)
+      expect(controller?.getSnapshot().sidebarOpen).toBe(true)
+      viewport.wide = false
+      expect(back().defaultPrevented).toBe(true)
+      expect(controller?.getSnapshot().sidebarOpen).toBe(false)
+
+      controller?.selectPanel('alpha')
+      dispose()
+      expect(back().defaultPrevented).toBe(false)
+      expect(controller?.getSnapshot().panelInfo.activePanelId).toBe('alpha')
+    } finally {
+      viewport.wide = false
+      layout?.selectPanel(null)
+      layout?.closeRightbar()
+      if (layout?.getSnapshot().sidebarOpen) layout.toggleSidebar()
+      dispose()
       restore()
     }
   })
