@@ -123,7 +123,15 @@ export const NATIVE_MOBILE_STYLES = `
   [data-dsh-mobile-history-loader] { position:relative !important; min-height:1px !important; }
   [data-dsh-mobile-history-loader] button:not(:disabled) { position:absolute !important; width:1px !important; height:1px !important; margin:-1px !important; padding:0 !important; clip-path:inset(50%) !important; opacity:0 !important; overflow:hidden !important; pointer-events:none !important; }
   [data-dsh-mobile-history-loader] button:disabled { min-height:28px !important; padding:4px 12px !important; }
-  [data-dsh-mobile-message-column] { box-sizing:border-box !important; width:100% !important; max-width:none !important; margin:0 !important; padding:0 !important; gap:10px !important; }
+  /* DSH spaces the Chat Node Seats in this column with 'margin-top' on
+     ':not([hidden])' siblings, because a folded-away seat deliberately keeps a
+     zero-height box ('hidden="until-found"' is what lets browser find still
+     reveal it) and must not contribute spacing. A flex 'gap' cannot tell those
+     seats apart: it charges the full gap to every folded step, so collapsing a
+     turn leaves a blank band as tall as the process that disappeared. Ride the
+     shared knob instead — it is read by the very rule that skips hidden seats,
+     so the phone keeps its spacing without the hole. */
+  [data-dsh-mobile-message-column] { box-sizing:border-box !important; width:100% !important; max-width:none !important; margin:0 !important; padding:0 !important; gap:0 !important; --dsh-chat-flow-gap:10px; }
   [data-dsh-mobile-message-column] > * { width:100% !important; max-width:100% !important; }
   [data-dsh-mobile-message-column] [data-disclosure-row] { box-sizing:border-box !important; display:grid !important; grid-template-columns:16px minmax(0,1fr) !important; grid-auto-rows:auto !important; align-items:center !important; column-gap:6px !important; width:100% !important; height:auto !important; min-height:40px !important; padding:4px 0 !important; }
   [data-dsh-mobile-message-column] [data-disclosure-row] > [class*="_leading"] { grid-column:1 !important; grid-row:1 !important; margin-right:0 !important; }
@@ -145,12 +153,39 @@ export const NATIVE_MOBILE_STYLES = `
   /* The context ring is a composer-metadata _root too, so the metadata rule
      above stretched it across the whole dock. It cannot shrink, which left the
      session statistics beside it a few pixels wide, every number clipped to an
-     ellipsis. Put the numbers in a wrapping left column and the ring in a right
-     column it cannot grow out of: a phone then shows every number in full, and
-     a wide screen keeps the ring beside them on one line. */
+     ellipsis. Keep the ring at its own size and let it hold the row the numbers
+     are on. */
   [data-dsh-mobile-center] [data-composer-card] ~ * [class*="_root"]:has(> [class*="_trigger"][aria-haspopup="dialog"]) { width:auto !important; max-width:none !important; flex:0 0 auto !important; }
-  [data-dsh-mobile-center] [class*="_dock"]:has([data-composer-stats]) { display:grid !important; grid-template-columns:minmax(0,1fr) max-content !important; align-items:center !important; column-gap:12px !important; }
-  [data-dsh-mobile-center] [data-composer-card] ~ * [class*="_root"][data-composer-stats] { box-sizing:border-box !important; width:auto !important; max-width:none !important; flex:0 1 auto !important; flex-wrap:wrap !important; justify-content:flex-start !important; row-gap:2px !important; }
+  /* 'conversation.composer.dock' is a 'list' slot whose anchor is
+     'display:contents', so the dock itself lays out an unbounded set of
+     children: the session statistics, the context ring, and whatever else a
+     plugin registers (a cost meter, a badge, …). Any rule that fixes the column
+     count is therefore wrong — with four children a two-column grid folds them
+     into two rows, which parks the ring on a row of its own and crushes the
+     statistics into a sliver of a column. Wrap instead: nothing is squeezed
+     below its content, 'order' keeps the ring on the statistics' row, and an
+     entry that asks for a row to itself (a plugin shipping 'width:100%') gets
+     one. */
+  [data-dsh-mobile-center] [class*="_dock"]:has([data-composer-stats]) { display:flex !important; flex-wrap:wrap !important; justify-content:flex-start !important; align-items:center !important; column-gap:12px !important; row-gap:2px !important; width:100% !important; max-width:100% !important; }
+  /* A wrapped row cannot survive the -6px bottom margin the composer-metadata
+     rule above puts on every '_root': the margin pulls the next row up into the
+     one before it. The dock owns the spacing between its rows, so cancel the
+     margin on each of them. */
+  [data-dsh-mobile-center] [class*="_dock"]:has([data-composer-stats]) > *,
+  [data-dsh-mobile-center] [class*="_dock"]:has([data-composer-stats]) [data-slot="conversation.composer.dock"] > * { margin-bottom:0 !important; }
+  [data-dsh-mobile-center] [class*="_dock"]:has([data-composer-stats]) [data-composer-stats] { order:-2 !important; }
+  [data-dsh-mobile-center] [class*="_dock"]:has([data-composer-stats]) [class*="_root"]:has(> [class*="_trigger"][aria-haspopup="dialog"]) { order:-1 !important; }
+  /* The statistics keep to one row and spend their width on the ring first; the
+     pills then take what is left and ellipsise. Wrapping them instead would cost
+     the composer a second row for text the pill already carries in full: each
+     pill is a button whose 'aria-label' and dialog hold the untruncated value,
+     so a clipped label loses nothing a tap cannot restore. 'text-overflow' only
+     reaches the label once the pill is a block box — inside a flex pill the text
+     is an anonymous flex item, which cannot be given 'overflow:hidden'. */
+  [data-dsh-mobile-center] [data-composer-card] ~ * [class*="_root"][data-composer-stats] { box-sizing:border-box !important; width:auto !important; max-width:none !important; flex:1 1 0 !important; flex-wrap:nowrap !important; justify-content:flex-start !important; overflow:hidden !important; row-gap:2px !important; }
+  [data-dsh-mobile-center] [data-composer-stats] > * { min-width:0 !important; }
+  [data-dsh-mobile-center] [data-composer-stats] [class*="_pill"] { display:block !important; min-width:0 !important; white-space:nowrap !important; overflow:hidden !important; text-overflow:ellipsis !important; }
+  [data-dsh-mobile-center] [data-composer-stats] [class*="_pill"] svg { display:inline-block !important; vertical-align:-2px !important; margin-right:6px !important; }
   /* Message runtime details are inline on desktop. Give the clock/runtime
      label its own wrapping row on narrow screens so TTFT and throughput do
      not push the action buttons or clip at the viewport edge. */
