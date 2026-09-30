@@ -216,6 +216,19 @@ describe('native mobile presentation', () => {
     expect(NATIVE_MOBILE_STYLES).toContain('[class*="_dock"]:has([data-composer-stats]) [data-slot="conversation.composer.dock"] > * { margin-bottom:0 !important; }')
   })
 
+  it('keeps the statistics on one ellipsised row rather than a second composer row', () => {
+    // A pill is a button, and its `aria-label` plus its dialog carry the
+    // untruncated value, so a clipped label costs the reader nothing a tap cannot
+    // restore — while wrapping the pills costs the composer a whole extra row on
+    // every phone. `text-overflow` only reaches that label once the pill is a
+    // block box: inside a flex pill the text is an anonymous flex item, which
+    // cannot be given `overflow:hidden`.
+    expect(NATIVE_MOBILE_STYLES).toContain('flex:1 1 0 !important; flex-wrap:nowrap !important; justify-content:flex-start !important; overflow:hidden !important')
+    expect(NATIVE_MOBILE_STYLES).toContain('[data-dsh-mobile-center] [data-composer-stats] [class*="_pill"] { display:block !important; min-width:0 !important; white-space:nowrap !important; overflow:hidden !important; text-overflow:ellipsis !important; }')
+    expect(NATIVE_MOBILE_STYLES).toContain('[data-dsh-mobile-center] [data-composer-stats] [class*="_pill"] svg { display:inline-block !important; vertical-align:-2px !important; margin-right:6px !important; }')
+    expect(NATIVE_MOBILE_STYLES).not.toContain('flex:1 1 0 !important; flex-wrap:wrap !important')
+  })
+
   it('keeps unrelated feature frames from suppressing the dedicated mobile layout', () => {
     const unrelatedFrame = fakeElement(['QuestionComposer_a1_frame'], {
       descendants: [fakeElement(['QuestionComposer_a1_body'])],

@@ -175,7 +175,17 @@ export const NATIVE_MOBILE_STYLES = `
   [data-dsh-mobile-center] [class*="_dock"]:has([data-composer-stats]) [data-slot="conversation.composer.dock"] > * { margin-bottom:0 !important; }
   [data-dsh-mobile-center] [class*="_dock"]:has([data-composer-stats]) [data-composer-stats] { order:-2 !important; }
   [data-dsh-mobile-center] [class*="_dock"]:has([data-composer-stats]) [class*="_root"]:has(> [class*="_trigger"][aria-haspopup="dialog"]) { order:-1 !important; }
-  [data-dsh-mobile-center] [data-composer-card] ~ * [class*="_root"][data-composer-stats] { box-sizing:border-box !important; width:auto !important; max-width:none !important; flex:1 1 auto !important; flex-wrap:wrap !important; justify-content:flex-start !important; row-gap:2px !important; }
+  /* The statistics keep to one row and spend their width on the ring first; the
+     pills then take what is left and ellipsise. Wrapping them instead would cost
+     the composer a second row for text the pill already carries in full: each
+     pill is a button whose 'aria-label' and dialog hold the untruncated value,
+     so a clipped label loses nothing a tap cannot restore. 'text-overflow' only
+     reaches the label once the pill is a block box — inside a flex pill the text
+     is an anonymous flex item, which cannot be given 'overflow:hidden'. */
+  [data-dsh-mobile-center] [data-composer-card] ~ * [class*="_root"][data-composer-stats] { box-sizing:border-box !important; width:auto !important; max-width:none !important; flex:1 1 0 !important; flex-wrap:nowrap !important; justify-content:flex-start !important; overflow:hidden !important; row-gap:2px !important; }
+  [data-dsh-mobile-center] [data-composer-stats] > * { min-width:0 !important; }
+  [data-dsh-mobile-center] [data-composer-stats] [class*="_pill"] { display:block !important; min-width:0 !important; white-space:nowrap !important; overflow:hidden !important; text-overflow:ellipsis !important; }
+  [data-dsh-mobile-center] [data-composer-stats] [class*="_pill"] svg { display:inline-block !important; vertical-align:-2px !important; margin-right:6px !important; }
   /* Message runtime details are inline on desktop. Give the clock/runtime
      label its own wrapping row on narrow screens so TTFT and throughput do
      not push the action buttons or clip at the viewport edge. */
