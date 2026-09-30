@@ -41,6 +41,36 @@ export default defineConfig([{
   clean: false,
   outputOptions: { entryFileNames: 'cli.js' },
 }, {
+  // The question-fixes component. It is its own package so its bundle row can
+  // name it, which is what gives it a separate entry in the dsh-mobile card's
+  // Components list and its own Running toggle.
+  entry: { index: 'packages/question-fixes/src/index.ts' },
+  outDir: 'packages/question-fixes/lib',
+  format: ['esm'],
+  platform: 'node',
+  target: 'node22',
+  dts: false,
+  sourcemap: true,
+  clean: true,
+  outputOptions: { entryFileNames: 'index.mjs' },
+}, {
+  entry: { client: 'packages/question-fixes/src/client.ts' },
+  outDir: 'packages/question-fixes/lib',
+  format: ['cjs'],
+  platform: 'browser',
+  target: 'es2022',
+  dts: false,
+  sourcemap: true,
+  clean: false,
+  deps: { neverBundle: ['react'] },
+  outputOptions: {
+    entryFileNames: 'client.js',
+    // The loader id is the package name: that is what binds this file to the row.
+    banner: 'window.__ModuleLoader__.load({ id: "dsh-mobile-question-fixes", factory: (require) => {',
+    intro: 'var module = { exports: {} }; var exports = module.exports;',
+    footer: 'return module.exports; } });',
+  },
+}, {
   entry: { client: 'src/client.ts' },
   outDir: 'lib',
   format: ['cjs'],

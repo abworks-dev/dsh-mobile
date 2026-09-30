@@ -216,7 +216,8 @@ async function inspectBrowser(baseUrl, logs) {
       throw new Error(`Pairing could not open: status=${pairing.status} json=${String(pairing.body !== undefined)}\n${logs()}`)
     }
 
-    const phone = await browser.newPage({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true })
+    // Back-layer assertions depend on open state, not on drawer animation timing.
+    const phone = await browser.newPage({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, reducedMotion: 'reduce' })
     const workspaceStream = observeWorkspaceStream(phone)
     const errors = []
     const failedBundles = []
@@ -280,6 +281,16 @@ async function inspectBrowser(baseUrl, logs) {
     if (!Array.isArray(plan?.entries) || !plan.entries.some(row => row.id === 'dsh-mobile')) {
       throw new Error(`Real DSH boot manifest did not contain dsh-mobile: entries=${sanitized(JSON.stringify(plan?.entries?.map(row => row.id) ?? []))}`)
     }
+    if (!excludedClientModules.includes('dsh-mobile-question-fixes')) {
+      if (!plan.entries.some(row => row.id === 'dsh-mobile-question-fixes')) {
+        throw new Error(`Bundled question-card component is absent from the boot manifest: ${JSON.stringify(plan.entries.map(row => row.id))}`)
+      }
+      const componentStyle = phone.locator('style[data-plugin="dsh-mobile-question-fixes"]')
+      await componentStyle.waitFor({ state: 'attached', timeout: CLIENT_TIMEOUT_MS })
+      if (await componentStyle.count() !== 1) {
+        throw new Error('Bundled question-card component did not activate exactly once')
+      }
+    }
     if (excludedClientModules.length > 0) {
       for (const id of excludedClientModules) {
         if (!stockBatches.some(batch => batch.entries.includes(id))) throw new Error(`Selected module ${id} is absent from the stock DSH graph`)
@@ -319,20 +330,50 @@ async function inspectBrowser(baseUrl, logs) {
     }
     if (await back()) throw new Error('Mobile Back consumed the root conversation without an open layer')
     const drawer = phone.locator('.dshm-drawer')
-    await drawer.locator('button[aria-label]').first().click()
-    await phone.waitForFunction(() => document.querySelector('.dshm-drawer')?.getAttribute('data-open') === 'true')
+    const scrim = phone.locator('.dshm-scrim')
+    const drawerToggle = drawer.locator('button[data-dsh-mobile-toggle]')
+    await drawerToggle.click()
+    await phone.waitForFunction(() => document.querySelector('.dshm-scrim')?.getAttribute('data-open') === 'true')
     if (!await back()) throw new Error('Mobile Back did not consume the open drawer')
-    await phone.waitForFunction(() => document.querySelector('.dshm-drawer')?.getAttribute('data-open') === 'false')
-    await drawer.locator('button[aria-label]').first().click()
-    await phone.waitForFunction(() => document.querySelector('.dshm-drawer')?.getAttribute('data-open') === 'true')
+    await phone.waitForFunction(() => document.querySelector('.dshm-scrim')?.getAttribute('data-open') === 'false')
+    await drawerToggle.click()
+    await phone.waitForFunction(() => document.querySelector('.dshm-scrim')?.getAttribute('data-open') === 'true')
     await drawer.locator('button[aria-haspopup="dialog"]').first().click()
     const settingsDialog = phone.locator('[role="dialog"][aria-modal="true"]').first()
     await settingsDialog.waitFor({ state: 'visible' })
     if (!await back()) throw new Error('Mobile Back did not consume the settings dialog')
     await settingsDialog.waitFor({ state: 'detached' })
-    if (!await back()) throw new Error('Mobile Back did not consume the drawer below settings')
-    await phone.waitForFunction(() => document.querySelector('.dshm-drawer')?.getAttribute('data-open') === 'false')
-    if (await back()) throw new Error('Mobile Back consumed the conversation after settings closed')
+    // Let dialog teardown and React's layout update finish before the next gesture.
+    await phone.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+    // The stock adapter mirrors delayed sidebar classes onto the drawer wrapper.
+    // The dedicated scrim is owned only by layout state and identifies its open layer.
+    if (!await phone.locator('.dshm-main').isVisible()) throw new Error('Conversation surface did not return after settings closed')
+    await phone.waitForFunction(() => document.querySelector('.dshm-details')?.getAttribute('data-open') === 'false')
+    if (await scrim.getAttribute('data-open') === 'true') {
+      if (!await back()) {
+        const state = await phone.evaluate(() => ({
+          width: window.innerWidth, clientWidth: document.documentElement.clientWidth,
+          viewport: document.querySelector('meta[name="viewport"]')?.getAttribute('content'),
+          drawerOpen: document.querySelector('.dshm-drawer')?.getAttribute('data-open'),
+          drawerWidth: document.querySelector('.dshm-drawer')?.getBoundingClientRect().width,
+        }))
+        throw new Error(`Mobile Back did not consume the drawer below settings: ${JSON.stringify(state)}`)
+      }
+      await phone.waitForFunction(() => document.querySelector('.dshm-scrim')?.getAttribute('data-open') === 'false')
+    }
+    const layoutState = () => phone.evaluate(() => ({
+      width: innerWidth,
+      layers: ['.dshm-drawer', '.dshm-details', '.dshm-main'].map(selector => {
+        const node = document.querySelector(selector)
+        return node === null ? null : {
+          selector, open: node.getAttribute('data-open'), display: getComputedStyle(node).display,
+          width: node.getBoundingClientRect().width, height: node.getBoundingClientRect().height,
+        }
+      }),
+      main: document.querySelector('.dshm-main')?.textContent?.slice(0, 120),
+    }))
+    const beforeRootBack = await layoutState()
+    if (await back()) throw new Error(`Mobile Back consumed the conversation after settings closed: ${JSON.stringify({ before: beforeRootBack, after: await layoutState() })}`)
     const extensionBack = await phone.evaluate(() => {
       const layer = document.createElement('section')
       layer.dataset.dshMobileSurfacePlacement = 'overlay'

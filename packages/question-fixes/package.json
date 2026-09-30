@@ -1,0 +1,25 @@
+{
+  "name": "dsh-mobile-question-fixes",
+  "version": "0.5.2",
+  "private": true,
+  "description": "Scoped question-card scrolling and touch-keyboard fixes for DSH Web.",
+  "type": "module",
+  "exports": {
+    ".": {
+      "default": "./lib/index.mjs"
+    },
+    "./client": {
+      "default": "./lib/client.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib"
+  ],
+  "dsh": {
+    "client": {
+      "platform": "web",
+      "immediately": true
+    }
+  }
+}
