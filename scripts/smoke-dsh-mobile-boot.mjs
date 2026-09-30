@@ -282,8 +282,12 @@ async function inspectBrowser(baseUrl, logs) {
       throw new Error(`Real DSH boot manifest did not contain dsh-mobile: entries=${sanitized(JSON.stringify(plan?.entries?.map(row => row.id) ?? []))}`)
     }
     if (!excludedClientModules.includes('dsh-mobile-question-fixes')) {
-      if (!plan.entries.some(row => row.id === 'dsh-mobile-question-fixes')
-        || await phone.locator('style[data-plugin="dsh-mobile-question-fixes"]').count() !== 1) {
+      if (!plan.entries.some(row => row.id === 'dsh-mobile-question-fixes')) {
+        throw new Error(`Bundled question-card component is absent from the boot manifest: ${JSON.stringify(plan.entries.map(row => row.id))}`)
+      }
+      const componentStyle = phone.locator('style[data-plugin="dsh-mobile-question-fixes"]')
+      await componentStyle.waitFor({ state: 'attached', timeout: CLIENT_TIMEOUT_MS })
+      if (await componentStyle.count() !== 1) {
         throw new Error('Bundled question-card component did not activate exactly once')
       }
     }
@@ -326,12 +330,14 @@ async function inspectBrowser(baseUrl, logs) {
     }
     if (await back()) throw new Error('Mobile Back consumed the root conversation without an open layer')
     const drawer = phone.locator('.dshm-drawer')
-    await drawer.locator('button[aria-label]').first().click()
-    await phone.waitForFunction(() => document.querySelector('.dshm-drawer')?.getAttribute('data-open') === 'true')
+    const scrim = phone.locator('.dshm-scrim')
+    const drawerToggle = drawer.locator('button[data-dsh-mobile-toggle]')
+    await drawerToggle.click()
+    await phone.waitForFunction(() => document.querySelector('.dshm-scrim')?.getAttribute('data-open') === 'true')
     if (!await back()) throw new Error('Mobile Back did not consume the open drawer')
-    await phone.waitForFunction(() => document.querySelector('.dshm-drawer')?.getAttribute('data-open') === 'false')
-    await drawer.locator('button[aria-label]').first().click()
-    await phone.waitForFunction(() => document.querySelector('.dshm-drawer')?.getAttribute('data-open') === 'true')
+    await phone.waitForFunction(() => document.querySelector('.dshm-scrim')?.getAttribute('data-open') === 'false')
+    await drawerToggle.click()
+    await phone.waitForFunction(() => document.querySelector('.dshm-scrim')?.getAttribute('data-open') === 'true')
     await drawer.locator('button[aria-haspopup="dialog"]').first().click()
     const settingsDialog = phone.locator('[role="dialog"][aria-modal="true"]').first()
     await settingsDialog.waitFor({ state: 'visible' })
@@ -339,10 +345,11 @@ async function inspectBrowser(baseUrl, logs) {
     await settingsDialog.waitFor({ state: 'detached' })
     // Let dialog teardown and React's layout update finish before the next gesture.
     await phone.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
-    // Settings can leave a hidden sidebar subtree. Consume a drawer only while
-    // it is visibly open; the drawer's independent Back behavior was checked above.
+    // The stock adapter mirrors delayed sidebar classes onto the drawer wrapper.
+    // The dedicated scrim is owned only by layout state and identifies its open layer.
     if (!await phone.locator('.dshm-main').isVisible()) throw new Error('Conversation surface did not return after settings closed')
-    if (await drawer.isVisible() && await drawer.getAttribute('data-open') === 'true') {
+    await phone.waitForFunction(() => document.querySelector('.dshm-details')?.getAttribute('data-open') === 'false')
+    if (await scrim.getAttribute('data-open') === 'true') {
       if (!await back()) {
         const state = await phone.evaluate(() => ({
           width: window.innerWidth, clientWidth: document.documentElement.clientWidth,
@@ -352,9 +359,21 @@ async function inspectBrowser(baseUrl, logs) {
         }))
         throw new Error(`Mobile Back did not consume the drawer below settings: ${JSON.stringify(state)}`)
       }
-      await phone.waitForFunction(() => document.querySelector('.dshm-drawer')?.getAttribute('data-open') === 'false')
+      await phone.waitForFunction(() => document.querySelector('.dshm-scrim')?.getAttribute('data-open') === 'false')
     }
-    if (await back()) throw new Error('Mobile Back consumed the conversation after settings closed')
+    const layoutState = () => phone.evaluate(() => ({
+      width: innerWidth,
+      layers: ['.dshm-drawer', '.dshm-details', '.dshm-main'].map(selector => {
+        const node = document.querySelector(selector)
+        return node === null ? null : {
+          selector, open: node.getAttribute('data-open'), display: getComputedStyle(node).display,
+          width: node.getBoundingClientRect().width, height: node.getBoundingClientRect().height,
+        }
+      }),
+      main: document.querySelector('.dshm-main')?.textContent?.slice(0, 120),
+    }))
+    const beforeRootBack = await layoutState()
+    if (await back()) throw new Error(`Mobile Back consumed the conversation after settings closed: ${JSON.stringify({ before: beforeRootBack, after: await layoutState() })}`)
     const extensionBack = await phone.evaluate(() => {
       const layer = document.createElement('section')
       layer.dataset.dshMobileSurfacePlacement = 'overlay'
