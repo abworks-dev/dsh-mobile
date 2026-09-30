@@ -22,6 +22,12 @@ GitHub's Contributors graph counts commits on the default branch; issue reports 
 | [@xhwxt](https://github.com/xhwxt) | [#105](https://github.com/saya-ch/dsh-mobile/pull/105) |
 | [@xingleiwu](https://github.com/xingleiwu) | [#79](https://github.com/saya-ch/dsh-mobile/pull/79), [#84](https://github.com/saya-ch/dsh-mobile/pull/84), [#85](https://github.com/saya-ch/dsh-mobile/pull/85), [#86](https://github.com/saya-ch/dsh-mobile/pull/86) |
 
+## 本地候选中的贡献 / Contributions in the local candidate
+
+[@xhwxt](https://github.com/xhwxt) 的 [#134](https://github.com/saya-ch/dsh-mobile/pull/134) 已保留原始提交并纳入本地 0.5.3 候选，修复折叠过程后的空白与输入栏下方的布局；维护者随后补充静态统计可读性和排序范围修正。该候选尚未发布，GitHub PR 的合并状态以链接页面为准。
+
+[@xhwxt](https://github.com/xhwxt)'s [#134](https://github.com/saya-ch/dsh-mobile/pull/134) is incorporated into the local 0.5.3 candidate with its original commits preserved. It fixes blank space after folded process sections and composer-dock layout; maintainer follow-ups keep static statistics readable and narrow the ordering scope. The candidate is not yet released; the linked PR shows its current GitHub merge status.
+
 ## 已吸收但未直接合并的 PR / Incorporated without a direct merge
 
 [@BlueandwhiteXD](https://github.com/BlueandwhiteXD) 的 [#15](https://github.com/saya-ch/dsh-mobile/pull/15) 提出了并实现了 Android 键盘遮挡修复。由于发布分支已有重叠的状态栏改动，该方案改写后进入主线提交 [`09ef315`](https://github.com/saya-ch/dsh-mobile/commit/09ef31590219f2a436bd801214703338c215b00d)，并在 [`04e6a0d`](https://github.com/saya-ch/dsh-mobile/commit/04e6a0da030353d4f0897419d0f692dc538a752d) 以 `Co-authored-by` 致谢。PR 的 Closed 状态不应掩盖这项已采用的代码贡献。

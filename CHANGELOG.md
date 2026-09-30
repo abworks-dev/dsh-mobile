@@ -2,10 +2,14 @@
 
 Notable changes to DSH Mobile are recorded here. GitHub Releases remain the source for downloadable packages and complete generated commit notes.
 
-## Unreleased
+## 0.5.3 (unreleased)
 
-- Add a separately switchable question-card component that keeps long questions, answer options, and footer actions reachable in one bounded scroll area. Touch Enter retains its native newline; desktop shortcuts and IME composition remain available (thanks @ayiejosh for [PR #133](https://github.com/saya-ch/dsh-mobile/pull/133)). Answers stay in DSH's existing draft store instead of being copied into browser localStorage.
-- Explain how to distinguish failed settings writes caused by Host/Origin rejection, a missing root Include, and file or lock errors, based on [#132](https://github.com/saya-ch/dsh-mobile/issues/132). Connection diagnostics do not perform a settings write.
+- Add a default-enabled, separately switchable question-card component: long questions, options, and footer actions share one bounded scroll area, while collapsed titles show up to two lines. Keep touch Enter as a newline without intercepting desktop shortcuts or IME composition; Android applies it only with an active software keyboard and no hardware keyboard. Answers remain in DSH's existing draft store rather than browser localStorage. Thanks @ayiejosh for [PR #133](https://github.com/saya-ch/dsh-mobile/pull/133).
+- Fix large blank gaps after folded process sections by using DSH's message-flow spacing, which skips its hidden search-expandable sections. Thanks @xhwxt for [PR #134](https://github.com/saya-ch/dsh-mobile/pull/134), integrated into this local candidate with follow-up adjustments.
+- Let composer-dock entries wrap when community plugins add statistics or actions. Keep static statistics readable, limit context-ring ordering to the dock's direct children, and prevent adjacent entries from overlapping.
+- Include the question-card component's built runtime in npm packages and add packed-installation and browser layout checks, covering long cards, keyboard modes, component disablement, folded sections, and additional composer-dock entries.
+- Expand settings-save troubleshooting for Host/Origin rejection, a missing root Include, and file or lock errors, based on [#132](https://github.com/saya-ch/dsh-mobile/issues/132). This is diagnostic guidance, not a fix for DSH's reported duplicate-module problem; connection diagnostics do not attempt a settings write.
+- Synchronize Android version metadata to 0.5.3 (build 73). Native behavior and the pairing protocol are unchanged from 0.5.2; existing paired devices do not need to pair again.
 
 ## 0.5.2 - 2026-09-29
 

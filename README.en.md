@@ -31,9 +31,9 @@
 
 > DSH Mobile is a DeepSeek Harness community plugin; the native app supports Android only.
 >
-> **Current version: 0.5.2**. It gives installations stable, distinct proxy names on shared frps servers, reports name or port conflicts directly, and removes the DSH prerelease peer-version gate. [Release notes](CHANGELOG.md#052---2026-09-29).
+> **Preparing 0.5.3 (not yet released)**: improve question-card scrolling and input, fix blank space after folded process sections and composer statistics squeezed by third-party plugins, and expand troubleshooting for failed settings saves. [Release notes](CHANGELOG.md#053-unreleased).
 >
-> **Upgrade reminder**: the plugin and Android app can both be updated to 0.5.2. This APK only synchronizes version metadata; the 0.5.1 app and existing pairings do not need reinstalling or re-pairing. [Compatibility notes](#compatibility).
+> **Current release: 0.5.2**. Downloads below still point to the released app. The 0.5.3 candidate does not change the pairing protocol; existing devices do not need re-pairing. [Compatibility notes](#compatibility).
 
 <p align="center">
   <a href="https://github.com/saya-ch/dsh-mobile/releases/download/v0.5.2/dsh-mobile-android-v0.5.2.apk"><img src="assets/brand/app-icon-rounded.svg" alt="DSH Mobile Android app icon" width="72" height="72"></a><br>
@@ -212,7 +212,7 @@ Revoking a device permanently deletes its durable record and token digest instea
 
 ## Third-party plugin compatibility
 
-The bundle includes the independently switchable `dsh-mobile-question-fixes` component, enabled by default. Disable it in DSH's plugin component list to restore the stock card immediately. Long questions, options, and footer actions share the card's scroll area; ordinary touch Enter retains its newline. DSH continues to own answer drafts.
+The 0.5.3 candidate includes the independently switchable `dsh-mobile-question-fixes` component, enabled by default; the released 0.5.2 does not include it yet. Disable it in DSH's plugin component list to restore the stock card immediately. Long questions, options, and footer actions share one bounded scroll area, and collapsed titles show up to two lines. Touch Enter retains its newline in phone browsers; the Android app applies this behavior only when its software keyboard is open and no hardware keyboard is connected. DSH continues to own answer drafts, with no additional copy in browser localStorage.
 
 The mobile adaptation keeps DSH's existing Workspace, task-management, terminal, and file-panel entry points instead of isolating third-party plugin content in a separate page. The wide-layout screenshot below shows the Android app in a wide viewport. The app adapts to the available width: phones use drawers and overlays, while wide screens use side-by-side panels; both layouts expose the same features and connection methods. DSH still loads third-party plugins itself—the mobile layer only adapts layout and access, without modifying DeepSeek Harness source.
 
@@ -322,6 +322,7 @@ On macOS, local network, self-hosted FRP, and the own reverse proxy work; the th
 
 | DSH Mobile plugin | Verified DeepSeek Harness version |
 | --- | --- |
+| `0.5.3` (unreleased candidate) | Windows-local npm installation, pairing, mobile-page boot, and WebSocket Workspace baseline: `0.1.7-rc.2` and `0.2.0-rc.2`; `0.2.0-rc.2` source contract passed; candidate cross-platform CI awaits a push |
 | `0.5.2` | `0.1.7-alpha.2`, `0.1.7-rc.1`, `0.1.7-rc.2`, and `0.2.0-rc.1` (carried forward from earlier verification); `0.2.0-rc.2` (source contract, isolated pairing, mobile-page boot, and WebSocket Workspace baseline) |
 | `0.5.1` | `0.1.7-alpha.2`, `0.1.7-rc.1`, `0.1.7-rc.2`, and `0.2.0-rc.1`; official Desktop `0.1.7-rc.2` (administration surface) |
 | `0.5.0` | `0.1.7-alpha.2`, `0.1.7-rc.1`, and `0.1.7-rc.2`; official Desktop `0.1.7-rc.2` (administration surface) |
@@ -373,6 +374,8 @@ Thanks to everyone who submitted PRs, reproduced issues, or proposed improvement
 npm ci
 npm run verify
 ```
+
+After building question-card or mobile-layout changes, run `npx playwright install chromium --only-shell`, `npm run smoke:question-fixes`, and `npm run smoke:native-layout` to check scrolling, keyboard behavior, and geometry using the built client.
 
 The real browser-startup smoke uses a temporary DSH home, OS-assigned loopback ports, and Chromium pairing. It neither reads an existing user profile nor sends a model request. Development-branch CI tests DSH `0.1.7-alpha.2`, `0.1.7-rc.1`, `0.1.7-rc.2`, `0.2.0-rc.1`, and `0.2.0-rc.2`; install DSH `0.2.0-rc.2` in a separate directory so it does not replace the plugin's development dependencies:
 
