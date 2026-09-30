@@ -216,7 +216,8 @@ async function inspectBrowser(baseUrl, logs) {
       throw new Error(`Pairing could not open: status=${pairing.status} json=${String(pairing.body !== undefined)}\n${logs()}`)
     }
 
-    const phone = await browser.newPage({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true })
+    // Back-layer assertions depend on open state, not on drawer animation timing.
+    const phone = await browser.newPage({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, reducedMotion: 'reduce' })
     const workspaceStream = observeWorkspaceStream(phone)
     const errors = []
     const failedBundles = []
@@ -280,6 +281,12 @@ async function inspectBrowser(baseUrl, logs) {
     if (!Array.isArray(plan?.entries) || !plan.entries.some(row => row.id === 'dsh-mobile')) {
       throw new Error(`Real DSH boot manifest did not contain dsh-mobile: entries=${sanitized(JSON.stringify(plan?.entries?.map(row => row.id) ?? []))}`)
     }
+    if (!excludedClientModules.includes('dsh-mobile-question-fixes')) {
+      if (!plan.entries.some(row => row.id === 'dsh-mobile-question-fixes')
+        || await phone.locator('style[data-plugin="dsh-mobile-question-fixes"]').count() !== 1) {
+        throw new Error('Bundled question-card component did not activate exactly once')
+      }
+    }
     if (excludedClientModules.length > 0) {
       for (const id of excludedClientModules) {
         if (!stockBatches.some(batch => batch.entries.includes(id))) throw new Error(`Selected module ${id} is absent from the stock DSH graph`)
@@ -330,8 +337,23 @@ async function inspectBrowser(baseUrl, logs) {
     await settingsDialog.waitFor({ state: 'visible' })
     if (!await back()) throw new Error('Mobile Back did not consume the settings dialog')
     await settingsDialog.waitFor({ state: 'detached' })
-    if (!await back()) throw new Error('Mobile Back did not consume the drawer below settings')
-    await phone.waitForFunction(() => document.querySelector('.dshm-drawer')?.getAttribute('data-open') === 'false')
+    // Let dialog teardown and React's layout update finish before the next gesture.
+    await phone.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+    // Settings can leave a hidden sidebar subtree. Consume a drawer only while
+    // it is visibly open; the drawer's independent Back behavior was checked above.
+    if (!await phone.locator('.dshm-main').isVisible()) throw new Error('Conversation surface did not return after settings closed')
+    if (await drawer.isVisible() && await drawer.getAttribute('data-open') === 'true') {
+      if (!await back()) {
+        const state = await phone.evaluate(() => ({
+          width: window.innerWidth, clientWidth: document.documentElement.clientWidth,
+          viewport: document.querySelector('meta[name="viewport"]')?.getAttribute('content'),
+          drawerOpen: document.querySelector('.dshm-drawer')?.getAttribute('data-open'),
+          drawerWidth: document.querySelector('.dshm-drawer')?.getBoundingClientRect().width,
+        }))
+        throw new Error(`Mobile Back did not consume the drawer below settings: ${JSON.stringify(state)}`)
+      }
+      await phone.waitForFunction(() => document.querySelector('.dshm-drawer')?.getAttribute('data-open') === 'false')
+    }
     if (await back()) throw new Error('Mobile Back consumed the conversation after settings closed')
     const extensionBack = await phone.evaluate(() => {
       const layer = document.createElement('section')

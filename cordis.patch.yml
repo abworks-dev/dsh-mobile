@@ -30,15 +30,8 @@
         tls:
           mode: disabled
 
-    # Experimental question-card layout fixes, carried as this bundle's own
-    # component so they get a Running toggle in the dsh-mobile card rather than a
-    # row in Settings.
-    #
-    # On by default: without them a question taller than the card's cap hides its
-    # own answer options, which is a dead end for the user, and it is silent — the
-    # card simply looks like it has no answers. The row's toggle restores stock
-    # behaviour for anyone who wants it, and the fixes stand down on their own
-    # once DSH removes the cap they work around.
+    # Keep long question titles and answer options in one card scrollport.
+    # The component switch restores the upstream layout immediately.
     - id: dsh-ui-fixes
       name: dsh-mobile-question-fixes
 

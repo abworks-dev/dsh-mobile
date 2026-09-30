@@ -40,11 +40,16 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
-      - name: Install the released DSH Web runtime
+      - name: Install DSH and the packed Mobile bundle
         run: |
-          npm install --prefix "$RUNNER_TEMP/dsh-runtime" --no-save --package-lock=false "@deepseek-ai/dsh@${{ matrix.dsh }}"
+          mkdir -p "$RUNNER_TEMP/plugin-package"
+          npm pack --ignore-scripts --pack-destination "$RUNNER_TEMP/plugin-package"
+          mobile_version=$(node -p "require('./package.json').version")
+          npm install --prefix "$RUNNER_TEMP/dsh-runtime" --no-save --package-lock=false "@deepseek-ai/dsh@${{ matrix.dsh }}" "$RUNNER_TEMP/plugin-package/dsh-mobile-$mobile_version.tgz"
           echo "DSH_BOOT_SMOKE_BIN=$RUNNER_TEMP/dsh-runtime/node_modules/@deepseek-ai/dsh/lib/bin.js" >> "$GITHUB_ENV"
+          echo "DSH_BOOT_SMOKE_MOBILE_ROOT=$RUNNER_TEMP/dsh-runtime/node_modules/dsh-mobile" >> "$GITHUB_ENV"
       - run: npx playwright install --with-deps chromium --only-shell
+      - run: npm run smoke:question-fixes
       - run: npm run smoke:dsh-boot
 
   gateway:

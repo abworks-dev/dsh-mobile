@@ -2,6 +2,11 @@
 
 Notable changes to DSH Mobile are recorded here. GitHub Releases remain the source for downloadable packages and complete generated commit notes.
 
+## Unreleased
+
+- Add a separately switchable question-card component that keeps long questions, answer options, and footer actions reachable in one bounded scroll area. Touch Enter retains its native newline; desktop shortcuts and IME composition remain available (thanks @ayiejosh for [PR #133](https://github.com/saya-ch/dsh-mobile/pull/133)). Answers stay in DSH's existing draft store instead of being copied into browser localStorage.
+- Explain how to distinguish failed settings writes caused by Host/Origin rejection, a missing root Include, and file or lock errors, based on [#132](https://github.com/saya-ch/dsh-mobile/issues/132). Connection diagnostics do not perform a settings write.
+
 ## 0.5.2 - 2026-09-29
 
 - Give each DSH Mobile installation a stable FRP proxy name on a shared frps and report proxy-name or entry-port conflicts directly instead of waiting for a generic timeout (thanks @liudasheng for [PR #130](https://github.com/saya-ch/dsh-mobile/pull/130)). Keep that name through first-time setup and restarts, and use it in copied attach instructions.

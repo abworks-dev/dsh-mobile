@@ -30,7 +30,8 @@
     "bin/dsh-mobile-funnel-win32-x64.exe",
     "bin/dsh-mobile-funnel-linux-x64",
     "bin/dsh-mobile-funnel-linux-arm64",
-    "packages/**",
+    "packages/question-fixes/package.json",
+    "packages/question-fixes/lib/**",
     "cordis.patch.yml",
     "README.md",
     "README.en.md",
@@ -72,6 +73,7 @@
     "check:mobile-release": "node ./scripts/check-mobile-release.mjs",
     "check:dsh-compatibility": "node ./scripts/check-dsh-compatibility.mjs",
     "smoke:dsh-boot": "node ./scripts/smoke-dsh-mobile-boot.mjs",
+    "smoke:question-fixes": "node ./scripts/smoke-question-fixes.mjs",
     "check:release-tag": "node ./scripts/check-release-version.mjs --tag-env",
     "check:version": "node ./scripts/check-release-version.mjs",
     "clean": "node ./scripts/clean.mjs",
@@ -149,6 +151,9 @@
     "qrcode": "^1.5.4",
     "selfsigned": "^5.5.0"
   },
+  "bundledDependencies": [
+    "dsh-mobile-question-fixes"
+  ],
   "devDependencies": {
     "@deepseek-ai/cordis": "4.0.4",
     "@deepseek-ai/cordis-plugin-include": "1.0.9",
