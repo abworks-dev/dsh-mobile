@@ -162,7 +162,7 @@ describe('native mobile presentation', () => {
     expect(NATIVE_MOBILE_STYLES).toContain('[data-composer-card] ~ * [class*="_root"]')
     expect(NATIVE_MOBILE_STYLES).toContain('[data-slot="conversation.composer.dock"] [class*="_root"] { font-size:10px !important; line-height:16px !important; }')
     expect(NATIVE_MOBILE_STYLES).toContain('[class*="_root"]:has(> [class*="_trigger"][aria-haspopup="dialog"]) { width:auto !important')
-    expect(NATIVE_MOBILE_STYLES).toContain('[class*="_dock"]:has([data-composer-stats]) { display:grid !important; grid-template-columns:minmax(0,1fr) max-content !important')
+    expect(NATIVE_MOBILE_STYLES).toContain('[class*="_dock"]:has([data-composer-stats]) { display:flex !important; flex-wrap:wrap !important')
     expect(NATIVE_MOBILE_STYLES).toContain('[class*="_root"][data-composer-stats] { box-sizing:border-box !important; width:auto !important')
     expect(NATIVE_MOBILE_STYLES).toContain('white-space:normal !important; overflow:visible !important')
     expect(NATIVE_MOBILE_STYLES).toContain('margin-bottom:-6px !important')
@@ -184,6 +184,36 @@ describe('native mobile presentation', () => {
     expect(NATIVE_MOBILE_STYLES).toContain('[class*="_rowActions"] button { flex:none !important; width:auto !important; min-width:44px !important')
     expect(NATIVE_MOBILE_STYLES).toContain('white-space:nowrap !important; word-break:keep-all !important; writing-mode:horizontal-tb !important')
     expect(NATIVE_MOBILE_STYLES).toContain('[data-variant="think"]) { margin-bottom:12px !important; }')
+  })
+
+  it('spaces the message column through the shared flow gap so folded seats cost nothing', () => {
+    // DSH hides a folded process seat with `hidden="until-found"`, which keeps a
+    // zero-height box on purpose, and spaces the surviving seats with `margin-top`
+    // on `:not([hidden])` siblings. A flex `gap` cannot skip those boxes: it
+    // charged every folded step a full gap, so collapsing a turn left a blank band
+    // as tall as the process that disappeared (196px against the core's 6px at a
+    // 393px viewport, with 18 folded seats).
+    expect(NATIVE_MOBILE_STYLES).toContain('[data-dsh-mobile-message-column] { box-sizing:border-box !important; width:100% !important; max-width:none !important; margin:0 !important; padding:0 !important; gap:0 !important; --dsh-chat-flow-gap:10px; }')
+    expect(NATIVE_MOBILE_STYLES).not.toContain('margin:0 !important; padding:0 !important; gap:10px !important; }')
+  })
+
+  it('wraps the composer dock instead of assuming a fixed column count', () => {
+    // `conversation.composer.dock` is a `list` slot rendered through a
+    // `display:contents` anchor, so the dock lays out every registered entry: the
+    // statistics, the context ring, and whatever else a plugin adds. A two-column
+    // grid folded four children into two rows, which stranded the ring on a row of
+    // its own and crushed the statistics into a sliver of a column.
+    expect(NATIVE_MOBILE_STYLES).toContain('[class*="_dock"]:has([data-composer-stats]) { display:flex !important; flex-wrap:wrap !important; justify-content:flex-start !important; align-items:center !important')
+    expect(NATIVE_MOBILE_STYLES).not.toContain('grid-template-columns:minmax(0,1fr) max-content !important')
+  })
+
+  it('keeps the context ring on the statistics row however many dock entries exist', () => {
+    expect(NATIVE_MOBILE_STYLES).toContain('[class*="_dock"]:has([data-composer-stats]) [data-composer-stats] { order:-2 !important; }')
+    expect(NATIVE_MOBILE_STYLES).toContain('[class*="_dock"]:has([data-composer-stats]) [class*="_root"]:has(> [class*="_trigger"][aria-haspopup="dialog"]) { order:-1 !important; }')
+    // Wrapped rows would otherwise overlap each other: the composer-metadata rule
+    // gives every `_root` a -6px bottom margin, which was harmless while the dock
+    // was a single line.
+    expect(NATIVE_MOBILE_STYLES).toContain('[class*="_dock"]:has([data-composer-stats]) [data-slot="conversation.composer.dock"] > * { margin-bottom:0 !important; }')
   })
 
   it('keeps unrelated feature frames from suppressing the dedicated mobile layout', () => {
