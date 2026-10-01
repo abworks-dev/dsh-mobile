@@ -9,7 +9,7 @@ npm ci
 npm run verify
 ```
 
-For question-card or mobile-layout changes, build the client and run `npx playwright install chromium --only-shell`, `npm run smoke:question-fixes`, and `npm run smoke:native-layout`. These browser checks exercise the built client; the CI startup matrix also installs the npm tarball into isolated DSH runtimes before pairing.
+For question-card, mobile-layout, or dictation changes, build the client and run `npx playwright install chromium --only-shell`, `npm run smoke:question-fixes`, `npm run smoke:native-layout`, and `npm run smoke:voice-session`. These browser checks exercise the built client; the CI startup matrix also installs the npm tarball into isolated DSH runtimes before pairing.
 
 For Android changes, also run the [app build and unit checks](apps/mobile/README.md#build); review the internal [design reference](design-system/dsh-mobile/MASTER.md) for native screens and plugin-owned controls. Keep the English and Chinese app instructions aligned. Never commit signing keys, provisioning profiles, TLS private keys, device registries, credentials, or tokens.
 

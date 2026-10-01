@@ -31,14 +31,14 @@
 
 > DSH Mobile 是 DeepSeek Harness 社区插件，原生 App 仅支持 Android。
 >
-> **0.5.3 发布准备（尚未发布）**：优化提问卡片的滚动与输入体验，修复折叠过程后的空白及第三方插件挤压输入栏统计的问题，并补充设置保存失败的排查说明。[更新记录](CHANGELOG.md#053-unreleased)。
+> **当前版本：0.5.3**。优化提问卡片、折叠过程间距和第三方插件输入栏布局，改善语音输入期间的焦点与常亮处理，并补充设置保存故障排查。[更新记录](CHANGELOG.md#053---2026-10-01)。
 >
-> **当前发布版：0.5.2**。下方下载仍指向已发布 App；0.5.3 候选不改变配对协议，现有设备无需重新配对。[兼容说明](#兼容性)。
+> **升级提醒**：插件与 Android App 可同步更新至 0.5.3。App 本次仅同步版本信息，现有设备无需重新配对。[兼容说明](#兼容性)。
 
 <p align="center">
-  <a href="https://github.com/saya-ch/dsh-mobile/releases/download/v0.5.2/dsh-mobile-android-v0.5.2.apk"><img src="assets/brand/app-icon-rounded.svg" alt="DSH Mobile 安卓应用图标" width="72" height="72"></a><br>
-  <a href="https://github.com/saya-ch/dsh-mobile/releases/download/v0.5.2/dsh-mobile-android-v0.5.2.apk"><strong>下载 Android App 0.5.2</strong></a><br>
-  <sub><a href="https://github.com/saya-ch/dsh-mobile/releases/tag/v0.5.2">版本说明与校验文件</a></sub>
+  <a href="https://github.com/saya-ch/dsh-mobile/releases/download/v0.5.3/dsh-mobile-android-v0.5.3.apk"><img src="assets/brand/app-icon-rounded.svg" alt="DSH Mobile 安卓应用图标" width="72" height="72"></a><br>
+  <a href="https://github.com/saya-ch/dsh-mobile/releases/download/v0.5.3/dsh-mobile-android-v0.5.3.apk"><strong>下载 Android App 0.5.3</strong></a><br>
+  <sub><a href="https://github.com/saya-ch/dsh-mobile/releases/tag/v0.5.3">版本说明与校验文件</a></sub>
 </p>
 
 DSH Mobile 是一个 DeepSeek Harness 插件，让手机浏览器或 Android App 通过局域网，或可选的 Tailscale Funnel、cpolar、cloudflared、自建 FRP 或自有反向代理远程通道连接电脑，继续使用同一份会话、工作区、消息和工具。电脑端分别启停局域网与远程访问、分别管理配对授权；Android App 统一显示已配对电脑。插件不修改 DeepSeek Harness 源码。
@@ -212,7 +212,7 @@ Android App 用一个“已配对设备”列表同时显示多台电脑：局�
 
 ## 第三方插件适配
 
-0.5.3 候选包含默认启用、可独立启停的 `dsh-mobile-question-fixes` 提问卡片组件，已发布的 0.5.2 尚不包含。在 DSH 插件详情的组件列表中关闭它，可立即恢复原卡片样式。长问题、选项和底部按钮在有限高度的卡片内共同滚动，收起时标题最多显示两行；手机浏览器的触屏 Enter 保留换行，Android App 则仅在软键盘已打开且未连接实体键盘时使用该行为。答案草稿仍由 DSH 管理，不另存到浏览器 localStorage。
+0.5.3 包含默认启用、可独立启停的 `dsh-mobile-question-fixes` 提问卡片组件。在 DSH 插件详情的组件列表中关闭它，可立即恢复原卡片样式。长问题、选项和底部按钮在有限高度的卡片内共同滚动，收起时标题最多显示两行；手机浏览器的触屏 Enter 保留换行，Android App 则仅在软键盘已打开且未连接实体键盘时使用该行为。答案草稿仍由 DSH 管理，不另存到浏览器 localStorage。
 
 移动适配保持 DSH 原有的工作区、任务管理、终端和文件面板入口，不会把第三方插件内容隔离成另一套页面。下面的宽屏截图展示 Android App 在宽屏下的布局。App 会根据屏幕宽度自适应：手机使用抽屉和浮层，宽屏使用并排面板；两种布局共享相同的功能和连接方式。第三方插件仍由 DSH 自己加载，移动层负责适配布局与连接，不修改 DeepSeek Harness 源码。
 
@@ -323,7 +323,7 @@ macOS 上局域网、自建 FRP 与自有反向代理可用；三个托管组件
 
 | DSH Mobile 插件                         | 验证支持的 DeepSeek Harness 版本                             |
 | ----------------------------------------- | -------------------------------------------------------------- |
-| `0.5.3`（候选，未发布） | Windows 本地 npm 打包安装、配对、移动页面启动和 WebSocket 工作区读取：`0.1.7-rc.2`、`0.2.0-rc.2`；`0.2.0-rc.2` 源码契约通过；候选的跨平台 CI 待推送后运行 |
+| `0.5.3` | `0.1.7-alpha.2`、`0.1.7-rc.1`、`0.1.7-rc.2`、`0.2.0-rc.1`、`0.2.0-rc.2`（源码契约、npm 打包安装、隔离配对、移动页面启动及 WebSocket 工作区读取） |
 | `0.5.2` | `0.1.7-alpha.2`、`0.1.7-rc.1`、`0.1.7-rc.2`、`0.2.0-rc.1`（延续既有验证）；`0.2.0-rc.2`（源码契约、隔离配对、移动页面启动和 WebSocket 工作区读取） |
 | `0.5.1` | `0.1.7-alpha.2`、`0.1.7-rc.1`、`0.1.7-rc.2`、`0.2.0-rc.1`；官方 Desktop `0.1.7-rc.2`（桌面管理入口） |
 | `0.5.0` | `0.1.7-alpha.2`、`0.1.7-rc.1`、`0.1.7-rc.2`；官方 Desktop `0.1.7-rc.2`（桌面管理入口） |

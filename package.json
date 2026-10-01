@@ -75,6 +75,7 @@
     "smoke:dsh-boot": "node ./scripts/smoke-dsh-mobile-boot.mjs",
     "smoke:question-fixes": "node ./scripts/smoke-question-fixes.mjs",
     "smoke:native-layout": "node ./scripts/smoke-native-mobile-layout.mjs",
+    "smoke:voice-session": "node ./scripts/smoke-voice-session.mjs",
     "check:release-tag": "node ./scripts/check-release-version.mjs --tag-env",
     "check:version": "node ./scripts/check-release-version.mjs",
     "clean": "node ./scripts/clean.mjs",

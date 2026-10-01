@@ -2,7 +2,7 @@
 
 GitHub 的 [Contributors 图表](https://github.com/saya-ch/dsh-mobile/graphs/contributors) 按进入默认分支的提交自动统计，无法手动加入仅提交 issue 或 PR 提案的成员。本页按实际参与方式感谢社区成员；仓库维护者与自动依赖更新仍可在 GitHub 历史记录中查看。
 
-GitHub's Contributors graph counts commits on the default branch; issue reports and PR proposals cannot be manually added to it. This page credits community members by how they contributed, through 2026-09-30. The repository maintainer and automated dependency updates remain visible in GitHub's history.
+GitHub's Contributors graph counts commits on the default branch; issue reports and PR proposals cannot be manually added to it. This page credits community members by how they contributed, through 2026-10-01. The repository maintainer and automated dependency updates remain visible in GitHub's history.
 
 ## 已合并 PR / Merged PRs
 
@@ -10,7 +10,7 @@ GitHub's Contributors graph counts commits on the default branch; issue reports 
 | --- | --- |
 | [@1624318455](https://github.com/1624318455) | [#93](https://github.com/saya-ch/dsh-mobile/pull/93) |
 | [@abworks-dev](https://github.com/abworks-dev) | [#91](https://github.com/saya-ch/dsh-mobile/pull/91), [#98](https://github.com/saya-ch/dsh-mobile/pull/98), [#99](https://github.com/saya-ch/dsh-mobile/pull/99) |
-| [@ayiejosh](https://github.com/ayiejosh) | [#109](https://github.com/saya-ch/dsh-mobile/pull/109), [#110](https://github.com/saya-ch/dsh-mobile/pull/110), [#116](https://github.com/saya-ch/dsh-mobile/pull/116), [#117](https://github.com/saya-ch/dsh-mobile/pull/117), [#119](https://github.com/saya-ch/dsh-mobile/pull/119), [#124](https://github.com/saya-ch/dsh-mobile/pull/124), [#125](https://github.com/saya-ch/dsh-mobile/pull/125), [#133](https://github.com/saya-ch/dsh-mobile/pull/133) |
+| [@ayiejosh](https://github.com/ayiejosh) | [#109](https://github.com/saya-ch/dsh-mobile/pull/109), [#110](https://github.com/saya-ch/dsh-mobile/pull/110), [#116](https://github.com/saya-ch/dsh-mobile/pull/116), [#117](https://github.com/saya-ch/dsh-mobile/pull/117), [#119](https://github.com/saya-ch/dsh-mobile/pull/119), [#124](https://github.com/saya-ch/dsh-mobile/pull/124), [#125](https://github.com/saya-ch/dsh-mobile/pull/125), [#133](https://github.com/saya-ch/dsh-mobile/pull/133), [#136](https://github.com/saya-ch/dsh-mobile/pull/136) |
 | [@chintoleung](https://github.com/chintoleung) | [#104](https://github.com/saya-ch/dsh-mobile/pull/104) |
 | [@idoall](https://github.com/idoall) | [#61](https://github.com/saya-ch/dsh-mobile/pull/61), [#66](https://github.com/saya-ch/dsh-mobile/pull/66), [#67](https://github.com/saya-ch/dsh-mobile/pull/67), [#77](https://github.com/saya-ch/dsh-mobile/pull/77) |
 | [@JackRushante](https://github.com/JackRushante) | [#16](https://github.com/saya-ch/dsh-mobile/pull/16) |
@@ -19,14 +19,8 @@ GitHub's Contributors graph counts commits on the default branch; issue reports 
 | [@qzyqmzn](https://github.com/qzyqmzn) | [#38](https://github.com/saya-ch/dsh-mobile/pull/38), [#75](https://github.com/saya-ch/dsh-mobile/pull/75) |
 | [@Sanksu](https://github.com/Sanksu) | [#118](https://github.com/saya-ch/dsh-mobile/pull/118) |
 | [@StrawberryAO](https://github.com/StrawberryAO) | [#34](https://github.com/saya-ch/dsh-mobile/pull/34), [#40](https://github.com/saya-ch/dsh-mobile/pull/40) |
-| [@xhwxt](https://github.com/xhwxt) | [#105](https://github.com/saya-ch/dsh-mobile/pull/105) |
+| [@xhwxt](https://github.com/xhwxt) | [#105](https://github.com/saya-ch/dsh-mobile/pull/105), [#134](https://github.com/saya-ch/dsh-mobile/pull/134) |
 | [@xingleiwu](https://github.com/xingleiwu) | [#79](https://github.com/saya-ch/dsh-mobile/pull/79), [#84](https://github.com/saya-ch/dsh-mobile/pull/84), [#85](https://github.com/saya-ch/dsh-mobile/pull/85), [#86](https://github.com/saya-ch/dsh-mobile/pull/86) |
-
-## 本地候选中的贡献 / Contributions in the local candidate
-
-[@xhwxt](https://github.com/xhwxt) 的 [#134](https://github.com/saya-ch/dsh-mobile/pull/134) 已保留原始提交并纳入本地 0.5.3 候选，修复折叠过程后的空白与输入栏下方的布局；维护者随后补充静态统计可读性和排序范围修正。该候选尚未发布，GitHub PR 的合并状态以链接页面为准。
-
-[@xhwxt](https://github.com/xhwxt)'s [#134](https://github.com/saya-ch/dsh-mobile/pull/134) is incorporated into the local 0.5.3 candidate with its original commits preserved. It fixes blank space after folded process sections and composer-dock layout; maintainer follow-ups keep static statistics readable and narrow the ordering scope. The candidate is not yet released; the linked PR shows its current GitHub merge status.
 
 ## 已吸收但未直接合并的 PR / Incorporated without a direct merge
 

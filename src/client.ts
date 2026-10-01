@@ -4177,10 +4177,7 @@ export function apply(ctx: ClientContext): void {
       ? CONTROL_STYLES
       : NATIVE_MOBILE_STYLES
     document.head.append(style)
-    // Installed for every surface, not just the phone: it only acts while a
-    // recording is running, and it self-disables where the browser has no Screen
-    // Wake Lock API.
-    const removeVoiceSession = installVoiceSession()
+    const removeVoiceSession = installVoiceSession(!desktopAdmin)
     if (!desktopAdmin) {
       const removeSettingsAction = ctx.slots.inject('settings.general.item', () => {
         const removeSwitchComputer = ctx.slots.register({

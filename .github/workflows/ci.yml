@@ -50,6 +50,7 @@ jobs:
           echo "DSH_BOOT_SMOKE_MOBILE_ROOT=$RUNNER_TEMP/dsh-runtime/node_modules/dsh-mobile" >> "$GITHUB_ENV"
       - run: npx playwright install --with-deps chromium --only-shell
       - run: npm run smoke:native-layout
+      - run: npm run smoke:voice-session
       - run: npm run smoke:question-fixes
       - run: npm run smoke:dsh-boot
 
