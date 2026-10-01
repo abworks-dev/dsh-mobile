@@ -153,7 +153,7 @@ describe('native mobile presentation', () => {
     expect(NATIVE_MOBILE_STYLES).toContain('data-slot="settings.general.item"')
     expect(NATIVE_MOBILE_STYLES).toContain('flex-direction:column !important')
     expect(NATIVE_MOBILE_STYLES).toContain('[data-disclosure-row]')
-    expect(NATIVE_MOBILE_STYLES).toContain('gap:10px !important')
+    expect(NATIVE_MOBILE_STYLES).toContain('gap:0 !important; --dsh-chat-flow-gap:10px;')
     expect(NATIVE_MOBILE_STYLES).toContain('[data-dsh-mobile-message-scroll] { box-sizing:border-box !important; width:100% !important')
     expect(NATIVE_MOBILE_STYLES).toContain('min-height:40px !important')
     expect(NATIVE_MOBILE_STYLES).toContain('line-height:19px !important')
@@ -162,7 +162,7 @@ describe('native mobile presentation', () => {
     expect(NATIVE_MOBILE_STYLES).toContain('[data-composer-card] ~ * [class*="_root"]')
     expect(NATIVE_MOBILE_STYLES).toContain('[data-slot="conversation.composer.dock"] [class*="_root"] { font-size:10px !important; line-height:16px !important; }')
     expect(NATIVE_MOBILE_STYLES).toContain('[class*="_root"]:has(> [class*="_trigger"][aria-haspopup="dialog"]) { width:auto !important')
-    expect(NATIVE_MOBILE_STYLES).toContain('[class*="_dock"]:has([data-composer-stats]) { display:grid !important; grid-template-columns:minmax(0,1fr) max-content !important')
+    expect(NATIVE_MOBILE_STYLES).toContain('[class*="_dock"]:has([data-composer-stats]) { display:flex !important; flex-wrap:wrap !important')
     expect(NATIVE_MOBILE_STYLES).toContain('[class*="_root"][data-composer-stats] { box-sizing:border-box !important; width:auto !important')
     expect(NATIVE_MOBILE_STYLES).toContain('white-space:normal !important; overflow:visible !important')
     expect(NATIVE_MOBILE_STYLES).toContain('margin-bottom:-6px !important')
@@ -184,6 +184,31 @@ describe('native mobile presentation', () => {
     expect(NATIVE_MOBILE_STYLES).toContain('[class*="_rowActions"] button { flex:none !important; width:auto !important; min-width:44px !important')
     expect(NATIVE_MOBILE_STYLES).toContain('white-space:nowrap !important; word-break:keep-all !important; writing-mode:horizontal-tb !important')
     expect(NATIVE_MOBILE_STYLES).toContain('[data-variant="think"]) { margin-bottom:12px !important; }')
+  })
+
+  it('spaces the message column through the shared flow gap so folded seats cost nothing', () => {
+    expect(NATIVE_MOBILE_STYLES).toContain('[data-dsh-mobile-message-column] { box-sizing:border-box !important; width:100% !important; max-width:none !important; margin:0 !important; padding:0 !important; gap:0 !important; --dsh-chat-flow-gap:10px; }')
+    expect(NATIVE_MOBILE_STYLES).not.toContain('margin:0 !important; padding:0 !important; gap:10px !important; }')
+  })
+
+  it('wraps the composer dock instead of assuming a fixed column count', () => {
+    expect(NATIVE_MOBILE_STYLES).toContain('[class*="_dock"]:has([data-composer-stats]) { display:flex !important; flex-wrap:wrap !important; justify-content:flex-start !important; align-items:center !important')
+    expect(NATIVE_MOBILE_STYLES).not.toContain('grid-template-columns:minmax(0,1fr) max-content !important')
+    expect(NATIVE_MOBILE_STYLES).toContain('[data-slot="conversation.composer.dock"] > :not([data-composer-stats]) { flex:0 1 100% !important; min-width:0 !important; max-width:100% !important; }')
+  })
+
+  it('keeps the context ring on the statistics row however many dock entries exist', () => {
+    expect(NATIVE_MOBILE_STYLES).toContain('[class*="_dock"]:has([data-composer-stats]) [data-composer-stats] { order:-2 !important; }')
+    expect(NATIVE_MOBILE_STYLES).toContain('[class*="_dock"]:has([data-composer-stats]) > [class*="_root"]:has(> [class*="_trigger"][aria-haspopup="dialog"]) { order:-1 !important; }')
+    expect(NATIVE_MOBILE_STYLES).toContain('[class*="_dock"]:has([data-composer-stats]) [data-slot="conversation.composer.dock"] > * { margin-bottom:0 !important; }')
+  })
+
+  it('keeps interactive statistics compact while static statistics can wrap', () => {
+    expect(NATIVE_MOBILE_STYLES).toContain('flex:1 1 0 !important; flex-wrap:nowrap !important; justify-content:flex-start !important; overflow:hidden !important')
+    expect(NATIVE_MOBILE_STYLES).toContain('[data-dsh-mobile-center] [data-composer-stats] [class*="_pill"] { display:block !important; min-width:0 !important; white-space:nowrap !important; overflow:hidden !important; text-overflow:ellipsis !important; }')
+    expect(NATIVE_MOBILE_STYLES).toContain('[data-dsh-mobile-center] [data-composer-stats] [class*="_pill"] svg { display:inline-block !important; vertical-align:-2px !important; margin-right:6px !important; }')
+    expect(NATIVE_MOBILE_STYLES).toContain('[data-composer-stats]:has(span[class*="_pill"]) { flex-wrap:wrap !important; overflow:visible !important; }')
+    expect(NATIVE_MOBILE_STYLES).toContain('span[class*="_pill"] { flex:0 1 auto !important; max-width:100% !important; white-space:normal !important; overflow:visible !important; overflow-wrap:anywhere !important; text-overflow:clip !important; }')
   })
 
   it('keeps unrelated feature frames from suppressing the dedicated mobile layout', () => {

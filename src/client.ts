@@ -9,6 +9,7 @@ import { createRestrictedFrpServerTemplate } from './frp-template.js'
 import { createFrpAttachFrpcToml, createFrpAttachTemplate } from './frp-attach.js'
 import { parseFrpSettings, type FrpSettings } from './frp-config.js'
 import { installNativeMobileSurface, NATIVE_MOBILE_STYLES, resolveNativeMobileLanguage } from './native-mobile.js'
+import { installVoiceSession } from './voice-session.js'
 import { isDesktopAdminSurface, localAdminRequestHeaders } from './local-admin-host.js'
 import { fireDeviceRevoked, fireTaskNotifyEvent, isDeviceRevokedPayload, parseTaskNotifyPayload, taskCompletionTag } from './task-notify.js'
 
@@ -4176,6 +4177,7 @@ export function apply(ctx: ClientContext): void {
       ? CONTROL_STYLES
       : NATIVE_MOBILE_STYLES
     document.head.append(style)
+    const removeVoiceSession = installVoiceSession(!desktopAdmin)
     if (!desktopAdmin) {
       const removeSettingsAction = ctx.slots.inject('settings.general.item', () => {
         const removeSwitchComputer = ctx.slots.register({
@@ -4195,7 +4197,7 @@ export function apply(ctx: ClientContext): void {
         getLayout: () => ctx.get('layout'),
         getSidebarRight: () => ctx.get('sidebarRight'),
       }))
-      return () => { removeSettingsAction(); removeCustom(); removeSurface(); style.remove() }
+      return () => { removeSettingsAction(); removeCustom(); removeSurface(); removeVoiceSession(); style.remove() }
     }
     const removeControl = installDshLanguageBoundSurface(() => {
       const control = installControl()
@@ -4225,7 +4227,7 @@ export function apply(ctx: ClientContext): void {
       }, createElement('rect', { x: 4, y: 1, width: 8, height: 14, rx: 2 }), createElement('path', { d: 'M7 12h2' })), wide ? createElement('span', { className: 'dsh-mobile-control__trigger-label' }, t('mobileAccess')) : undefined)))
       return () => { disposeSlot(); control.remove() }
     })
-    return () => { removeControl(); style.remove() }
+    return () => { removeControl(); removeVoiceSession(); style.remove() }
   }, 'dsh-mobile: stock mobile adaptation and local control')
 }
 
