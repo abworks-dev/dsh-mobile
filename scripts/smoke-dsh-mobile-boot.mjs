@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process'
-import { lstat, mkdir, mkdtemp, readdir, rm, symlink, unlink, writeFile, readFile } from 'node:fs/promises'
+import { cp, lstat, mkdir, mkdtemp, readdir, rm, unlink, writeFile, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -35,8 +35,8 @@ async function removeTemporaryRoot(root) {
       else if (metadata.isDirectory()) await unlinkNestedLinks(path)
     }
   }
-  // DSH may project package links, and this test itself creates a junction to
-  // the source checkout. Never let recursive removal encounter any link.
+  // DSH may project package links into the profile. Never let recursive removal
+  // encounter any link.
   await unlinkNestedLinks(absolute)
   await rm(absolute, { recursive: true, force: true })
 }
@@ -118,7 +118,7 @@ async function createProfile(root) {
     },
   }]) + '\n')
   await writeFile(join(profile, 'pnpm-workspace.yaml'), 'packages:\n  - .\n\nnodeLinker: hoisted\nautoInstallPeers: false\n')
-  await symlink(mobileRoot, join(profile, 'node_modules', 'dsh-mobile'), process.platform === 'win32' ? 'junction' : 'dir')
+  await installBundleInto(join(profile, 'node_modules', 'dsh-mobile'))
   await writeFile(join(mobileState, 'setup.json'), JSON.stringify({
     version: 1,
     listenHost: '127.0.0.1',
@@ -127,6 +127,47 @@ async function createProfile(root) {
     tls: { mode: 'disabled' },
   }) + '\n')
   return home
+}
+
+/**
+ * Place the bundle in the profile the way an installation leaves it. A symlink
+ * to the checkout would make the checkout's own `node_modules` the bundle's
+ * lookup path, so a specifier that only exists there — a workspace-linked or
+ * non-bundled dependency — would resolve and hide the defect. Copying keeps the
+ * bundle's own nested `node_modules`, so every row specifier resolves from the
+ * profile root exactly as it does for an installed profile.
+ *
+ * The checkout's top-level `node_modules` is left out: an installation never
+ * places it inside the package, and it is both huge and irrelevant to row
+ * resolution. `cp`'s filter cannot express this — it skips every `node_modules`
+ * it meets, including the bundled one this fixture exists to preserve.
+ */
+async function installBundleInto(destination) {
+  await copyTree(mobileRoot, destination)
+  // A packed root ships `packages/question-fixes` without its own linked copy,
+  // so materialize the nested `file:` bundled dependency a package manager
+  // would have created — the placement this fixture must reproduce.
+  const manifest = JSON.parse(await readFile(join(destination, 'package.json'), 'utf8'))
+  for (const name of manifest.bundledDependencies ?? []) {
+    const nested = join(destination, 'node_modules', name)
+    if (await exists(nested)) continue
+    await copyTree(join(destination, 'packages', 'question-fixes'), nested)
+  }
+}
+
+async function exists(path) {
+  try { await readdir(path); return true } catch { return false }
+}
+
+async function copyTree(source, destination) {
+  await mkdir(destination, { recursive: true })
+  for (const entry of await readdir(source, { withFileTypes: true })) {
+    if (source === mobileRoot && entry.name === 'node_modules') continue
+    const from = join(source, entry.name)
+    const to = join(destination, entry.name)
+    if (entry.isDirectory()) await copyTree(from, to)
+    else await cp(from, to, { recursive: true, dereference: true, force: true })
+  }
 }
 
 function launchDsh(root, home) {
