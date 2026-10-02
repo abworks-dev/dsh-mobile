@@ -10,6 +10,7 @@ import {
   WIDE_LAYOUT_MIN_WIDTH_PX,
   apply as applyMobileLayout,
   closeDetailsFromScrim,
+  isComposerActionTap,
   isComposerOwnedFocus,
   isMobileScrimOpen,
   isSessionRowNavigation,
@@ -18,6 +19,7 @@ import {
   resolveComposerImePolicy,
   resolveMobileLayoutLanguage,
   resolveMobileRightbarLayout,
+  shouldCollapseComposerKeyboard,
 } from '../src/mobile-layout.js'
 
 function index(entries: unknown[]): string {
@@ -1269,6 +1271,19 @@ describe('composer soft-keyboard policy', () => {
     expect(source).toContain("editor.removeAttribute('inputmode')")
   })
 
+  it('drops the soft keyboard once a composer action consumes the draft', () => {
+    // The stock Send button keeps the editor focused on purpose so desktop
+    // typing continues; on a phone the keyboard must collapse instead of
+    // covering the reply. The capture listener snapshots the focused draft
+    // before stock handlers run, and the timeout verifies consumption after.
+    const source = readFileSync(new URL('../src/mobile-layout.ts', import.meta.url), 'utf8')
+    expect(source).toContain("document.addEventListener('click', collapseComposerKeyboardAfterSend, true)")
+    expect(source).toContain("document.removeEventListener('click', collapseComposerKeyboardAfterSend, true)")
+    expect(source).toContain('if (sendCollapseTimer !== 0) window.clearTimeout(sendCollapseTimer)')
+    expect(source).toContain('suppressComposerUntil.current = performance.now() + 700')
+    expect(source).toContain('shouldCollapseComposerKeyboard({')
+  })
+
   it('only suppresses composer autofocus while changing Sessions on a touch device', () => {
     const source = readFileSync(new URL('../src/mobile-layout.ts', import.meta.url), 'utf8')
     expect(source).toContain('if (performance.now() < suppressComposerUntil.current) target.blur()')
@@ -1291,5 +1306,37 @@ describe('composer soft-keyboard policy', () => {
     expect(isSessionRowNavigation(target(true, false))).toBe(false)
     expect(isSessionRowNavigation(target(false, true))).toBe(false)
     expect(isSessionRowNavigation(null)).toBe(false)
+  })
+
+  it('treats only a button inside the composer card as a send-capable action', () => {
+    const card = {} as Element
+    const buttonInCard = {
+      closest: (selector: string) => selector === '[data-composer-card]' ? card : null,
+    } as unknown as Element
+    const buttonOutside = { closest: () => null } as unknown as Element
+    let queried = ''
+    const tapOn = (button: Element | null): Element => ({
+      closest: (selector: string) => { queried = selector; return button },
+    }) as unknown as Element
+    expect(isComposerActionTap(tapOn(buttonInCard))).toBe(true)
+    expect(isComposerActionTap(tapOn(buttonOutside))).toBe(false)
+    // The editor itself and taps without a button ancestor never count.
+    expect(isComposerActionTap(tapOn(null))).toBe(false)
+    expect(isComposerActionTap(null)).toBe(false)
+    // The button match runs first, like the stock policy lookups.
+    expect(queried).toBe('button')
+  })
+
+  it('collapses the keyboard only for a touch send that consumed the focused draft', () => {
+    const sent = { touchPrimary: true, hadDraft: true, draftConsumed: true, editorStillFocused: true }
+    expect(shouldCollapseComposerKeyboard(sent)).toBe(true)
+    // Desktop pointers keep the stock keep-focus behaviour.
+    expect(shouldCollapseComposerKeyboard({ ...sent, touchPrimary: false })).toBe(false)
+    // An empty or unfocused composer never armed the capture snapshot.
+    expect(shouldCollapseComposerKeyboard({ ...sent, hadDraft: false })).toBe(false)
+    // Stop, disabled, and menu taps leave the draft intact.
+    expect(shouldCollapseComposerKeyboard({ ...sent, draftConsumed: false })).toBe(false)
+    // Stock already moved the caret, so there is nothing left to blur.
+    expect(shouldCollapseComposerKeyboard({ ...sent, editorStillFocused: false })).toBe(false)
   })
 })
