@@ -42,7 +42,6 @@ import {
   DEVICE_COOKIE,
   HttpError,
   LOCAL_ADMIN_PREFIX,
-  parseCookies,
   parseRequestTarget,
   readJsonObject,
   sendFailure,
@@ -51,7 +50,15 @@ import {
   setSecurityHeaders,
   WS_PATHS,
 } from './http-security.js'
+import {
+  authenticatedCookie,
+  browserAuthCookies,
+  HOST_CSRF_COOKIE,
+  HOST_DEVICE_COOKIE,
+  HOST_SESSION_COOKIE,
+} from './browser-auth-cookies.js'
 import type { BlockedUpgradePathEntry, BlockedUpgradePathLog } from './websocket-paths.js'
+import { bridgeCompressedWebSocket } from './websocket-compression.js'
 import {
   DSH_MOBILE_VERSION,
   MINIMUM_ANDROID_APP_VERSION,
@@ -95,8 +102,6 @@ interface ActiveWebSocket {
 
 const MAX_CONTROL_BODY_BYTES = 16 * 1024
 const MAX_HEADER_BYTES = 16 * 1024
-const MOBILE_HISTORY_PAGE_MESSAGES = 10
-const SESSION_HISTORY_PATH = '/api/session.history'
 const DISCOVERY_QUERY = Buffer.from('DSH_MOBILE_DISCOVER_V1', 'ascii')
 const DISCOVERY_PROTOCOL = 1
 const DISCOVERY_INTERVAL_MS = 3_000
@@ -180,7 +185,9 @@ const MOBILE_LAYOUT_DEPENDENCY_PROFILES = Object.freeze([
     ]),
   }),
 ])
-const MOBILE_CSRF_FETCH_BOOTSTRAP = `(()=>{const nativeFetch=window.fetch.bind(window);window.fetch=(input,init)=>{const source=input instanceof Request?input:undefined;const method=String(init?.method??source?.method??'GET').toUpperCase();if(method==='GET'||method==='HEAD')return nativeFetch(input,init);const raw=typeof input==='string'?input:input instanceof URL?input.href:source?.url;if(raw===undefined||new URL(raw,location.href).origin!==location.origin)return nativeFetch(input,init);const headers=new Headers(init?.headers??source?.headers);if(!headers.has(${JSON.stringify(CSRF_HEADER)})){const prefix=${JSON.stringify(`${CSRF_COOKIE}=`)};const token=document.cookie.split(';').map(value=>value.trim()).find(value=>value.startsWith(prefix))?.slice(prefix.length);if(token!==undefined)headers.set(${JSON.stringify(CSRF_HEADER)},token)}return nativeFetch(input,{...init,headers})};})();`
+function mobileCsrfFetchBootstrap(cookieName: string): string {
+  return `(()=>{const nativeFetch=window.fetch.bind(window);window.fetch=(input,init)=>{const source=input instanceof Request?input:undefined;const method=String(init?.method??source?.method??'GET').toUpperCase();if(method==='GET'||method==='HEAD')return nativeFetch(input,init);const raw=typeof input==='string'?input:input instanceof URL?input.href:source?.url;if(raw===undefined||new URL(raw,location.href).origin!==location.origin)return nativeFetch(input,init);const headers=new Headers(init?.headers??source?.headers);if(!headers.has(${JSON.stringify(CSRF_HEADER)})){const prefix=${JSON.stringify(`${cookieName}=`)};const values=[...new Set(document.cookie.split(';').map(value=>value.trim()).filter(value=>value.startsWith(prefix)).map(value=>value.slice(prefix.length)))];if(values.length===1)headers.set(${JSON.stringify(CSRF_HEADER)},values[0])}return nativeFetch(input,{...init,headers})};})();`
+}
 // Paired pages use the gateway's authenticated HTTP carrier; streams retain DSH's WebSocket transport.
 // DSH's default file-upload Worker bypasses this gateway's CSRF fetch wrapper. Resolve
 // window.fetch when called because the wrapper is installed after the transport hook.
@@ -613,7 +620,7 @@ function rewriteMobileApplicationPreloads(html: string, replacements: ReadonlyMa
 
 function rewriteMobileIndexWithBatch(
   html: string,
-  options: { readonly sizes?: ReadonlyMap<string, number>; readonly passThrough?: ReadonlySet<string>; readonly excludedClientModules?: readonly string[] } = {},
+  options: { readonly sizes?: ReadonlyMap<string, number>; readonly passThrough?: ReadonlySet<string>; readonly excludedClientModules?: readonly string[]; readonly csrfCookie?: string } = {},
 ): RewrittenMobileIndex {
   const plan = parseMobileBootPlan(html, options.excludedClientModules)
   const remoteSettings = orderAuthenticatedSettings(plan.entries, plan.slotProvider)
@@ -646,7 +653,7 @@ function rewriteMobileIndexWithBatch(
     plan.parsed.rev = createHash('sha256').update(JSON.stringify({ entries: plan.entries, batches: plan.batches })).digest('hex').slice(0, 16)
   }
   const transportBootstrap = remoteSettings ? MOBILE_AUTHENTICATED_TRANSPORT_BOOTSTRAP : ''
-  const replacement = `${MOBILE_GATEWAY_REACHABILITY_BOOTSTRAP}${transportBootstrap}${MOBILE_CSRF_FETCH_BOOTSTRAP}window.__DSH_MOBILE_FRONTEND__="dedicated";${plan.assignment}${JSON.stringify(plan.parsed)};`
+  const replacement = `${MOBILE_GATEWAY_REACHABILITY_BOOTSTRAP}${transportBootstrap}${mobileCsrfFetchBootstrap(options.csrfCookie ?? CSRF_COOKIE)}window.__DSH_MOBILE_FRONTEND__="dedicated";${plan.assignment}${JSON.stringify(plan.parsed)};`
   const rewritten = `${html.slice(0, plan.replaceStart)}${replacement}${html.slice(plan.replaceEnd)}`
   return Object.freeze({
     html: ensureMobileViewport(ensureMobileCompatibility(rewriteMobileApplicationPreloads(rewritten, preloadReplacements))),
@@ -856,9 +863,8 @@ function isCompressibleContentType(value: string | string[] | undefined): boolea
 
 function shouldCompressResponse(request: IncomingMessage, response: IncomingMessage): boolean {
   const pathname = request.url?.split('?', 1)[0] ?? ''
-  const compressibleRequest = (request.method === 'GET'
-      && (pathname.startsWith('/plugins/') || pathname.startsWith('/assets/')))
-    || (request.method === 'POST' && pathname === SESSION_HISTORY_PATH)
+  const compressibleRequest = request.method === 'GET'
+    && (pathname.startsWith('/plugins/') || pathname.startsWith('/assets/'))
   return compressibleRequest
     && response.statusCode === 200
     && request.headers.range === undefined
@@ -890,29 +896,6 @@ function revisionedStaticCacheControl(
   return 'private, max-age=31536000, immutable'
 }
 
-function isJsonRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-function mobileHistoryRequestBody(request: IncomingMessage, body: Buffer): Buffer {
-  if (request.method !== 'POST' || request.url?.split('?', 1)[0] !== SESSION_HISTORY_PATH) return body
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(body.toString('utf8'))
-  } catch {
-    return body
-  }
-  if (!isJsonRecord(parsed) || parsed.method !== 'session.history' || !isJsonRecord(parsed.payload)) return body
-  const requested = parsed.payload.maxMessages
-  if (typeof requested === 'number' && Number.isInteger(requested) && requested > 0 && requested <= MOBILE_HISTORY_PAGE_MESSAGES) {
-    return body
-  }
-  return Buffer.from(JSON.stringify({
-    ...parsed,
-    payload: { ...parsed.payload, maxMessages: MOBILE_HISTORY_PAGE_MESSAGES },
-  }))
-}
-
 function addVaryAcceptEncoding(headers: OutgoingHttpHeaders): void {
   const existing = headers.vary
   const rawValues: string[] = Array.isArray(existing)
@@ -921,12 +904,6 @@ function addVaryAcceptEncoding(headers: OutgoingHttpHeaders): void {
   const values = rawValues.flatMap(value => value.split(',').map(part => part.trim()).filter(Boolean))
   if (!values.some(value => value.toLowerCase() === 'accept-encoding')) values.push('Accept-Encoding')
   headers.vary = values.join(', ')
-}
-
-function requestCookies(request: IncomingMessage): ReadonlyMap<string, string> {
-  const cookies = parseCookies(request.headers.cookie)
-  if (cookies === undefined) throw new HttpError(401, 'authentication_failed')
-  return cookies
 }
 
 function mapError(error: unknown): HttpError {
@@ -1508,9 +1485,9 @@ export class MobileAccessGateway {
   }
 
   private authorize(request: IncomingMessage): SessionAuthorization {
-    const sessionToken = requestCookies(request).get(SESSION_COOKIE)
-    if (sessionToken === undefined) throw new HttpError(401, 'authentication_failed')
-    return this.access.authorizeSession(sessionToken)
+    const cookies = browserAuthCookies(request.headers.cookie)
+    const name = this.tlsEnabled && cookies.has(HOST_SESSION_COOKIE) ? HOST_SESSION_COOKIE : SESSION_COOKIE
+    return authenticatedCookie(cookies.get(name) ?? [], token => this.access.authorizeSession(token)).result
   }
 
   private requireCsrf(request: IncomingMessage, authorization: SessionAuthorization): void {
@@ -1527,7 +1504,19 @@ export class MobileAccessGateway {
     response.setHeader('Set-Cookie', [
       cookie(SESSION_COOKIE, result.sessionToken, { tls: this.tlsEnabled, httpOnly: true, path: '/', maxAgeSeconds: maxAge }),
       cookie(CSRF_COOKIE, result.csrfToken, { tls: this.tlsEnabled, httpOnly: false, path: '/', maxAgeSeconds: maxAge }),
+      ...(this.tlsEnabled ? [
+        cookie(HOST_SESSION_COOKIE, result.sessionToken, { tls: true, httpOnly: true, path: '/', maxAgeSeconds: maxAge }),
+        cookie(HOST_CSRF_COOKIE, result.csrfToken, { tls: true, httpOnly: false, path: '/', maxAgeSeconds: maxAge }),
+      ] : []),
     ])
+  }
+
+  private setBrowserDeviceBinding(response: ServerResponse, deviceId: string, deviceExpiresAt: number): void {
+    if (!this.tlsEnabled) return
+    const existing = response.getHeader('Set-Cookie') as string[]
+    response.setHeader('Set-Cookie', [...existing, cookie(HOST_DEVICE_COOKIE, deviceId, {
+      tls: true, httpOnly: true, path: '/', maxAgeSeconds: (deviceExpiresAt - Date.now()) / 1000,
+    })])
   }
 
   private async handlePair(request: IncomingMessage, response: ServerResponse): Promise<void> {
@@ -1548,6 +1537,7 @@ export class MobileAccessGateway {
         maxAgeSeconds: (result.deviceExpiresAt - now) / 1000,
       }),
     ])
+    this.setBrowserDeviceBinding(response, result.deviceId, result.deviceExpiresAt)
     sendJson(response, 201, {
       paired: true,
       deviceId: result.deviceId,
@@ -1561,23 +1551,17 @@ export class MobileAccessGateway {
       throw new HttpError(429, 'rate_limited')
     }
     await readJsonObject(request, MAX_CONTROL_BODY_BYTES)
-    const deviceToken = requestCookies(request).get(DEVICE_COOKIE)
-    if (deviceToken === undefined) throw new HttpError(401, 'authentication_failed')
-    let result
-    try {
-      result = await this.access.renew(deviceToken)
-    } catch (error) {
-      if (error instanceof AccessError && error.status === 401) {
-        response.setHeader('Set-Cookie', cookie(DEVICE_COOKIE, '', {
-          tls: this.tlsEnabled,
-          httpOnly: true,
-          path: '/mobile-access/auth/renew',
-          maxAgeSeconds: 0,
-        }))
-      }
-      throw error
-    }
+    const cookies = browserAuthCookies(request.headers.cookie)
+    const bindings = this.tlsEnabled ? cookies.get(HOST_DEVICE_COOKIE) : undefined
+    if (bindings !== undefined && bindings.length !== 1) throw new HttpError(401, 'authentication_failed')
+    const device = authenticatedCookie(
+      cookies.get(DEVICE_COOKIE) ?? [],
+      token => this.access.authorizeDevice(token),
+      candidate => bindings === undefined || candidate.deviceId === bindings[0],
+    )
+    const result = await this.access.renew(device.value)
     this.setSessionCookies(response, result, Date.now())
+    this.setBrowserDeviceBinding(response, result.deviceId, device.result.deviceExpiresAt)
     sendJson(response, 200, {
       renewed: true,
       deviceId: result.deviceId,
@@ -1645,6 +1629,10 @@ export class MobileAccessGateway {
     response.setHeader('Set-Cookie', [
       cookie(SESSION_COOKIE, '', { tls: this.tlsEnabled, httpOnly: true, path: '/', maxAgeSeconds: 0 }),
       cookie(CSRF_COOKIE, '', { tls: this.tlsEnabled, httpOnly: false, path: '/', maxAgeSeconds: 0 }),
+      ...(this.tlsEnabled ? [
+        cookie(HOST_SESSION_COOKIE, '', { tls: true, httpOnly: true, path: '/', maxAgeSeconds: 0 }),
+        cookie(HOST_CSRF_COOKIE, '', { tls: true, httpOnly: false, path: '/', maxAgeSeconds: 0 }),
+      ] : []),
     ])
     sendJson(response, 200, { loggedOut: true }, this.tlsEnabled)
   }
@@ -1785,7 +1773,7 @@ export class MobileAccessGateway {
       throw new HttpError(404, 'not_found')
     }
 
-    if (request.method !== 'GET' && request.method !== 'HEAD' && request.method !== 'POST'
+    if (!['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method ?? '')
       && requestedExtension?.kind !== 'route') {
       throw new HttpError(405, 'method_not_allowed')
     }
@@ -2184,7 +2172,9 @@ export class MobileAccessGateway {
         const options = plan.rewrittenBatchEntries === undefined
           ? { excludedClientModules: this.config.excludedClientModules }
           : { ...await this.resolveMobileBootSizes(plan.rewrittenBatchEntries.flatMap(batch => batch.entries)), excludedClientModules: this.config.excludedClientModules }
-        const rewritten = rewriteMobileIndexWithBatch(html, options)
+        const cookies = browserAuthCookies(request.headers.cookie)
+        const csrfCookie = this.tlsEnabled && cookies.has(HOST_SESSION_COOKIE) ? HOST_CSRF_COOKIE : CSRF_COOKIE
+        const rewritten = rewriteMobileIndexWithBatch(html, { ...options, csrfCookie })
         for (const batch of rewritten.batches) this.rememberMobileBootBatch(batch)
         body = Buffer.from(rewritten.html)
       } catch (error) {
@@ -2582,13 +2572,9 @@ export class MobileAccessGateway {
     const operation = this.allocateRequest(authorization, response, holder)
     let bodyDone: Promise<void> | undefined
     try {
-      const bufferedBody = request.method === 'POST' && request.url?.split('?', 1)[0] === SESSION_HISTORY_PATH
-        ? mobileHistoryRequestBody(request, await readBoundedBody(request, this.config.maxBodyBytes))
-        : undefined
       const upstreamHeaders = sanitizeRequestHeaders(request, this.config.upstreamOrigin)
       const upstreamCookie = await this.upstreamCookieHeader()
       if (upstreamCookie !== undefined) upstreamHeaders.cookie = upstreamCookie
-      if (bufferedBody !== undefined) upstreamHeaders['content-length'] = String(bufferedBody.byteLength)
       const upstreamResponse = new Promise<IncomingMessage>((resolve, reject) => {
         const upstreamRequest = requestHttp({
           protocol: 'http:',
@@ -2605,12 +2591,7 @@ export class MobileAccessGateway {
         })
         upstreamRequest.once('response', resolve)
         upstreamRequest.once('error', reject)
-        if (bufferedBody === undefined) {
-          bodyDone = pipeline(request, new ByteLimitTransform(this.config.maxBodyBytes), upstreamRequest)
-        } else {
-          upstreamRequest.end(bufferedBody)
-          bodyDone = Promise.resolve()
-        }
+        bodyDone = pipeline(request, new ByteLimitTransform(this.config.maxBodyBytes), upstreamRequest)
         void bodyDone.catch(reject)
       })
       const proxied = await upstreamResponse
@@ -2867,10 +2848,13 @@ export class MobileAccessGateway {
       throw new HttpError(400, 'bad_request')
     }
     if (decodedKey.length !== 16 || decodedKey.toString('base64') !== key) throw new HttpError(400, 'bad_request')
-    const authorization = this.authorize(request)
+    let authorization = this.authorize(request)
     if (this.activeWebSockets.size >= this.config.maxWebSockets) throw new HttpError(429, 'busy')
     const upstreamCookie = await this.upstreamCookieHeader()
     if (client.destroyed) return
+    authorization = this.authorize(request)
+    if (this.activeWebSockets.size >= this.config.maxWebSockets) throw new HttpError(429, 'busy')
+    const compressed = this.config.websocketCompression.paths.includes(target.decodedPathname)
 
     const upstream = connect({
       host: stripIpv6Brackets(this.config.upstreamOrigin.hostname),
@@ -2889,14 +2873,26 @@ export class MobileAccessGateway {
     const record: ActiveWebSocket = Object.freeze({ ...authorization, client, upstream, timer })
     this.activeWebSockets.set(id, record)
     const cleanup = (): void => {
+      if (compressed && (!client.destroyed || !upstream.destroyed)) return
       const active = this.activeWebSockets.get(id)
       if (active !== undefined) clearTimeout(active.timer)
       this.activeWebSockets.delete(id)
     }
-    client.once('close', () => { upstream.destroy(); cleanup() })
-    upstream.once('close', () => { client.destroy(); cleanup() })
+    client.once('close', () => { if (!compressed) upstream.destroy(); cleanup() })
+    upstream.once('close', () => { if (!compressed) client.destroy(); cleanup() })
     upstream.setTimeout(this.config.upstreamTimeoutMs, closeBoth)
     try {
+      if (compressed) {
+        const upstreamTarget = new URL(this.config.upstreamOrigin.href)
+        const compressionTarget = upstreamTarget
+        compressionTarget.pathname = target.pathname
+        compressionTarget.search = target.search
+        await bridgeCompressedWebSocket(
+          request, client, upstream, head, compressionTarget, upstreamCookie,
+          this.config.websocketCompression, this.config.upstreamTimeoutMs,
+        )
+        return
+      }
       await new Promise<void>((resolve, reject) => {
         const connected = (): void => {
           upstream.off('error', failed)

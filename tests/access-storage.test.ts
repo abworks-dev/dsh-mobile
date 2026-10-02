@@ -18,6 +18,25 @@ function controller(store: DeviceStore, now: () => number, overrides: Partial<Co
 }
 
 describe('device and Session state', () => {
+  it('validates a persistent credential without changing last-seen state or opening a Session', async () => {
+    let current = 10_000
+    const store = new MemoryDeviceStore()
+    const access = controller(store, () => current)
+    await access.initialize()
+    const opened = await access.openPairing()
+    const paired = await access.pair('source', opened.token)
+    const durable = store.inspect()
+    const sessions = access.metrics().sessions
+    current += 1_000
+    expect(access.authorizeDevice(paired.deviceToken)).toEqual({ deviceId: paired.deviceId, deviceExpiresAt: paired.deviceExpiresAt })
+    expect(store.inspect()).toEqual(durable)
+    expect(access.metrics().sessions).toBe(sessions)
+    expect(() => access.authorizeDevice('unknown')).toThrow(AccessError)
+    current = paired.deviceExpiresAt
+    expect(() => access.authorizeDevice(paired.deviceToken)).toThrow(AccessError)
+    await access.close()
+  })
+
   it('persists only a device digest and consumes pairing exactly once', async () => {
     let current = 1_000_000
     const store = new MemoryDeviceStore()

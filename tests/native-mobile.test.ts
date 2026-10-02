@@ -54,6 +54,13 @@ describe('native mobile presentation', () => {
     expect(NATIVE_MOBILE_STYLES).not.toContain('html.dsh-native-mobile-active :focus { outline:none')
   })
 
+  it('uses a minimum editable font on narrow and wide native surfaces', () => {
+    expect(NATIVE_MOBILE_STYLES).toContain(
+      '[data-dsh-mobile-center] :is(input,textarea,[contenteditable="true"],[contenteditable="plaintext-only"],[contenteditable=""]) { font-size:max(16px,1em,var(--dsh-content-font-size,1em)) !important; }',
+    )
+    expect(NATIVE_MOBILE_STYLES).not.toContain('[data-dsh-mobile-center] textarea { font-size:16px !important; }')
+  })
+
   it('keeps the drawer scrim invisible wherever the overlay query stops matching', () => {
     // The surface appends the scrim on every non-loopback page load, but every
     // rule that gives it a box lives inside the overlay query. Outside that

@@ -10,6 +10,7 @@ import {
   WIDE_LAYOUT_MIN_WIDTH_PX,
   apply as applyMobileLayout,
   closeDetailsFromScrim,
+  isComposerActionTap,
   isComposerOwnedFocus,
   isMobileScrimOpen,
   isSessionRowNavigation,
@@ -708,6 +709,13 @@ describe('dedicated mobile layout boot', () => {
     expect(MOBILE_LAYOUT_STYLES).toContain('.dshm-drawer[data-open=true]{width:340px')
   })
 
+  it('sets a minimum editable font while preserving the content-font preference', () => {
+    expect(MOBILE_LAYOUT_STYLES).toContain(
+      '.dshm-shell :is(input,textarea,[contenteditable=true],[contenteditable=plaintext-only],[contenteditable=""]){font-size:max(16px,1em,var(--dsh-content-font-size,1em))!important}',
+    )
+    expect(MOBILE_LAYOUT_STYLES).not.toContain('.dshm-shell textarea{font-size:16px}')
+  })
+
   it('opens the wide sidebar by default without resetting explicit toggles', () => {
     const source = readFileSync(new URL('../src/mobile-layout.ts', import.meta.url), 'utf8')
     expect(source).toContain('sidebarOpen: viewportIsWide()')
@@ -1280,5 +1288,9 @@ describe('composer soft-keyboard policy', () => {
     expect(isSessionRowNavigation(target(true, false))).toBe(false)
     expect(isSessionRowNavigation(target(false, true))).toBe(false)
     expect(isSessionRowNavigation(null)).toBe(false)
+  })
+
+  it('ignores send taps without an element target', () => {
+    expect(isComposerActionTap(null)).toBe(false)
   })
 })

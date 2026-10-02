@@ -10,6 +10,7 @@
 | [自建 FRP 使用指南](SELF_HOSTED_FRP.md) | [Self-hosted FRP guide](SELF_HOSTED_FRP.en.md) | 已有 VPS 时用 frps + Caddy 自建远程通道，避开公共隧道带宽限制 |
 | [接入你既有的 frps](ATTACH_EXISTING_FRPS.md) | [Attach to an existing frps](ATTACH_EXISTING_FRPS.en.md) | 复用 VPS 上已运行的 frps，不自动修改服务器；可选公开 CA + Caddy 或自签 CA + TCP 透传，须核对监听与证书有效期。 |
 | [自有 HTTPS 反向代理](SELF_HOSTED_ORIGIN.md) | [Own HTTPS reverse proxy](SELF_HOSTED_ORIGIN.en.md) | 复用已有的 Lucky / Nginx / Caddy 公网 HTTPS 入口，无需隧道组件 |
+| [慢链路与反复重连](SLOW_CONNECTIONS.md) | [Slow links and repeated reconnection](SLOW_CONNECTIONS.en.md) | 区分 HTTP 与实时连接故障，按需配置 DSH 等待时间或启用 WebSocket 压缩 |
 
 > 命名隧道与两个自建提供方都要求手机端走 App 的**远程访问**扫码流程；`SELF_HOSTED_ORIGIN.en.md` 是精简版，字段表与排错清单以中文版为准。
 

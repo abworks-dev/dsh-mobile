@@ -1712,14 +1712,20 @@ class MainActivity : Activity() {
     ) {
         if (!isCurrent() || session.origin != origin) return
         val cookies = CookieManager.getInstance()
-        cookies.setCookie(origin.serialized, "dsh_ma_session=${session.sessionToken}; Path=/; Secure; HttpOnly; SameSite=Strict") {
-            if (!isCurrent()) return@setCookie
-            cookies.setCookie(origin.serialized, "dsh_ma_csrf=${session.csrfToken}; Path=/; Secure; SameSite=Strict") {
-                if (!isCurrent()) return@setCookie
+        val aliases = nativeSessionCookies(session)
+        fun installAlias(index: Int) {
+            if (!isCurrent()) return
+            if (index == aliases.size) {
                 cookies.flush()
                 complete()
+                return
+            }
+            cookies.setCookie(origin.serialized, aliases[index]) {
+                if (!isCurrent()) return@setCookie
+                installAlias(index + 1)
             }
         }
+        installAlias(0)
     }
 
     private fun savePairedDevice(
