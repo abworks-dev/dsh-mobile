@@ -407,7 +407,10 @@ html,body,#root{width:100%;height:100%;overflow:hidden}
 .dshm-scrim[data-open=true]{opacity:1;pointer-events:auto}
 .dshm-overlay{position:fixed;z-index:90;inset:0;pointer-events:none}.dshm-overlay>*{pointer-events:auto}
 .dshm-shell header{min-width:0;padding-left:52px}
-.dshm-shell textarea{font-size:16px}
+/* iOS Safari auto-zooms any focused editable under 16px and never zooms back
+   once the keyboard drops, so every editable flavour in the shell — the stock
+   contenteditable composer at --dsw-font-xs-13 included — stays at 16px. */
+.dshm-shell :is(input,textarea,[contenteditable=true],[contenteditable=plaintext-only]){font-size:16px}
 .dshm-shell table{display:block;max-width:100%;overflow-x:auto}
 .dshm-shell pre{max-width:100%;overflow-x:auto}
 .dshm-shell img,.dshm-shell video,.dshm-shell canvas,.dshm-shell svg{max-width:100%}

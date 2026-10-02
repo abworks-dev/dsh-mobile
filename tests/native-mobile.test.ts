@@ -54,6 +54,15 @@ describe('native mobile presentation', () => {
     expect(NATIVE_MOBILE_STYLES).not.toContain('html.dsh-native-mobile-active :focus { outline:none')
   })
 
+  it('pins every center editable at 16px so focused inputs cannot trigger iOS zoom', () => {
+    // Parity with the shell rule: the stock composer editor is a contenteditable
+    // under 16px, and iOS Safari auto-zooms any focused editable below that.
+    expect(NATIVE_MOBILE_STYLES).toContain(
+      '[data-dsh-mobile-center] :is(input,textarea,[contenteditable="true"],[contenteditable="plaintext-only"]) { font-size:16px !important; }',
+    )
+    expect(NATIVE_MOBILE_STYLES).not.toContain('[data-dsh-mobile-center] textarea { font-size:16px !important; }')
+  })
+
   it('keeps the drawer scrim invisible wherever the overlay query stops matching', () => {
     // The surface appends the scrim on every non-loopback page load, but every
     // rule that gives it a box lives inside the overlay query. Outside that
