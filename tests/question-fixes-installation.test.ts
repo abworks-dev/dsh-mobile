@@ -32,11 +32,27 @@ const jsExpressionType = new yaml.Type('tag:yaml.org,2002:js', {
 })
 const patchSchema = yaml.JSON_SCHEMA.extend(jsExpressionType)
 
+/**
+ * Rows this bundle's patch declares. A patch is a single row, a list of rows,
+ * or `{ insert: row | row[] }`, and the inserted value itself may be either.
+ */
+function patchRows(): PatchRow[] {
+  const rows: PatchRow[] = []
+  const collect = (value: unknown): void => {
+    if (Array.isArray(value)) { for (const entry of value) collect(entry); return }
+    if (value === null || typeof value !== 'object') return
+    const { insert } = value as { insert?: unknown }
+    if (insert !== undefined) collect(insert)
+    else rows.push(value as PatchRow)
+  }
+  for (const document of yaml.loadAll(profilePatches, null, { schema: patchSchema })) collect(document)
+  return rows
+}
+
 /** Non-stock module specifiers this bundle's patch inserts as live rows. */
 function insertedRowNames(): string[] {
-  return yaml.loadAll(profilePatches, { schema: patchSchema })
-    .flatMap(patch => (patch as { insert?: PatchRow[] } | null)?.insert ?? [patch as PatchRow])
-    .filter(row => typeof row?.name === 'string' && row.disabled !== true)
+  return patchRows()
+    .filter(row => typeof row.name === 'string' && row.disabled !== true)
     .map(row => row.name!)
     .filter(name => !name.startsWith('@deepseek-ai/') && !name.startsWith('cordis:'))
 }
