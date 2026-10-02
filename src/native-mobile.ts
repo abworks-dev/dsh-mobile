@@ -201,7 +201,13 @@ export const NATIVE_MOBILE_STYLES = `
   .dsh-mobile-media-action svg { flex:none; width:16px; height:16px; color:var(--dsw-alias-label-tertiary,currentColor); }
   .dsh-mobile-media-action span { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   [data-dsh-mobile-center] [class*="_composer"] { padding-left:8px !important; padding-right:8px !important; padding-bottom:max(8px,env(safe-area-inset-bottom)) !important; }
-  /* The desktop composer intentionally wraps whole toolbar groups. On a phone,
+  /* Collapse the scroll viewport only; the editor, draft and attachments stay
+     owned by DSH. Toolbar focus keeps the card expanded during menu taps. */
+  [data-dsh-mobile-center] [data-composer-card]:not(:focus-within) > [data-input-scroll] { max-height:72px !important; overflow-y:auto !important; }
+  /* Stock Send/Queue/Steer and Stop keep their handlers and disabled state. */
+  [data-dsh-mobile-composer-row] button { min-height:44px !important; touch-action:manipulation; }
+  [data-dsh-mobile-composer-row] button[class*="_primary"] { min-width:44px !important; flex-shrink:0 !important; }
+   /* The desktop composer intentionally wraps whole toolbar groups. On a phone,
      dynamic model and status labels made that row alternate between one and
      two lines. Keep two stable columns and let only the model label shrink. */
   [data-dsh-mobile-composer-row] { display:grid !important; grid-template-columns:max-content minmax(0,1fr) !important; align-items:center !important; gap:4px 8px !important; }

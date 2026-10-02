@@ -1221,6 +1221,13 @@ function closestStub(found: boolean): Element {
 }
 
 describe('composer soft-keyboard policy', () => {
+  it('leaves Enter translation to the guarded native composer binding', () => {
+    const source = readFileSync(new URL('../src/mobile-layout.ts', import.meta.url), 'utf8')
+    expect(source).toContain("document.addEventListener('keydown', onTyping, true)")
+    expect(source).not.toContain('shouldPreserveComposerEnter')
+    expect(source).toContain('const COMPOSER_EDITOR_SELECTOR = `${COMPOSER_CARD_SELECTOR} :is([contenteditable="true"],[contenteditable="plaintext-only"],[contenteditable=""])`')
+  })
+
   it('withholds the IME for the Add trigger on a touch-primary device', () => {
     expect(resolveComposerImePolicy(closestStub(true), true)).toBe('withhold')
   })
