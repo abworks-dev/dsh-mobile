@@ -1,9 +1,10 @@
 import { spawn } from 'node:child_process'
-import { cp, lstat, mkdir, mkdtemp, readdir, rm, unlink, writeFile, readFile } from 'node:fs/promises'
+import { lstat, mkdir, mkdtemp, readdir, realpath, rm, unlink, writeFile, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { basename, dirname, join, resolve } from 'node:path'
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
+import { assertBundledComponents, installPackedBundle, packBundle, runPackagingCommand } from './packed-profile.mjs'
 
 const repository = fileURLToPath(new URL('..', import.meta.url))
 const mobileRoot = process.env.DSH_BOOT_SMOKE_MOBILE_ROOT === undefined
@@ -13,6 +14,8 @@ const dshBin = process.env.DSH_BOOT_SMOKE_BIN
   ?? fileURLToPath(new URL('../node_modules/@deepseek-ai/dsh/lib/bin.js', import.meta.url))
 const injectedFailure = process.argv.includes('--negative-control')
 const blockedRemoteMux = process.argv.includes('--negative-control-mux')
+const missingCompanion = process.argv.includes('--negative-control-companion')
+const compressedWebSocket = process.argv.includes('--compressed-websocket')
 const excludedClientModules = process.env.DSH_BOOT_SMOKE_EXCLUDED_MODULES?.split(',').map(id => id.trim()).filter(Boolean) ?? []
 const startedAt = Date.now()
 const START_TIMEOUT_MS = 90_000
@@ -79,6 +82,37 @@ function observeWorkspaceStream(page) {
   return { baseline, state }
 }
 
+/** Observe the actual Chromium upgrade headers without replacing the browser's WebSocket. */
+async function observeWebSocketCompression(page) {
+  const session = await page.context().newCDPSession(page)
+  const sockets = new Map()
+  const upgrades = []
+  const waiters = []
+  session.on('Network.webSocketCreated', event => {
+    if (new URL(event.url).pathname === '/api/remote.mux') sockets.set(event.requestId, event.url)
+  })
+  session.on('Network.webSocketHandshakeResponseReceived', event => {
+    const url = sockets.get(event.requestId)
+    if (url === undefined) return
+    const extensions = Object.entries(event.response.headers)
+      .find(([name]) => name.toLowerCase() === 'sec-websocket-extensions')?.[1] ?? ''
+    const upgrade = { url, status: event.response.status, extensions: String(extensions) }
+    upgrades.push(upgrade)
+    for (const waiter of waiters) {
+      if (waiter.url === url && upgrade.status === 101) waiter.resolve(upgrade)
+    }
+  })
+  await session.send('Network.enable')
+  return {
+    handshake(url) {
+      const upgrade = upgrades.find(candidate => candidate.url === url && candidate.status === 101)
+      return upgrade === undefined
+        ? new Promise(resolve => { waiters.push({ url, resolve }) }) : Promise.resolve(upgrade)
+    },
+    close: () => session.detach(),
+  }
+}
+
 async function within(promise, timeoutMs, failure) {
   let timer
   try {
@@ -89,7 +123,7 @@ async function within(promise, timeoutMs, failure) {
   } finally { clearTimeout(timer) }
 }
 
-async function createProfile(root) {
+async function createProfile(root, tarball) {
   const home = join(root, 'home')
   const profile = join(home, 'profiles', 'web')
   const mobileState = join(home, 'mobile-access')
@@ -98,7 +132,7 @@ async function createProfile(root) {
   await writeFile(join(profile, 'package.json'), JSON.stringify({
     name: 'dsh-profile-web',
     private: true,
-    dependencies: { 'dsh-mobile': `file:${mobileRoot}` },
+    dependencies: {},
     dsh: { profile: { bundles: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', 'dsh-mobile'] } },
   }, null, 2) + '\n')
   await writeFile(join(profile, 'cordis.patch.yml'), JSON.stringify([{
@@ -111,6 +145,7 @@ async function createProfile(root) {
       customScriptFile: join(mobileState, 'mobile.js'),
       initiallyEnabled: true,
       ...(excludedClientModules.length > 0 ? { excludedClientModules } : {}),
+      ...(compressedWebSocket ? { websocketCompression: { paths: ['/api/remote.mux'] } } : {}),
       listenHost: '127.0.0.1',
       listenPort: 0,
       allowedCidrs: ['127.0.0.0/8'],
@@ -118,7 +153,23 @@ async function createProfile(root) {
     },
   }]) + '\n')
   await writeFile(join(profile, 'pnpm-workspace.yaml'), 'packages:\n  - .\n\nnodeLinker: hoisted\nautoInstallPeers: false\n')
-  await installBundleInto(join(profile, 'node_modules', 'dsh-mobile'))
+  await installPackedBundle(tarball, profile)
+  const installed = join(profile, 'node_modules', 'dsh-mobile')
+  await assertBundledComponents(installed)
+  if (missingCompanion) {
+    const companion = join(installed, 'node_modules', 'dsh-mobile-question-fixes')
+    const metadata = await lstat(companion)
+    if (!metadata.isDirectory() || metadata.isSymbolicLink()) throw new Error('Negative-control component is not a real directory')
+    const inside = relative(await realpath(root), await realpath(companion))
+    if (isAbsolute(inside) || inside === '..' || inside.startsWith(`..${sep}`)) {
+      throw new Error('Negative-control component is outside the owned temporary profile')
+    }
+    await rm(companion, { recursive: true })
+    await assertBundledComponents(installed)
+  }
+  await runPackagingCommand(process.execPath, [
+    join(repository, 'scripts', 'check-packed-profile.mjs'), dshBin, profile, home,
+  ], root)
   await writeFile(join(mobileState, 'setup.json'), JSON.stringify({
     version: 1,
     listenHost: '127.0.0.1',
@@ -127,47 +178,6 @@ async function createProfile(root) {
     tls: { mode: 'disabled' },
   }) + '\n')
   return home
-}
-
-/**
- * Place the bundle in the profile the way an installation leaves it. A symlink
- * to the checkout would make the checkout's own `node_modules` the bundle's
- * lookup path, so a specifier that only exists there — a workspace-linked or
- * non-bundled dependency — would resolve and hide the defect. Copying keeps the
- * bundle's own nested `node_modules`, so every row specifier resolves from the
- * profile root exactly as it does for an installed profile.
- *
- * The checkout's top-level `node_modules` is left out: an installation never
- * places it inside the package, and it is both huge and irrelevant to row
- * resolution. `cp`'s filter cannot express this — it skips every `node_modules`
- * it meets, including the bundled one this fixture exists to preserve.
- */
-async function installBundleInto(destination) {
-  await copyTree(mobileRoot, destination)
-  // A packed root ships `packages/question-fixes` without its own linked copy,
-  // so materialize the nested `file:` bundled dependency a package manager
-  // would have created — the placement this fixture must reproduce.
-  const manifest = JSON.parse(await readFile(join(destination, 'package.json'), 'utf8'))
-  for (const name of manifest.bundledDependencies ?? []) {
-    const nested = join(destination, 'node_modules', name)
-    if (await exists(nested)) continue
-    await copyTree(join(destination, 'packages', 'question-fixes'), nested)
-  }
-}
-
-async function exists(path) {
-  try { await readdir(path); return true } catch { return false }
-}
-
-async function copyTree(source, destination) {
-  await mkdir(destination, { recursive: true })
-  for (const entry of await readdir(source, { withFileTypes: true })) {
-    if (source === mobileRoot && entry.name === 'node_modules') continue
-    const from = join(source, entry.name)
-    const to = join(destination, entry.name)
-    if (entry.isDirectory()) await copyTree(from, to)
-    else await cp(from, to, { recursive: true, dereference: true, force: true })
-  }
 }
 
 function launchDsh(root, home) {
@@ -230,6 +240,7 @@ function launchDsh(root, home) {
 
 async function inspectBrowser(baseUrl, logs) {
   const browser = await chromium.launch({ headless: true })
+  let compression
   try {
     const desktop = await browser.newPage()
     await desktop.goto(baseUrl, { waitUntil: 'domcontentloaded' })
@@ -260,6 +271,7 @@ async function inspectBrowser(baseUrl, logs) {
     // Back-layer assertions depend on open state, not on drawer animation timing.
     const phone = await browser.newPage({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, reducedMotion: 'reduce' })
     const workspaceStream = observeWorkspaceStream(phone)
+    if (compressedWebSocket) compression = await observeWebSocketCompression(phone)
     const errors = []
     const failedBundles = []
     const failedRequests = []
@@ -312,6 +324,14 @@ async function inspectBrowser(baseUrl, logs) {
     )
     if (workspace.socket.isClosed()) {
       throw new Error(`DSH Workspace stream closed after its opening baseline: ${sanitized(JSON.stringify(workspaceStream.state))}\n${logs()}`)
+    }
+    if (compression !== undefined) {
+      const upgrade = await within(compression.handshake(workspace.socket.url()), CLIENT_TIMEOUT_MS,
+        () => 'Chromium did not report the Workspace WebSocket upgrade response')
+      if (!upgrade.extensions.split(',').some(extension => extension.split(';')[0].trim() === 'permessage-deflate')) {
+        throw new Error(`Workspace WebSocket did not negotiate compression: status=${String(upgrade.status)} extensions=${upgrade.extensions || '<none>'}`)
+      }
+      console.log(`Workspace WebSocket negotiated ${upgrade.extensions} and delivered its real baseline`)
     }
     const bootFailures = await phone.getByText('Failed to load plugins').count()
     if (bootFailures > 0 || failedBundles.length > 0 || errors.some(error => /Failed to load plugins|failed to import|node:net|ERR_UNSUPPORTED/u.test(error))) {
@@ -429,18 +449,20 @@ async function inspectBrowser(baseUrl, logs) {
     if (!extensionBack) throw new Error('Mobile Back did not close a visible extension overlay')
     console.log(`Mobile client mounted through DSH Loader and read ${String(workspace.workspaces)} Workspaces over /api/remote.mux (${String(plan.entries.length)} plugin entries, ${Date.now() - startedAt} ms)`)
   } finally {
-    await browser.close()
+    try { await compression?.close() } finally { await browser.close() }
   }
 }
 
 async function main() {
-  await readFile(join(mobileRoot, 'lib', 'index.mjs'))
+  if (process.env.DSH_BOOT_SMOKE_MOBILE_TARBALL === undefined) await readFile(join(mobileRoot, 'lib', 'index.mjs'))
   await readFile(dshBin)
   const root = await mkdtemp(join(tmpdir(), 'dsh-mobile-boot-smoke-'))
   let dsh
   const failures = []
   try {
-    const home = await createProfile(root)
+    const tarball = process.env.DSH_BOOT_SMOKE_MOBILE_TARBALL === undefined
+      ? await packBundle(mobileRoot, root) : resolve(process.env.DSH_BOOT_SMOKE_MOBILE_TARBALL)
+    const home = await createProfile(root, tarball)
     dsh = launchDsh(root, home)
     await inspectBrowser(await dsh.ready(), dsh.logs)
   } catch (error) {

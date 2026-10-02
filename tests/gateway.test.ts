@@ -20,6 +20,7 @@ import { parseGatewayConfig } from '../src/config.js'
 import { MobileAccessGateway } from '../src/gateway.js'
 import { BlockedUpgradePathLog } from '../src/websocket-paths.js'
 import { CSRF_COOKIE, CSRF_HEADER, DEVICE_COOKIE, SESSION_COOKIE } from '../src/http-security.js'
+import { HOST_CSRF_COOKIE, HOST_DEVICE_COOKIE, HOST_SESSION_COOKIE } from '../src/browser-auth-cookies.js'
 import { MemoryDeviceStore } from '../src/storage.js'
 import { DSH_MOBILE_VERSION, MINIMUM_ANDROID_APP_VERSION } from '../src/version.js'
 import { createTestTlsChain } from './tls-fixtures.js'
@@ -47,14 +48,9 @@ const cleanups: Array<() => Promise<void>> = []
 const TEST_FAILED_START_PORT = 38081
 /** Held by a UDP occupant so the gateway's broadcast discovery socket cannot bind it. */
 const TEST_DISCOVERY_BUSY_PORT = 38099
-const SESSION_HISTORY_PATH = '/api/session.history'
 const COMPRESSIBLE_SCRIPT = 'globalThis.__compressionProbe = true;\n'.repeat(256)
 const UPSTREAM_LAUNCH_TOKEN = 'test-launch-token'
 const UPSTREAM_BROWSER_COOKIE = 'dsh-auth-test=v1.signed-cookie'
-const HISTORY_RESPONSE = JSON.stringify({
-  type: 'client-response',
-  result: { ok: true, value: { events: [{ event: { type: 'assistant/chunk', content: 'history '.repeat(2_048) } }] } },
-})
 
 afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup()
@@ -367,14 +363,6 @@ async function upstream(
       response.end(COMPRESSIBLE_SCRIPT)
       return
     }
-    if (incoming.url === '/api/session.history') {
-      response.writeHead(200, {
-        'content-type': 'application/json; charset=utf-8',
-        'content-length': Buffer.byteLength(HISTORY_RESPONSE),
-      })
-      response.end(HISTORY_RESPONSE)
-      return
-    }
     const body = `${JSON.stringify({ ok: true, method: incoming.method, url: incoming.url })}\n`
     response.writeHead(200, {
       'content-type': 'application/json',
@@ -476,6 +464,21 @@ function browserHeaders(instance: MobileAccessGateway): Record<string, string> {
     origin,
     'sec-fetch-site': 'same-origin',
   }
+}
+
+async function remoteCookieGateway(upstreamPort: number, sessionTtlMs = 30_000): Promise<MobileAccessGateway> {
+  const config = parseGatewayConfig({
+    listenHost: '127.0.0.1', listenPort: 0,
+    upstreamOrigin: `http://127.0.0.1:${String(upstreamPort)}`,
+    publicAuthorities: ['127.0.0.1'], allowedCidrs: ['127.0.0.0/8'],
+    stateFile: join(tmpdir(), `dsh-mobile-cookie-${crypto.randomUUID()}.json`),
+    tls: { mode: 'disabled' },
+  })
+  // Remote providers terminate HTTPS outside the loopback gateway.
+  const instance = new MobileAccessGateway(Object.freeze({ ...config, publicTls: true, sessionTtlMs }), new MemoryDeviceStore())
+  await instance.start()
+  cleanups.push(() => instance.close())
+  return instance
 }
 
 async function pair(instance: MobileAccessGateway): Promise<{
@@ -1822,7 +1825,122 @@ describe('HTTP gateway', () => {
     const duplicateCookie = await request(instance.address().port, '/', {
       headers: { ...base, cookie: `${SESSION_COOKIE}=${session}; ${SESSION_COOKIE}=${session}` },
     })
-    expect(duplicateCookie.status).toBe(401)
+    expect(duplicateCookie.status).toBe(200)
+  })
+
+  it.each(['PUT', 'PATCH', 'DELETE'])('forwards authenticated %s requests to ordinary third-party DSH routes without browser credentials', async method => {
+    const inner = await upstream()
+    const instance = await gateway(inner.port)
+    const paired = await pair(instance)
+    const body = JSON.stringify({ size: 'large', label: '手机设置' })
+    const saved = await request(instance.address().port, '/dsh-whale/size.json?profile=current', {
+      method,
+      headers: {
+        ...browserHeaders(instance), 'content-type': 'application/json',
+        cookie: `${SESSION_COOKIE}=${paired.session}; ${DEVICE_COOKIE}=${paired.device}`,
+        authorization: 'Bearer must-not-forward', [CSRF_HEADER]: paired.csrf,
+        'x-forwarded-for': '203.0.113.10',
+      },
+      body,
+    })
+    expect(saved.status).toBe(200)
+    expect(inner.observations).toHaveLength(1)
+    expect(inner.observations[0]).toMatchObject({
+      method, url: '/dsh-whale/size.json?profile=current', body,
+      headers: { host: `127.0.0.1:${String(inner.port)}`, origin: `http://127.0.0.1:${String(inner.port)}`, 'content-type': 'application/json' },
+    })
+    const headers = inner.observations[0]!.headers
+    expect(headers.cookie).toBeUndefined()
+    expect(headers.authorization).toBeUndefined()
+    expect(headers[CSRF_HEADER]).toBeUndefined()
+    expect(headers['x-forwarded-for']).toBeUndefined()
+  })
+
+  it.each(['PUT', 'PATCH', 'DELETE'])('rejects unauthenticated, cross-origin, and CSRF-invalid %s writes before forwarding', async method => {
+    const inner = await upstream()
+    const instance = await gateway(inner.port)
+    const paired = await pair(instance)
+    const headers: Record<string, string> = {
+      ...browserHeaders(instance), 'content-type': 'application/json',
+      cookie: `${SESSION_COOKIE}=${paired.session}`, [CSRF_HEADER]: paired.csrf,
+    }
+    const { cookie: _session, ...withoutSession } = headers
+    const { origin: _origin, ...withoutOrigin } = headers
+    const { [CSRF_HEADER]: _csrf, ...withoutCsrf } = headers
+    for (const [rejectedHeaders, status] of [
+      [withoutSession, 401],
+      [{ ...headers, cookie: `${SESSION_COOKIE}=invalid` }, 401],
+      [withoutCsrf, 403],
+      [{ ...headers, [CSRF_HEADER]: 'invalid' }, 403],
+      [withoutOrigin, 403],
+      [{ ...headers, origin: 'https://foreign.example' }, 403],
+      [{ ...headers, host: 'foreign.example' }, 403],
+    ] as const) {
+      const rejected = await request(instance.address().port, '/dsh-whale/size.json', {
+        method, headers: rejectedHeaders, body: '{}',
+      })
+      expect(rejected.status).toBe(status)
+    }
+    const admin = await request(instance.address().port, '/api/mobile-access/devices/reset', {
+      method, headers, body: '{}',
+    })
+    expect(admin.status).toBe(404)
+    expect(inner.observations).toHaveLength(0)
+  })
+
+  it.each(['OPTIONS', 'TRACE', 'PROPFIND'])('keeps ordinary-route %s requests rejected', async method => {
+    const inner = await upstream()
+    const instance = await gateway(inner.port)
+    const paired = await pair(instance)
+    const rejected = await request(instance.address().port, '/dsh-whale/size.json', {
+      method,
+      headers: { ...browserHeaders(instance), cookie: `${SESSION_COOKIE}=${paired.session}`, [CSRF_HEADER]: paired.csrf },
+    })
+    expect(rejected.status).toBe(405)
+    expect(inner.observations).toHaveLength(0)
+  })
+
+  it('keeps CONNECT requests disconnected before they can reach an ordinary DSH route', async () => {
+    const inner = await upstream()
+    const instance = await gateway(inner.port)
+    const paired = await pair(instance)
+    await expect(request(instance.address().port, '/dsh-whale/size.json', {
+      method: 'CONNECT',
+      headers: { ...browserHeaders(instance), cookie: `${SESSION_COOKIE}=${paired.session}`, [CSRF_HEADER]: paired.csrf },
+    })).rejects.toThrow()
+    expect(inner.observations).toHaveLength(0)
+  })
+
+  it.each(['PUT', 'PATCH', 'DELETE'])('retains request body limits for ordinary-route %s writes', async method => {
+    const inner = await upstream()
+    const instance = await gateway(inner.port, { maxBodyBytes: 1024 })
+    const paired = await pair(instance)
+    const rejected = await request(instance.address().port, '/dsh-whale/size.json', {
+      method,
+      headers: { ...browserHeaders(instance), cookie: `${SESSION_COOKIE}=${paired.session}`, [CSRF_HEADER]: paired.csrf },
+      body: 'x'.repeat(1025),
+    })
+    expect(rejected.status).toBe(413)
+    expect(inner.observations).toHaveLength(0)
+    expect(instance.access.metrics().sessions).toBe(1)
+  })
+
+  it('retains the active-request limit while a third-party PUT response is pending', async () => {
+    const inner = await upstream()
+    const instance = await gateway(inner.port, { maxActiveRequests: 1 })
+    const paired = await pair(instance)
+    const headers = { ...browserHeaders(instance), cookie: `${SESSION_COOKIE}=${paired.session}`, [CSRF_HEADER]: paired.csrf }
+    const held = beginRequest(instance.address().port, '/hold', { method: 'PUT', headers, body: '{}' })
+    try {
+      await vi.waitFor(() => expect(inner.observations).toHaveLength(1))
+      const busy = await request(instance.address().port, '/dsh-whale/size.json', { method: 'PATCH', headers, body: '{}' })
+      expect(busy.status).toBe(429)
+      expect(JSON.parse(busy.body)).toEqual({ error: 'busy' })
+      expect(inner.observations).toHaveLength(1)
+    } finally {
+      inner.releaseHold()
+      expect((await held.result).status).toBe(200)
+    }
   })
 
   it('keeps the proxied GUI frameable by itself and by the sidebar browser, while gateway pages stay unframeable', async () => {
@@ -1930,7 +2048,7 @@ describe('HTTP gateway', () => {
     expect(served.headers['cache-control']).toBe('private, max-age=31536000, immutable')
   })
 
-  it('uses mobile-sized pages and compresses session history', async () => {
+  it('streams authenticated JSON bodies without rewriting history budgets', async () => {
     const inner = await upstream()
     const instance = await gateway(inner.port)
     const paired = await pair(instance)
@@ -1941,33 +2059,19 @@ describe('HTTP gateway', () => {
       'content-type': 'application/json',
       'accept-encoding': 'gzip',
     }
-    const historyRequest = (maxMessages: number): string => JSON.stringify({
-      type: 'client-request',
-      rpcId: crypto.randomUUID(),
-      method: 'session.history',
-      payload: { sessionId: 'session-example', maxMessages },
-    })
-
-    const compressed = await request(instance.address().port, SESSION_HISTORY_PATH, {
+    const path = '/api/session.history'
+    const body = '{\n  "method": "session.history", "payload": { "sessionId": "旧会话", "maxMessages": 500 }\n}\n'
+    const forwarded = await request(instance.address().port, path, {
       method: 'POST',
       headers,
-      body: historyRequest(50),
+      body,
     })
-    expect(compressed.status).toBe(200)
-    expect(compressed.headers['content-encoding']).toBe('gzip')
-    expect(compressed.headers['content-length']).toBeUndefined()
-    expect(gunzipSync(compressed.rawBody).toString('utf8')).toBe(HISTORY_RESPONSE)
-    const capped = inner.observations.at(-1)
-    expect(capped?.url).toBe(SESSION_HISTORY_PATH)
-    expect(JSON.parse(capped?.body ?? '{}')).toMatchObject({ payload: { maxMessages: 10 } })
-    expect(capped?.headers['content-length']).toBe(String(Buffer.byteLength(capped?.body ?? '')))
-
-    await request(instance.address().port, SESSION_HISTORY_PATH, {
-      method: 'POST',
-      headers: { ...headers, 'accept-encoding': 'identity' },
-      body: historyRequest(5),
-    })
-    expect(JSON.parse(inner.observations.at(-1)?.body ?? '{}')).toMatchObject({ payload: { maxMessages: 5 } })
+    expect(forwarded.status).toBe(200)
+    expect(forwarded.headers['content-encoding']).toBeUndefined()
+    const observed = inner.observations.at(-1)
+    expect(observed?.url).toBe(path)
+    expect(observed?.body).toBe(body)
+    expect(observed?.headers['content-length']).toBe(String(Buffer.byteLength(body)))
   })
 
   it('renews, logs out, and revokes without exposing the persistent credential to the app path', async () => {
@@ -2025,8 +2129,195 @@ describe('HTTP gateway', () => {
       body: '{}',
     })
     expect(afterRevoke.status).toBe(401)
-    expect(afterRevoke.headers['set-cookie']?.join(';')).toContain(`${DEVICE_COOKIE}=;`)
+    expect(afterRevoke.headers['set-cookie']).toBeUndefined()
     expect(JSON.stringify(instance.devices())).not.toContain('tokenDigest')
+  })
+
+  it('keeps valid browser credentials usable beside stale and unrelated parent-domain cookies', async () => {
+    const inner = await upstream()
+    const instance = await gateway(inner.port)
+    const paired = await pair(instance)
+    const base = browserHeaders(instance)
+    for (const values of [
+      `${SESSION_COOKIE}=stale; ${SESSION_COOKIE}=${paired.session}`,
+      `${SESSION_COOKIE}=${paired.session}; ${SESSION_COOKIE}=stale`,
+    ]) {
+      const document = await request(instance.address().port, '/', {
+        headers: { ...base, cookie: `analytics=first%20value; analytics="older value"; ${values}` },
+      })
+      expect(document.status).toBe(200)
+    }
+    const sessions = instance.access.metrics().sessions
+    const renewed = await request(instance.address().port, '/mobile-access/auth/renew', {
+      method: 'POST',
+      headers: {
+        ...base, 'content-type': 'application/json',
+        cookie: `analytics=one; analytics=two; ${DEVICE_COOKIE}=stale; ${DEVICE_COOKIE}=${paired.device}; ${DEVICE_COOKIE}=${paired.device}`,
+      },
+      body: '{}',
+    })
+    expect(renewed.status).toBe(200)
+    expect(JSON.parse(renewed.body)).toMatchObject({ deviceId: paired.deviceId })
+    expect(instance.access.metrics().sessions).toBe(sessions + 1)
+  })
+
+  it('rejects ambiguous valid legacy credentials without allocating extra Sessions or deleting cookies', async () => {
+    const inner = await upstream()
+    const instance = await gateway(inner.port)
+    const first = await pair(instance)
+    const second = await pair(instance)
+    const base = browserHeaders(instance)
+    const sessions = instance.access.metrics().sessions
+    const document = await request(instance.address().port, '/', {
+      headers: { ...base, cookie: `${SESSION_COOKIE}=${first.session}; ${SESSION_COOKIE}=${second.session}` },
+    })
+    expect(document.status).toBe(401)
+    const renewal = await request(instance.address().port, '/mobile-access/auth/renew', {
+      method: 'POST',
+      headers: { ...base, 'content-type': 'application/json', cookie: `${DEVICE_COOKIE}=${first.device}; ${DEVICE_COOKIE}=${second.device}` },
+      body: '{}',
+    })
+    expect(renewal.status).toBe(401)
+    expect(renewal.headers['set-cookie']).toBeUndefined()
+    expect(instance.access.metrics().sessions).toBe(sessions)
+    expect(inner.observations).toHaveLength(0)
+  })
+
+  it('issues protected HTTPS browser cookies while keeping the persistent credential on the renewal path', async () => {
+    const inner = await upstream()
+    const instance = await remoteCookieGateway(inner.port)
+    const opened = await instance.access.openPairing()
+    const paired = await request(instance.address().port, '/mobile-access/auth/pair', {
+      method: 'POST', headers: { ...browserHeaders(instance), 'content-type': 'application/json' },
+      body: JSON.stringify({ token: opened.token }),
+    })
+    expect(paired.status).toBe(201)
+    const lines = paired.headers['set-cookie'] ?? []
+    const values = cookiesByName(paired.headers)
+    expect(values.get(HOST_DEVICE_COOKIE)).toBe(JSON.parse(paired.body).deviceId)
+    expect(values.get(HOST_SESSION_COOKIE)).toBe(values.get(SESSION_COOKIE))
+    expect(values.get(HOST_CSRF_COOKIE)).toBe(values.get(CSRF_COOKIE))
+    for (const name of [HOST_SESSION_COOKIE, HOST_CSRF_COOKIE, HOST_DEVICE_COOKIE]) {
+      const line = lines.find(value => value.startsWith(`${name}=`)) ?? ''
+      expect(line).toContain('Path=/;')
+      expect(line).toContain('Secure')
+      expect(line).toContain('SameSite=Strict')
+      expect(line).not.toContain('Domain=')
+      expect(line.includes('HttpOnly')).toBe(name !== HOST_CSRF_COOKIE)
+    }
+    const persistent = lines.find(value => value.startsWith(`${DEVICE_COOKIE}=`)) ?? ''
+    expect(persistent).toContain('Path=/mobile-access/auth/renew;')
+    expect(persistent).toContain('HttpOnly')
+    expect(persistent).toContain('Secure')
+  })
+
+  it('recovers by re-pairing beside two valid legacy credentials and renews the selected device after Session expiry', async () => {
+    const inner = await upstream()
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(Date.now())
+    try {
+      const instance = await remoteCookieGateway(inner.port)
+      const first = await pair(instance)
+      const second = await pair(instance)
+      const base = browserHeaders(instance)
+      const cookieHeader = `${SESSION_COOKIE}=${first.session}; ${SESSION_COOKIE}=${second.session}; ${HOST_SESSION_COOKIE}=${second.session}; ${HOST_DEVICE_COOKIE}=${second.deviceId}; ${DEVICE_COOKIE}=${first.device}; ${DEVICE_COOKIE}=${second.device}`
+      const recovered = await request(instance.address().port, '/', { headers: { ...base, cookie: cookieHeader } })
+      expect(recovered.status).toBe(200)
+      clock.mockReturnValue(Date.now() + 30_001)
+      expect(() => instance.access.authorizeSession(second.session)).toThrow()
+      const renewed = await request(instance.address().port, '/mobile-access/auth/renew', {
+        method: 'POST', headers: { ...base, 'content-type': 'application/json', cookie: cookieHeader }, body: '{}',
+      })
+      expect(renewed.status).toBe(200)
+      expect(JSON.parse(renewed.body)).toMatchObject({ deviceId: second.deviceId })
+      expect(instance.access.authorizeSession(cookiesByName(renewed.headers).get(HOST_SESSION_COOKIE) ?? '').deviceId).toBe(second.deviceId)
+    } finally {
+      clock.mockRestore()
+    }
+  })
+
+  it('does not use a browser identity or invalid protected Session as an authorization credential', async () => {
+    const inner = await upstream()
+    const instance = await remoteCookieGateway(inner.port)
+    const paired = await pair(instance)
+    const base = browserHeaders(instance)
+    const invalidPreferred = await request(instance.address().port, '/', {
+      headers: { ...base, cookie: `${HOST_SESSION_COOKIE}=invalid; ${SESSION_COOKIE}=${paired.session}` },
+    })
+    expect(invalidPreferred.status).toBe(401)
+    const idOnly = await request(instance.address().port, '/mobile-access/auth/renew', {
+      method: 'POST', headers: { ...base, 'content-type': 'application/json', cookie: `${HOST_DEVICE_COOKIE}=${paired.deviceId}` }, body: '{}',
+    })
+    expect(idOnly.status).toBe(401)
+    const wrongIdentity = await request(instance.address().port, '/mobile-access/auth/renew', {
+      method: 'POST', headers: { ...base, 'content-type': 'application/json', cookie: `${HOST_DEVICE_COOKIE}=wrong-device; ${DEVICE_COOKIE}=${paired.device}` }, body: '{}',
+    })
+    expect(wrongIdentity.status).toBe(401)
+    expect(wrongIdentity.headers['set-cookie']).toBeUndefined()
+  })
+
+  it('upgrades a single valid legacy credential to protected browser cookies on renewal', async () => {
+    const inner = await upstream()
+    const instance = await remoteCookieGateway(inner.port)
+    const paired = await pair(instance)
+    const renewal = await request(instance.address().port, '/mobile-access/auth/renew', {
+      method: 'POST', headers: { ...browserHeaders(instance), 'content-type': 'application/json', cookie: `${DEVICE_COOKIE}=${paired.device}` }, body: '{}',
+    })
+    expect(renewal.status).toBe(200)
+    expect(cookiesByName(renewal.headers).get(HOST_DEVICE_COOKIE)).toBe(paired.deviceId)
+    expect(cookiesByName(renewal.headers).has(HOST_SESSION_COOKIE)).toBe(true)
+  })
+
+  it('keeps native pairing, renewal, and authenticated HTML responses free of browser cookie migrations', async () => {
+    const inner = await upstream('remote-settings')
+    const instance = await remoteCookieGateway(inner.port)
+    const opened = await instance.access.openPairing()
+    const base = { ...browserHeaders(instance), 'user-agent': 'Android WebView DSHMobile/0.5.3' }
+    const paired = await request(instance.address().port, '/mobile-access/auth/native-pair', {
+      method: 'POST', headers: { ...base, 'content-type': 'application/json' }, body: JSON.stringify({ token: opened.token }),
+    })
+    expect(paired.status).toBe(201)
+    expect(paired.headers['set-cookie']).toBeUndefined()
+    const native = JSON.parse(paired.body) as { deviceToken: string }
+    expect(Object.keys(native).sort()).toEqual(['instanceId', 'deviceId', 'deviceToken', 'deviceExpiresAt', 'sessionToken', 'csrfToken', 'sessionExpiresAt'].sort())
+    const renewed = await request(instance.address().port, '/mobile-access/auth/native-renew', {
+      method: 'POST', headers: { ...base, 'content-type': 'application/json' }, body: JSON.stringify({ deviceToken: native.deviceToken }),
+    })
+    expect(renewed.status).toBe(200)
+    expect(renewed.headers['set-cookie']).toBeUndefined()
+    const session = JSON.parse(renewed.body) as { sessionToken: string; csrfToken: string }
+    expect(Object.keys(session).sort()).toEqual(['instanceId', 'deviceId', 'sessionToken', 'csrfToken', 'sessionExpiresAt'].sort())
+    const document = await request(instance.address().port, '/', {
+      headers: { ...base, accept: 'text/html', cookie: `${SESSION_COOKIE}=${session.sessionToken}; ${CSRF_COOKIE}=${session.csrfToken}` },
+    })
+    expect(document.status).toBe(200)
+    expect(document.headers['set-cookie']).toBeUndefined()
+    expect(document.body).toContain(`const prefix="${CSRF_COOKIE}="`)
+  })
+
+  it('uses the CSRF cookie from the selected Session family and clears both families on logout', async () => {
+    const inner = await upstream('remote-settings')
+    const instance = await remoteCookieGateway(inner.port)
+    const paired = await pair(instance)
+    const base = browserHeaders(instance)
+    const legacy = await request(instance.address().port, '/', {
+      headers: { ...base, accept: 'text/html', cookie: `${SESSION_COOKIE}=${paired.session}; ${HOST_CSRF_COOKIE}=unrelated` },
+    })
+    expect(legacy.status).toBe(200)
+    expect(legacy.body).toContain(`const prefix="${CSRF_COOKIE}="`)
+    const protectedDocument = await request(instance.address().port, '/', {
+      headers: { ...base, accept: 'text/html', cookie: `${HOST_SESSION_COOKIE}=${paired.session}; ${SESSION_COOKIE}=stale` },
+    })
+    expect(protectedDocument.status).toBe(200)
+    expect(protectedDocument.body).toContain(`const prefix="${HOST_CSRF_COOKIE}="`)
+    const logout = await request(instance.address().port, '/mobile-access/auth/logout', {
+      method: 'POST', headers: { ...base, 'content-type': 'application/json', cookie: `${HOST_SESSION_COOKIE}=${paired.session}`, [CSRF_HEADER]: paired.csrf }, body: '{}',
+    })
+    expect(logout.status).toBe(200)
+    const lines = logout.headers['set-cookie'] ?? []
+    for (const name of [SESSION_COOKIE, CSRF_COOKIE, HOST_SESSION_COOKIE, HOST_CSRF_COOKIE]) {
+      expect(lines.some(value => value.startsWith(`${name}=;`) && value.includes('Max-Age=0'))).toBe(true)
+    }
+    expect(lines.some(value => value.startsWith(`${DEVICE_COOKIE}=`) || value.startsWith(`${HOST_DEVICE_COOKIE}=`))).toBe(false)
   })
 
   it('uses the login landing to renew an expired Session without widening the device Cookie', async () => {

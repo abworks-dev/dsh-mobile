@@ -149,7 +149,7 @@ export const TOUCH_PRIMARY_QUERY = '(hover: none), (pointer: coarse)'
 const COMPOSER_CARD_SELECTOR = '[data-composer-card]'
 
 /** The composer's editing host, whichever contenteditable flavour it boots with. */
-const COMPOSER_EDITOR_SELECTOR = `${COMPOSER_CARD_SELECTOR} [contenteditable="true"],${COMPOSER_CARD_SELECTOR} [contenteditable="plaintext-only"]`
+const COMPOSER_EDITOR_SELECTOR = `${COMPOSER_CARD_SELECTOR} :is([contenteditable="true"],[contenteditable="plaintext-only"],[contenteditable=""])`
 
 /** The composer's Add trigger, whose menu must open without summoning the IME. */
 const COMPOSER_COMMAND_TRIGGER_SELECTOR = `${COMPOSER_CARD_SELECTOR} button[aria-haspopup="listbox"]`
@@ -198,37 +198,129 @@ export function resolveComposerImePolicy(
 }
 
 /**
- * Whether a tap landed on a button inside the composer card, the only gestures
- * that can consume the draft (Send, Queue, and Steer share one primary button;
- * Stop and the Add trigger leave the draft in place).
+ * Whether a tap landed on the stock Send, Queue, or Steer primary button.
+ * Stop uses a square SVG; Add, attachment, and plugin buttons are separate actions.
  * @param target - the click target in the composer card.
- * @returns whether the tap hit a composer button rather than the editor itself.
+ * @returns whether the enabled primary action carries the send arrow.
  */
 export function isComposerActionTap(target: Element | null): boolean {
   if (target === null) return false
-  const action = target.closest('button')
+  const action = target.closest('button[class*="_primary"]')
   return action !== null && action.closest(COMPOSER_CARD_SELECTOR) !== null
+    && !action.hasAttribute('disabled') && action.getAttribute('aria-disabled') !== 'true'
+    && action.querySelector('svg path') !== null
+}
+
+/** Text, reference chips, and the stock attachment rail all contribute to a draft. */
+function composerHasDraft(editor: HTMLElement, card: Element): boolean {
+  return (editor.textContent ?? '').replaceAll('\u200b', '').trim() !== ''
+    || editor.querySelector('[contenteditable="false"],[data-lexical-decorator],img') !== null
+    || card.querySelector('[data-slot="conversation.input.attachments"] [role="group"] > *') !== null
 }
 
 /**
- * Decide whether the soft keyboard collapses after a composer button tap.
- *
- * The stock Send button holds editor focus on purpose so desktop typing
- * continues right after a send; on a phone that focus keeps the keyboard
- * covering the reply. The keyboard drops only when the tap was on a touch
- * device, the editor held a draft when the tap armed the check, that draft
- * was consumed by the tap (Stop, disabled, and menu taps leave it intact),
- * and stock never moved the caret elsewhere.
- * @param state - the snapshot captured at tap time plus the post-tap state.
- * @returns whether the still-focused editor should blur.
+ * Collapse an on-screen keyboard after a trusted touch Send consumes the focused
+ * draft. Consumption may be asynchronous; input, navigation, composition, or
+ * another gesture cancels the observation. DSH owns optimistic sends and any
+ * later failure restoration; this listener never submits or modifies the draft.
+ * @param onConsumed - called immediately before blurring to suppress DSH autofocus.
+ * @returns disposer for pointer, composition, focus, and draft observations.
  */
-export function shouldCollapseComposerKeyboard(state: {
-  readonly touchPrimary: boolean
-  readonly hadDraft: boolean
-  readonly draftConsumed: boolean
-  readonly editorStillFocused: boolean
-}): boolean {
-  return state.touchPrimary && state.hadDraft && state.draftConsumed && state.editorStillFocused
+export function installComposerSendKeyboardPolicy(onConsumed: () => void): () => void {
+  let touchButton: Element | null = null
+  let cancelPending = (): void => {}
+  const composing = new WeakSet<Element>()
+  let compositionEndedAt = -Infinity
+  const elementTarget = (target: EventTarget | null): Element | null => target instanceof Element ? target : null
+  const onPointerDown = (event: PointerEvent): void => {
+    cancelPending()
+    const target = elementTarget(event.target)
+    touchButton = event.isTrusted && (event.pointerType === 'touch' || event.pointerType === 'pen')
+      && isComposerActionTap(target) ? target?.closest('button') ?? null : null
+  }
+  const onClick = (event: MouseEvent): void => {
+    const action = touchButton
+    touchButton = null
+    const target = elementTarget(event.target)
+    const active = document.activeElement
+    const nativeState = window.__DSH_MOBILE_KEYBOARD_STATE__
+    if (!event.isTrusted || event.detail === 0 || action === null || target?.closest('button') !== action
+      || !isComposerActionTap(target) || !window.matchMedia(TOUCH_PRIMARY_QUERY).matches
+      || (window.__DSH_MOBILE_NATIVE__ !== undefined
+        && (nativeState?.noHardwareKeyboard !== true || nativeState.imeVisible !== true))
+      || !(active instanceof HTMLElement) || !active.matches(COMPOSER_EDITOR_SELECTOR)
+      || composing.has(active) || performance.now() - compositionEndedAt < 10) return
+    const editor = active
+    const composerCard = editor.closest(COMPOSER_CARD_SELECTOR)
+    if (composerCard === null || action.closest(COMPOSER_CARD_SELECTOR) !== composerCard || !composerHasDraft(editor, composerCard)) return
+    const card = composerCard
+    const sessionOwner = card.closest('[data-conversation-session]')
+    const sessionId = sessionOwner?.getAttribute('data-conversation-session')
+    const currentEditor = (): boolean => editor.isConnected && editor.closest(COMPOSER_CARD_SELECTOR) === card
+      && card.closest('[data-conversation-session]') === sessionOwner
+      && sessionOwner?.getAttribute('data-conversation-session') === sessionId
+      && document.activeElement === editor
+    cancelPending()
+    let frame = 0
+    const observer = new MutationObserver(check)
+    const expiry = window.setTimeout(() => { cancelPending() }, 30_000)
+    cancelPending = (): void => {
+      observer.disconnect()
+      window.clearTimeout(expiry)
+      window.cancelAnimationFrame(frame)
+      cancelPending = () => {}
+    }
+    function check(): void {
+      if (!currentEditor()) {
+        cancelPending()
+        return
+      }
+      if (composerHasDraft(editor, card) || ['adjudicating', 'submitting'].includes(editor.dataset.phase ?? '')) return
+      if (frame !== 0) return
+      frame = window.requestAnimationFrame(() => {
+        frame = window.requestAnimationFrame(() => {
+          frame = 0
+          if (!currentEditor() || composerHasDraft(editor, card)
+            || ['adjudicating', 'submitting'].includes(editor.dataset.phase ?? '')) return
+          cancelPending()
+          onConsumed()
+          editor.blur()
+        })
+      })
+    }
+    observer.observe(card, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['data-phase', 'contenteditable'] })
+    // The capture listener runs before React's onClick; the first frame reads its result.
+    frame = window.requestAnimationFrame(() => { frame = 0; check() })
+  }
+  const onCompositionStart = (event: CompositionEvent): void => {
+    const target = elementTarget(event.target)
+    if (target !== null) composing.add(target)
+    cancelPending()
+  }
+  const onCompositionEnd = (event: CompositionEvent): void => {
+    const target = elementTarget(event.target)
+    if (target !== null) composing.delete(target)
+    compositionEndedAt = performance.now()
+  }
+  const onTyping = (): void => { touchButton = null; cancelPending() }
+  const onFocus = (): void => { cancelPending() }
+  document.addEventListener('pointerdown', onPointerDown, true)
+  document.addEventListener('click', onClick, true)
+  document.addEventListener('compositionstart', onCompositionStart, true)
+  document.addEventListener('compositionend', onCompositionEnd, true)
+  document.addEventListener('keydown', onTyping, true)
+  document.addEventListener('input', onTyping, true)
+  document.addEventListener('focusin', onFocus, true)
+  return () => {
+    cancelPending()
+    document.removeEventListener('pointerdown', onPointerDown, true)
+    document.removeEventListener('click', onClick, true)
+    document.removeEventListener('compositionstart', onCompositionStart, true)
+    document.removeEventListener('compositionend', onCompositionEnd, true)
+    document.removeEventListener('keydown', onTyping, true)
+    document.removeEventListener('input', onTyping, true)
+    document.removeEventListener('focusin', onFocus, true)
+  }
 }
 
 /**
@@ -441,10 +533,9 @@ html,body,#root{width:100%;height:100%;overflow:hidden}
 .dshm-scrim[data-open=true]{opacity:1;pointer-events:auto}
 .dshm-overlay{position:fixed;z-index:90;inset:0;pointer-events:none}.dshm-overlay>*{pointer-events:auto}
 .dshm-shell header{min-width:0;padding-left:52px}
-/* iOS Safari auto-zooms any focused editable under 16px and never zooms back
-   once the keyboard drops, so every editable flavour in the shell — the stock
-   contenteditable composer at --dsw-font-xs-13 included — stays at 16px. */
-.dshm-shell :is(input,textarea,[contenteditable=true],[contenteditable=plaintext-only]){font-size:16px}
+/* Keep focused editables above Safari's 16px zoom threshold while retaining
+   the DSH content-font preference and larger inherited text. */
+.dshm-shell :is(input,textarea,[contenteditable=true],[contenteditable=plaintext-only],[contenteditable=""]){font-size:max(16px,1em,var(--dsh-content-font-size,1em))!important}
 .dshm-shell table{display:block;max-width:100%;overflow-x:auto}
 .dshm-shell pre{max-width:100%;overflow-x:auto}
 .dshm-shell img,.dshm-shell video,.dshm-shell canvas,.dshm-shell svg{max-width:100%}
@@ -605,43 +696,14 @@ function MobileAppFrame(props: MobileRootProps & {
     // A finger tap never fires mousedown on Android, and this has to land before
     // the trigger's own focus, so it runs on capture for pointerdown.
     document.addEventListener('pointerdown', applyComposerImePolicy, true)
-    // The stock Send button keeps the editor focused on purpose (keepFocus on
-    // mousedown) so desktop typing continues; a phone wants the keyboard gone
-    // once the tapped action actually consumed the draft, or the reply stays
-    // hidden behind the IME. The capture pass snapshots the focused draft
-    // before stock handlers run; the timer verifies consumption after.
-    let sendCollapseTimer = 0
-    const collapseComposerKeyboardAfterSend = (event: MouseEvent): void => {
-      const armed = isComposerActionTap(elementTarget(event.target))
-      const active = document.activeElement
-      const editor = armed
-        && active instanceof HTMLElement
-        && active.matches(COMPOSER_EDITOR_SELECTOR)
-        && (active.textContent ?? '').trim() !== ''
-          ? active
-          : null
-      if (sendCollapseTimer !== 0) window.clearTimeout(sendCollapseTimer)
-      sendCollapseTimer = window.setTimeout(() => {
-        sendCollapseTimer = 0
-        if (editor === null) return
-        if (shouldCollapseComposerKeyboard({
-          touchPrimary: window.matchMedia(TOUCH_PRIMARY_QUERY).matches,
-          hadDraft: true,
-          draftConsumed: (editor.textContent ?? '').trim() === '',
-          editorStillFocused: document.activeElement === editor,
-        })) {
-          suppressComposerUntil.current = performance.now() + 700
-          editor.blur()
-        }
-      }, 0)
-    }
-    document.addEventListener('click', collapseComposerKeyboardAfterSend, true)
+    const disposeSendKeyboard = installComposerSendKeyboardPolicy(() => {
+      suppressComposerUntil.current = performance.now() + 700
+    })
     return () => {
       document.removeEventListener('focusin', suppressAutofocus, true)
       document.removeEventListener('click', suppressBranchAutofocus, true)
       document.removeEventListener('pointerdown', applyComposerImePolicy, true)
-      document.removeEventListener('click', collapseComposerKeyboardAfterSend, true)
-      if (sendCollapseTimer !== 0) window.clearTimeout(sendCollapseTimer)
+      disposeSendKeyboard()
       restoreNavigationIme()
       // A withheld editor outliving the surface would strand the composer without
       // a keyboard for the rest of the session.

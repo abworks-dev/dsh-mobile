@@ -303,17 +303,10 @@ export class AccessController {
   /** Exchange a valid persistent device credential for a new short Session. */
   async renew(deviceToken: string): Promise<RenewalResult> {
     this.requireInitialized()
-    if (deviceToken.length > 512) throw new AccessError(401, 'authentication_failed')
     return this.exclusive(async () => {
       const now = this.now()
-      const tokenDigest = digest(deviceToken)
-      const index = this.devices.findIndex(device => timingSafeEqual(Buffer.from(device.tokenDigest, 'hex'), tokenDigest))
-      const device = this.devices[index]
-      if (device === undefined) {
-        throw new AccessError(401, 'authentication_failed')
-      }
-      if (device.revokedAt !== undefined) throw new AccessError(401, 'device_revoked')
-      if (device.expiresAt <= now) throw new AccessError(401, 'device_expired')
+      const device = this.requireDevice(deviceToken, now)
+      const index = this.devices.indexOf(device)
       const updated: StoredDevice = Object.freeze({ ...device, lastSeenAt: now })
       const next = [...this.devices]
       next[index] = updated
@@ -326,15 +319,10 @@ export class AccessController {
   /** Validate a persistent device credential without consuming a Session slot. */
   async probe(deviceToken: string): Promise<DeviceProbeResult> {
     this.requireInitialized()
-    if (deviceToken.length > 512) throw new AccessError(401, 'authentication_failed')
     return this.exclusive(async () => {
       const now = this.now()
-      const tokenDigest = digest(deviceToken)
-      const index = this.devices.findIndex(device => timingSafeEqual(Buffer.from(device.tokenDigest, 'hex'), tokenDigest))
-      const device = this.devices[index]
-      if (device === undefined) throw new AccessError(401, 'authentication_failed')
-      if (device.revokedAt !== undefined) throw new AccessError(401, 'device_revoked')
-      if (device.expiresAt <= now) throw new AccessError(401, 'device_expired')
+      const device = this.requireDevice(deviceToken, now)
+      const index = this.devices.indexOf(device)
       const updated: StoredDevice = Object.freeze({ ...device, lastSeenAt: now })
       const next = [...this.devices]
       next[index] = updated
@@ -342,6 +330,23 @@ export class AccessController {
       this.devices = next
       return Object.freeze({ deviceId: device.id, deviceExpiresAt: device.expiresAt })
     })
+  }
+
+  /** Validate a device credential without writing state or opening a Session. */
+  authorizeDevice(deviceToken: string): DeviceProbeResult {
+    this.requireInitialized()
+    const device = this.requireDevice(deviceToken, this.now())
+    return Object.freeze({ deviceId: device.id, deviceExpiresAt: device.expiresAt })
+  }
+
+  private requireDevice(deviceToken: string, now: number): StoredDevice {
+    if (deviceToken.length > 512) throw new AccessError(401, 'authentication_failed')
+    const tokenDigest = digest(deviceToken)
+    const device = this.devices.find(candidate => timingSafeEqual(Buffer.from(candidate.tokenDigest, 'hex'), tokenDigest))
+    if (device === undefined) throw new AccessError(401, 'authentication_failed')
+    if (device.revokedAt !== undefined) throw new AccessError(401, 'device_revoked')
+    if (device.expiresAt <= now) throw new AccessError(401, 'device_expired')
+    return device
   }
 
   /** Resolve a short Session Cookie without revealing whether device or Session failed. */

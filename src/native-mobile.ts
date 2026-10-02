@@ -19,6 +19,8 @@ export const NATIVE_MOBILE_STYLES = `
    the query restores the fixed scrim, and its more specific [hidden] rule
    keeps winning there. */
  .dsh-native-mobile-backdrop,.dsh-mobile-branch-toast,.dsh-mobile-media-toast { display:none; }
+ /* The content-font preference may exceed Safari's focused-editable minimum. */
+ [data-dsh-mobile-center] :is(input,textarea,[contenteditable="true"],[contenteditable="plaintext-only"],[contenteditable=""]) { font-size:max(16px,1em,var(--dsh-content-font-size,1em)) !important; }
  .dsh-mobile-settings_row { display:flex; align-items:center; gap:8px; padding:16px 0; border-bottom:0.5px solid var(--dsw-alias-border-l2); }
  .dsh-mobile-settings_rowText { flex:1; min-width:0; display:flex; flex-direction:column; gap:4px; padding-right:48px; }
  .dsh-mobile-settings_title { color:var(--dsw-alias-label-primary); font-size:14px; font-weight:400; line-height:22px; }
@@ -111,9 +113,6 @@ export const NATIVE_MOBILE_STYLES = `
   [data-dsh-mobile-settings-options] [class*="_rowActions"] button { flex:none !important; width:auto !important; min-width:44px !important; max-width:none !important; min-height:44px !important; padding-inline:10px !important; white-space:nowrap !important; word-break:keep-all !important; writing-mode:horizontal-tb !important; }
   [data-dsh-mobile-settings-content][data-dsh-mobile-view-transition="true"],
   [data-dsh-mobile-view][data-dsh-mobile-view-transition="true"] { animation:dsh-mobile-view-in var(--dsh-mobile-motion-duration) var(--dsh-mobile-motion-ease); }
-  /* Center-column parity with the shell's 16px editable rule: the stock
-     composer editor is a contenteditable under 16px. */
-  [data-dsh-mobile-center] :is(input,textarea,[contenteditable="true"],[contenteditable="plaintext-only"]) { font-size:16px !important; }
   /* Markdown tables use content-sized columns. Small tables fill the phone;
      wider tables keep readable cells and scroll inside their own region. */
   [data-dsh-mobile-table-scroll] { box-sizing:border-box; width:100%; max-width:100%; overflow-x:auto; overscroll-behavior-x:contain; -webkit-overflow-scrolling:touch; }

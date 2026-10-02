@@ -15,6 +15,32 @@ const stateFile = join(tmpdir(), 'dsh-mobile-access-config-test.json')
 const controlFile = join(tmpdir(), 'dsh-mobile-access-control-test.json')
 
 describe('gateway configuration', () => {
+  it('keeps WebSocket compression opt-in and freezes validated paths and budgets', () => {
+    const base = { stateFile, controlFile, initiallyEnabled: false, tls: { mode: 'disabled' as const } }
+    expect(parseGatewayConfig(base).websocketCompression.paths).toEqual([])
+    const paths = ['/api/remote.mux', '/api/remote.mux']
+    const value = Config({ ...base, websocketCompression: { paths, maxMessageBytes: 2048, maxQueuedBytes: 4096 } })
+    const resolved = parseGatewayConfig(value).websocketCompression
+    paths.push('/another')
+    expect(resolved.paths).toEqual(['/api/remote.mux'])
+    expect(resolved.maxMessageBytes).toBe(2048)
+    expect(resolved.maxQueuedBytes).toBe(4096)
+    expect(Object.isFrozen(resolved)).toBe(true)
+    expect(Object.isFrozen(resolved.paths)).toBe(true)
+  })
+
+  it('rejects malformed compression paths and unbounded compression resource settings', () => {
+    const base = { stateFile, tls: { mode: 'disabled' } }
+    for (const websocketCompression of [
+      true, [], { paths: ['/api/remote.mux?token=secret'] }, { paths: ['/../other'] },
+      { maxMessageBytes: 0 }, { maxMessageBytes: 4096, maxQueuedBytes: 2048 },
+      { maxMessageBytes: 1024, maxQueuedBytes: 1024 },
+      { maxMessageBytes: 1024, thresholdBytes: 2048 }, { concurrencyLimit: 0 }, { level: 10 },
+    ]) {
+      expect(() => parseGatewayConfig({ ...base, websocketCompression })).toThrow()
+    }
+  })
+
   it('keeps an additional TLS chain optional in the Loader schema', () => {
     const value = Config({
       stateFile,

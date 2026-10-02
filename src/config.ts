@@ -4,6 +4,27 @@ import { fileURLToPath } from 'node:url'
 import z from '@deepseek-ai/schemastery'
 import { isIP } from './ip.js'
 import { isLoopbackAddress, parseAuthority, parseCidr, type AuthoritySpec, type ParsedCidr } from './network.js'
+import { normalizeWebSocketPaths } from './websocket-paths.js'
+
+/** Optional compression for exact, already authorized WebSocket paths. */
+export interface WebSocketCompressionConfig {
+  paths?: string[]
+  maxMessageBytes?: number
+  maxQueuedBytes?: number
+  thresholdBytes?: number
+  concurrencyLimit?: number
+  level?: number
+}
+
+/** Validated compression settings; an empty path list keeps the raw transport. */
+export interface ResolvedWebSocketCompressionConfig {
+  readonly paths: readonly string[]
+  readonly maxMessageBytes: number
+  readonly maxQueuedBytes: number
+  readonly thresholdBytes: number
+  readonly concurrencyLimit: number
+  readonly level: number
+}
 
 /** TLS source accepted by the LAN listener. */
 export interface ProvidedTlsConfig {
@@ -46,6 +67,8 @@ export interface PluginConfig {
   mobileCompatibilityFile?: string
   /** Optional application-phase client package ids omitted only from the mobile boot graph. */
   excludedClientModules?: string[]
+  /** Compression is opt-in; it does not authorize additional WebSocket paths. */
+  websocketCompression?: WebSocketCompressionConfig
   /** Stable public discovery identifier; it is not an authentication secret. */
   instanceId?: string
   /** Managed CA certificate offered to the Android installer after fingerprint binding. */
@@ -88,6 +111,7 @@ export interface ResolvedGatewayConfig {
   readonly mobileLayoutFile: string
   readonly mobileCompatibilityFile: string
   readonly excludedClientModules: readonly string[]
+  readonly websocketCompression: ResolvedWebSocketCompressionConfig
   readonly instanceId: string
   readonly pairingCaFile?: string
   readonly tls: TlsConfig
@@ -126,6 +150,14 @@ export const Config: z<PluginConfig> = z.object({
   mobileLayoutFile: z.string().hidden(),
   mobileCompatibilityFile: z.string().hidden(),
   excludedClientModules: z.array(String).default([]),
+  websocketCompression: z.object({
+    paths: z.array(String).default([]),
+    maxMessageBytes: z.natural(),
+    maxQueuedBytes: z.natural(),
+    thresholdBytes: z.natural(),
+    concurrencyLimit: z.natural(),
+    level: z.natural().max(9),
+  }),
   instanceId: z.string().hidden(),
   pairingCaFile: z.string().hidden(),
   initiallyEnabled: z.boolean().hidden().required(),
@@ -156,6 +188,24 @@ function integer(value: unknown, name: string, fallback: number, minimum: number
     throw new Error(`${name} must be an integer from ${String(minimum)} through ${String(maximum)}`)
   }
   return resolved
+}
+
+function parseWebSocketCompression(raw: unknown): ResolvedWebSocketCompressionConfig {
+  if (raw !== undefined && (typeof raw !== 'object' || raw === null || Array.isArray(raw))) {
+    throw new Error('websocketCompression must be an object')
+  }
+  const value = (raw ?? {}) as WebSocketCompressionConfig
+  const maxMessageBytes = integer(value.maxMessageBytes, 'websocketCompression.maxMessageBytes', 32 * 1024 * 1024, 1024, 256 * 1024 * 1024)
+  const maxQueuedBytes = integer(value.maxQueuedBytes, 'websocketCompression.maxQueuedBytes', 64 * 1024 * 1024, 1024, 256 * 1024 * 1024)
+  if (maxQueuedBytes < maxMessageBytes + 14) throw new Error('websocketCompression.maxQueuedBytes must cover maxMessageBytes and the frame header')
+  return Object.freeze({
+    paths: Object.freeze(normalizeWebSocketPaths(value.paths ?? [])),
+    maxMessageBytes,
+    maxQueuedBytes,
+    thresholdBytes: integer(value.thresholdBytes, 'websocketCompression.thresholdBytes', 1024, 0, maxMessageBytes),
+    concurrencyLimit: integer(value.concurrencyLimit, 'websocketCompression.concurrencyLimit', 4, 1, 32),
+    level: integer(value.level, 'websocketCompression.level', 3, 0, 9),
+  })
 }
 
 function stringArray(value: unknown, name: string): string[] {
@@ -315,6 +365,7 @@ export function parseGatewayConfig(raw: unknown): ResolvedGatewayConfig {
       ? fileURLToPath(new URL('./mobile-compat.js', import.meta.url))
       : absoluteFile(value.mobileCompatibilityFile, 'mobileCompatibilityFile'),
     excludedClientModules: excludedClientModules(value.excludedClientModules),
+    websocketCompression: parseWebSocketCompression(value.websocketCompression),
     instanceId: value.instanceId === undefined
       ? createHash('sha256').update(absoluteFile(value.stateFile, 'stateFile')).digest('hex')
       : /^[a-f\d]{64}$/u.test(value.instanceId)

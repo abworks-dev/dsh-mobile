@@ -1,8 +1,8 @@
 # 贡献者 / Contributors
 
-GitHub 的 [Contributors 图表](https://github.com/saya-ch/dsh-mobile/graphs/contributors) 按进入默认分支的提交自动统计，无法手动加入仅提交 issue 或 PR 提案的成员。本页按实际参与方式感谢社区成员；仓库维护者与自动依赖更新仍可在 GitHub 历史记录中查看。
+GitHub 的 [Contributors 图表](https://github.com/saya-ch/dsh-mobile/graphs/contributors) 按进入默认分支的提交自动统计，无法手动加入仅提交 issue 或 PR 提案的成员。本页按截至 2026-10-02 的实际参与方式感谢社区成员；仓库维护者与自动依赖更新仍可在 GitHub 历史记录中查看。
 
-GitHub's Contributors graph counts commits on the default branch; issue reports and PR proposals cannot be manually added to it. This page credits community members by how they contributed, through 2026-10-01. The repository maintainer and automated dependency updates remain visible in GitHub's history.
+GitHub's Contributors graph counts commits on the default branch; issue reports and PR proposals cannot be manually added to it. This page credits community members by how they contributed, through 2026-10-02. The repository maintainer and automated dependency updates remain visible in GitHub's history.
 
 ## 已合并 PR / Merged PRs
 
@@ -11,7 +11,8 @@ GitHub's Contributors graph counts commits on the default branch; issue reports 
 | [@1624318455](https://github.com/1624318455) | [#93](https://github.com/saya-ch/dsh-mobile/pull/93) |
 | [@abworks-dev](https://github.com/abworks-dev) | [#91](https://github.com/saya-ch/dsh-mobile/pull/91), [#98](https://github.com/saya-ch/dsh-mobile/pull/98), [#99](https://github.com/saya-ch/dsh-mobile/pull/99) |
 | [@ayiejosh](https://github.com/ayiejosh) | [#109](https://github.com/saya-ch/dsh-mobile/pull/109), [#110](https://github.com/saya-ch/dsh-mobile/pull/110), [#116](https://github.com/saya-ch/dsh-mobile/pull/116), [#117](https://github.com/saya-ch/dsh-mobile/pull/117), [#119](https://github.com/saya-ch/dsh-mobile/pull/119), [#124](https://github.com/saya-ch/dsh-mobile/pull/124), [#125](https://github.com/saya-ch/dsh-mobile/pull/125), [#133](https://github.com/saya-ch/dsh-mobile/pull/133), [#136](https://github.com/saya-ch/dsh-mobile/pull/136) |
-| [@chintoleung](https://github.com/chintoleung) | [#104](https://github.com/saya-ch/dsh-mobile/pull/104) |
+| [@chintoleung](https://github.com/chintoleung) | [#104](https://github.com/saya-ch/dsh-mobile/pull/104), [#147](https://github.com/saya-ch/dsh-mobile/pull/147), [#148](https://github.com/saya-ch/dsh-mobile/pull/148) |
+| [@fengfanfan-max](https://github.com/fengfanfan-max) | [#143](https://github.com/saya-ch/dsh-mobile/pull/143) |
 | [@idoall](https://github.com/idoall) | [#61](https://github.com/saya-ch/dsh-mobile/pull/61), [#66](https://github.com/saya-ch/dsh-mobile/pull/66), [#67](https://github.com/saya-ch/dsh-mobile/pull/67), [#77](https://github.com/saya-ch/dsh-mobile/pull/77) |
 | [@JackRushante](https://github.com/JackRushante) | [#16](https://github.com/saya-ch/dsh-mobile/pull/16) |
 | [@liudasheng](https://github.com/liudasheng) | [#100](https://github.com/saya-ch/dsh-mobile/pull/100), [#130](https://github.com/saya-ch/dsh-mobile/pull/130) |
@@ -37,6 +38,7 @@ GitHub's Contributors graph counts commits on the default branch; issue reports 
 | 反馈贡献者 / Issue reporter | 提交的问题 / Issues |
 | --- | --- |
 | [@1624318455](https://github.com/1624318455) | [#92](https://github.com/saya-ch/dsh-mobile/issues/92) |
+| [@Ann-luo](https://github.com/Ann-luo) | [#150](https://github.com/saya-ch/dsh-mobile/issues/150) |
 | [@azri57806-design](https://github.com/azri57806-design) | [#97](https://github.com/saya-ch/dsh-mobile/issues/97) |
 | [@BrainZombie](https://github.com/BrainZombie) | [#128](https://github.com/saya-ch/dsh-mobile/issues/128) |
 | [@CESAEREE](https://github.com/CESAEREE) | [#1](https://github.com/saya-ch/dsh-mobile/issues/1) |
@@ -58,6 +60,7 @@ GitHub's Contributors graph counts commits on the default branch; issue reports 
 | [@rgshendong](https://github.com/rgshendong) | [#87](https://github.com/saya-ch/dsh-mobile/issues/87) |
 | [@RonaldinhoL](https://github.com/RonaldinhoL) | [#89](https://github.com/saya-ch/dsh-mobile/issues/89) |
 | [@shengyvself](https://github.com/shengyvself) | [#13](https://github.com/saya-ch/dsh-mobile/issues/13), [#14](https://github.com/saya-ch/dsh-mobile/issues/14) |
+| [@snailium](https://github.com/snailium) | [#144](https://github.com/saya-ch/dsh-mobile/issues/144) |
 | [@sznyhgm](https://github.com/sznyhgm) | [#96](https://github.com/saya-ch/dsh-mobile/issues/96) |
 | [@sortjiajun](https://github.com/sortjiajun) | [#90](https://github.com/saya-ch/dsh-mobile/issues/90) |
 | [@StrawberryAO](https://github.com/StrawberryAO) | [#39](https://github.com/saya-ch/dsh-mobile/issues/39) |
@@ -66,6 +69,6 @@ GitHub's Contributors graph counts commits on the default branch; issue reports 
 | [@taki-ohh](https://github.com/taki-ohh) | [#19](https://github.com/saya-ch/dsh-mobile/issues/19) |
 | [@tianyimc](https://github.com/tianyimc) | [#126](https://github.com/saya-ch/dsh-mobile/issues/126) |
 | [@Xingcheng-wang](https://github.com/Xingcheng-wang) | [#76](https://github.com/saya-ch/dsh-mobile/issues/76) |
-| [@xhwxt](https://github.com/xhwxt) | [#107](https://github.com/saya-ch/dsh-mobile/issues/107), [#108](https://github.com/saya-ch/dsh-mobile/issues/108) |
+| [@xhwxt](https://github.com/xhwxt) | [#107](https://github.com/saya-ch/dsh-mobile/issues/107), [#108](https://github.com/saya-ch/dsh-mobile/issues/108), [#145](https://github.com/saya-ch/dsh-mobile/issues/145), [#146](https://github.com/saya-ch/dsh-mobile/issues/146), [#149](https://github.com/saya-ch/dsh-mobile/issues/149) |
 | [@Yurzi](https://github.com/Yurzi) | [#17](https://github.com/saya-ch/dsh-mobile/issues/17) |
 | [@Ztyss](https://github.com/Ztyss) | [#22](https://github.com/saya-ch/dsh-mobile/issues/22), [#23](https://github.com/saya-ch/dsh-mobile/issues/23) |

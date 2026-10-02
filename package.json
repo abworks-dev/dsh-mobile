@@ -1,6 +1,6 @@
 {
   "name": "dsh-mobile",
-  "version": "0.5.3",
+  "version": "0.5.4",
   "private": false,
   "description": "DeepSeek Harness 移动端适配与安全访问插件，支持局域网、远程连接、Android App 和手机浏览器。",
   "type": "module",
@@ -47,6 +47,8 @@
     "docs/ATTACH_EXISTING_FRPS.en.md",
     "docs/SELF_HOSTED_ORIGIN.md",
     "docs/SELF_HOSTED_ORIGIN.en.md",
+    "docs/SLOW_CONNECTIONS.md",
+    "docs/SLOW_CONNECTIONS.en.md",
     "LICENSE",
     "FUNNEL_THIRD_PARTY_LICENSES.txt",
     "SECURITY.md",
@@ -76,6 +78,8 @@
     "smoke:question-fixes": "node ./scripts/smoke-question-fixes.mjs",
     "smoke:native-layout": "node ./scripts/smoke-native-mobile-layout.mjs",
     "smoke:voice-session": "node ./scripts/smoke-voice-session.mjs",
+    "smoke:composer-keyboard": "node ./scripts/smoke-composer-keyboard.mjs",
+    "smoke:browser-auth-cookies": "node ./scripts/smoke-browser-auth-cookies.mjs",
     "check:release-tag": "node ./scripts/check-release-version.mjs --tag-env",
     "check:version": "node ./scripts/check-release-version.mjs",
     "clean": "node ./scripts/clean.mjs",
@@ -151,7 +155,8 @@
     "bonjour-service": "1.4.4",
     "dsh-mobile-question-fixes": "file:packages/question-fixes",
     "qrcode": "^1.5.4",
-    "selfsigned": "^5.5.0"
+    "selfsigned": "^5.5.0",
+    "ws": "8.22.0"
   },
   "bundledDependencies": [
     "dsh-mobile-question-fixes"
@@ -176,6 +181,7 @@
     "@types/node": "^26.5.1",
     "@types/qrcode": "^1.5.5",
     "@types/react": "~18.3.1",
+    "@types/ws": "8.18.2",
     "core-js": "^3.50.0",
     "js-yaml": "^4.3.2",
     "playwright": "1.63.0",

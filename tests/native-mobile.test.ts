@@ -54,11 +54,9 @@ describe('native mobile presentation', () => {
     expect(NATIVE_MOBILE_STYLES).not.toContain('html.dsh-native-mobile-active :focus { outline:none')
   })
 
-  it('pins every center editable at 16px so focused inputs cannot trigger iOS zoom', () => {
-    // Parity with the shell rule: the stock composer editor is a contenteditable
-    // under 16px, and iOS Safari auto-zooms any focused editable below that.
+  it('uses a minimum editable font on narrow and wide native surfaces', () => {
     expect(NATIVE_MOBILE_STYLES).toContain(
-      '[data-dsh-mobile-center] :is(input,textarea,[contenteditable="true"],[contenteditable="plaintext-only"]) { font-size:16px !important; }',
+      '[data-dsh-mobile-center] :is(input,textarea,[contenteditable="true"],[contenteditable="plaintext-only"],[contenteditable=""]) { font-size:max(16px,1em,var(--dsh-content-font-size,1em)) !important; }',
     )
     expect(NATIVE_MOBILE_STYLES).not.toContain('[data-dsh-mobile-center] textarea { font-size:16px !important; }')
   })
