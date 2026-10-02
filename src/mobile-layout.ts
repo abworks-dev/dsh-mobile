@@ -198,6 +198,40 @@ export function resolveComposerImePolicy(
 }
 
 /**
+ * Whether a tap landed on a button inside the composer card, the only gestures
+ * that can consume the draft (Send, Queue, and Steer share one primary button;
+ * Stop and the Add trigger leave the draft in place).
+ * @param target - the click target in the composer card.
+ * @returns whether the tap hit a composer button rather than the editor itself.
+ */
+export function isComposerActionTap(target: Element | null): boolean {
+  if (target === null) return false
+  const action = target.closest('button')
+  return action !== null && action.closest(COMPOSER_CARD_SELECTOR) !== null
+}
+
+/**
+ * Decide whether the soft keyboard collapses after a composer button tap.
+ *
+ * The stock Send button holds editor focus on purpose so desktop typing
+ * continues right after a send; on a phone that focus keeps the keyboard
+ * covering the reply. The keyboard drops only when the tap was on a touch
+ * device, the editor held a draft when the tap armed the check, that draft
+ * was consumed by the tap (Stop, disabled, and menu taps leave it intact),
+ * and stock never moved the caret elsewhere.
+ * @param state - the snapshot captured at tap time plus the post-tap state.
+ * @returns whether the still-focused editor should blur.
+ */
+export function shouldCollapseComposerKeyboard(state: {
+  readonly touchPrimary: boolean
+  readonly hadDraft: boolean
+  readonly draftConsumed: boolean
+  readonly editorStillFocused: boolean
+}): boolean {
+  return state.touchPrimary && state.hadDraft && state.draftConsumed && state.editorStillFocused
+}
+
+/**
  * Close the details drawer from its scrim, collapsing the DSH 0.1.5 right
  * Sidebar first when that optional service owns the visible content.
  */
@@ -568,10 +602,43 @@ function MobileAppFrame(props: MobileRootProps & {
     // A finger tap never fires mousedown on Android, and this has to land before
     // the trigger's own focus, so it runs on capture for pointerdown.
     document.addEventListener('pointerdown', applyComposerImePolicy, true)
+    // The stock Send button keeps the editor focused on purpose (keepFocus on
+    // mousedown) so desktop typing continues; a phone wants the keyboard gone
+    // once the tapped action actually consumed the draft, or the reply stays
+    // hidden behind the IME. The capture pass snapshots the focused draft
+    // before stock handlers run; the timer verifies consumption after.
+    let sendCollapseTimer = 0
+    const collapseComposerKeyboardAfterSend = (event: MouseEvent): void => {
+      const armed = isComposerActionTap(elementTarget(event.target))
+      const active = document.activeElement
+      const editor = armed
+        && active instanceof HTMLElement
+        && active.matches(COMPOSER_EDITOR_SELECTOR)
+        && (active.textContent ?? '').trim() !== ''
+          ? active
+          : null
+      if (sendCollapseTimer !== 0) window.clearTimeout(sendCollapseTimer)
+      sendCollapseTimer = window.setTimeout(() => {
+        sendCollapseTimer = 0
+        if (editor === null) return
+        if (shouldCollapseComposerKeyboard({
+          touchPrimary: window.matchMedia(TOUCH_PRIMARY_QUERY).matches,
+          hadDraft: true,
+          draftConsumed: (editor.textContent ?? '').trim() === '',
+          editorStillFocused: document.activeElement === editor,
+        })) {
+          suppressComposerUntil.current = performance.now() + 700
+          editor.blur()
+        }
+      }, 0)
+    }
+    document.addEventListener('click', collapseComposerKeyboardAfterSend, true)
     return () => {
       document.removeEventListener('focusin', suppressAutofocus, true)
       document.removeEventListener('click', suppressBranchAutofocus, true)
       document.removeEventListener('pointerdown', applyComposerImePolicy, true)
+      document.removeEventListener('click', collapseComposerKeyboardAfterSend, true)
+      if (sendCollapseTimer !== 0) window.clearTimeout(sendCollapseTimer)
       restoreNavigationIme()
       // A withheld editor outliving the surface would strand the composer without
       // a keyboard for the rest of the session.
