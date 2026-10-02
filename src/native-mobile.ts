@@ -19,7 +19,13 @@ export const NATIVE_MOBILE_STYLES = `
    the query restores the fixed scrim, and its more specific [hidden] rule
    keeps winning there. */
  .dsh-native-mobile-backdrop,.dsh-mobile-branch-toast,.dsh-mobile-media-toast { display:none; }
- /* The content-font preference may exceed Safari's focused-editable minimum. */
+ /* The content-font preference may exceed Safari's focused-editable minimum.
+    The html-level class exists on every non-desktop mobile page, so it also
+    covers body-level portals (model picker search) the center column never
+    contained; the center marker stays alongside it because a disposed
+    surface removes the html class while styles applied from its string can
+    outlive the class on a page that still carries the center column. */
+ html.dsh-native-mobile-active :is(input,textarea,[contenteditable="true"],[contenteditable="plaintext-only"],[contenteditable=""]),
  [data-dsh-mobile-center] :is(input,textarea,[contenteditable="true"],[contenteditable="plaintext-only"],[contenteditable=""]) { font-size:max(16px,1em,var(--dsh-content-font-size,1em)) !important; }
  .dsh-mobile-settings_row { display:flex; align-items:center; gap:8px; padding:16px 0; border-bottom:0.5px solid var(--dsw-alias-border-l2); }
  .dsh-mobile-settings_rowText { flex:1; min-width:0; display:flex; flex-direction:column; gap:4px; padding-right:48px; }

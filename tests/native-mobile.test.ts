@@ -61,8 +61,16 @@ describe('native mobile presentation', () => {
   })
 
   it('uses a minimum editable font on narrow and wide native surfaces', () => {
+    // The html-level class exists on every non-desktop mobile page, so it also
+    // covers body-level portals (model picker search) the center column never
+    // contained.
     expect(NATIVE_MOBILE_STYLES).toContain(
-      '[data-dsh-mobile-center] :is(input,textarea,[contenteditable="true"],[contenteditable="plaintext-only"],[contenteditable=""]) { font-size:max(16px,1em,var(--dsh-content-font-size,1em)) !important; }',
+      'html.dsh-native-mobile-active :is(input,textarea,[contenteditable="true"],[contenteditable="plaintext-only"],[contenteditable=""])',
+    )
+    // The center marker scope survives a disposed surface, which removes the
+    // html class while its applied style string can outlive it.
+    expect(NATIVE_MOBILE_STYLES).toContain(
+      ' [data-dsh-mobile-center] :is(input,textarea,[contenteditable="true"],[contenteditable="plaintext-only"],[contenteditable=""]) { font-size:max(16px,1em,var(--dsh-content-font-size,1em)) !important; }',
     )
     expect(NATIVE_MOBILE_STYLES).not.toContain('[data-dsh-mobile-center] textarea { font-size:16px !important; }')
   })

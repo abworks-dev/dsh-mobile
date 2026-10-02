@@ -534,8 +534,9 @@ html,body,#root{width:100%;height:100%;overflow:hidden}
 .dshm-overlay{position:fixed;z-index:90;inset:0;pointer-events:none}.dshm-overlay>*{pointer-events:auto}
 .dshm-shell header{min-width:0;padding-left:52px}
 /* Keep focused editables above Safari's 16px zoom threshold while retaining
-   the DSH content-font preference and larger inherited text. */
-.dshm-shell :is(input,textarea,[contenteditable=true],[contenteditable=plaintext-only],[contenteditable=""]){font-size:max(16px,1em,var(--dsh-content-font-size,1em))!important}
+   the DSH content-font preference and larger inherited text. Stock menus
+   portal into document.body, so the floor scopes from the body itself. */
+body:has(.dshm-shell) :is(input,textarea,[contenteditable=true],[contenteditable=plaintext-only],[contenteditable=""]){font-size:max(16px,1em,var(--dsh-content-font-size,1em))!important}
 .dshm-shell table{display:block;max-width:100%;overflow-x:auto}
 .dshm-shell pre{max-width:100%;overflow-x:auto}
 .dshm-shell img,.dshm-shell video,.dshm-shell canvas,.dshm-shell svg{max-width:100%}

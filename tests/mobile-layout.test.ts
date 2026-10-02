@@ -710,9 +710,13 @@ describe('dedicated mobile layout boot', () => {
   })
 
   it('sets a minimum editable font while preserving the content-font preference', () => {
+    // Stock menus portal into document.body (model picker search, trigger
+    // menus), outside .dshm-shell, so the 16px floor must scope from the body
+    // itself or Safari still zooms those inputs and never zooms back.
     expect(MOBILE_LAYOUT_STYLES).toContain(
-      '.dshm-shell :is(input,textarea,[contenteditable=true],[contenteditable=plaintext-only],[contenteditable=""]){font-size:max(16px,1em,var(--dsh-content-font-size,1em))!important}',
+      'body:has(.dshm-shell) :is(input,textarea,[contenteditable=true],[contenteditable=plaintext-only],[contenteditable=""]){font-size:max(16px,1em,var(--dsh-content-font-size,1em))!important}',
     )
+    expect(MOBILE_LAYOUT_STYLES).not.toContain('.dshm-shell :is(input,textarea,')
     expect(MOBILE_LAYOUT_STYLES).not.toContain('.dshm-shell textarea{font-size:16px}')
   })
 
