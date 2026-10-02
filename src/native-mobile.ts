@@ -111,7 +111,9 @@ export const NATIVE_MOBILE_STYLES = `
   [data-dsh-mobile-settings-options] [class*="_rowActions"] button { flex:none !important; width:auto !important; min-width:44px !important; max-width:none !important; min-height:44px !important; padding-inline:10px !important; white-space:nowrap !important; word-break:keep-all !important; writing-mode:horizontal-tb !important; }
   [data-dsh-mobile-settings-content][data-dsh-mobile-view-transition="true"],
   [data-dsh-mobile-view][data-dsh-mobile-view-transition="true"] { animation:dsh-mobile-view-in var(--dsh-mobile-motion-duration) var(--dsh-mobile-motion-ease); }
-  [data-dsh-mobile-center] textarea { font-size:16px !important; }
+  /* Center-column parity with the shell's 16px editable rule: the stock
+     composer editor is a contenteditable under 16px. */
+  [data-dsh-mobile-center] :is(input,textarea,[contenteditable="true"],[contenteditable="plaintext-only"]) { font-size:16px !important; }
   /* Markdown tables use content-sized columns. Small tables fill the phone;
      wider tables keep readable cells and scroll inside their own region. */
   [data-dsh-mobile-table-scroll] { box-sizing:border-box; width:100%; max-width:100%; overflow-x:auto; overscroll-behavior-x:contain; -webkit-overflow-scrolling:touch; }

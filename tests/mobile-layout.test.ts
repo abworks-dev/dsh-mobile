@@ -708,6 +708,17 @@ describe('dedicated mobile layout boot', () => {
     expect(MOBILE_LAYOUT_STYLES).toContain('.dshm-drawer[data-open=true]{width:340px')
   })
 
+  it('pins every shell editable at 16px so iOS Safari cannot zoom on focus', () => {
+    // The stock composer editor is a contenteditable at --dsw-font-xs-13 and
+    // stock modal inputs sit at 14px: iOS Safari auto-zooms any focused
+    // editable under 16px and never zooms back after the keyboard drops, so
+    // the shell must pin every editable flavour, not just textareas.
+    expect(MOBILE_LAYOUT_STYLES).toContain(
+      '.dshm-shell :is(input,textarea,[contenteditable=true],[contenteditable=plaintext-only]){font-size:16px}',
+    )
+    expect(MOBILE_LAYOUT_STYLES).not.toContain('.dshm-shell textarea{font-size:16px}')
+  })
+
   it('opens the wide sidebar by default without resetting explicit toggles', () => {
     const source = readFileSync(new URL('../src/mobile-layout.ts', import.meta.url), 'utf8')
     expect(source).toContain('sidebarOpen: viewportIsWide()')
