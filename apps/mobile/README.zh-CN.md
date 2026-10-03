@@ -6,7 +6,7 @@ DeepSeek Harness 是这个轻量、社区维护的 Android WebView 薄壳的显�
 
 当前只支持 Android。iOS 客户端仍为未发布的本地开发实验，不进入构建、Release 或支持范围。
 
-0.5.2 版的 Android 原生功能与 0.5.1 相同，仅同步版本信息。已配对设备列表与启动方式设置保持不变；WebView 通信音频权限继续可用，麦克风仍需用户授权，语音识别效果取决于设备 WebView 和语音服务。接入既有 frps 的自签 HTTPS 入口需要 0.4.6 或更新的 Android App 固定远程网关 CA；更早的 App 不支持此入口，原有局域网与公开证书远程连接仍可使用。
+当前正式 App 为 0.5.4，修正 WebView 认证 Cookie 写入，已有配对和续期协议保持兼容。已配对设备列表与启动方式设置继续可用；麦克风仍需用户授权，语音识别效果取决于设备 WebView 和语音服务。接入既有 frps 的自签 HTTPS 入口需要 0.4.6 或更新的 Android App 固定远程网关 CA；更早的 App 不支持此入口，原有局域网与公开证书远程连接仍可使用。
 
 ## 使用
 
@@ -27,6 +27,10 @@ App 会在配对前读取独立的版本元数据，明确区分“App 过旧”
 
 自动恢复续期成功时，如果原 DSH 界面仍在运行，App 会保留当前 WebView 和页面状态；如果界面未能完成启动或渲染进程已经失效，则必须重新打开页面，未保存的页面状态无法恢复。
 
+开发版 App 还会在旋转、调整窗口大小或改变键盘可用状态时保留当前 WebView，保持页面滚动位置、引用与未发送图片，只重新计算布局和 Insets，不刷新网页。语言、字体缩放与系统主题变化仍由 Android 重建 Activity；进程终止或渲染进程失效也可能丢失未持久化的页面状态。实现遵循 [Android WebView 状态管理指南](https://developer.android.com/develop/adaptive-apps/cookbook/webview-state)。
+
+App 收到电脑端撤销通知后，后续检测不会把“电脑端已移除”改成过期或网络状态；重新配对取得新凭据后，该条目才能恢复连接。离线期间被撤销的设备仍可能显示“配对已过期”，因为电脑端会删除其令牌记录，并返回与未知令牌相同的通用认证失败。
+
 局域网自动发现会同时监听 DNS-SD/mDNS 与周期性 UDP 公告，也保留端口 `3443` 的主动 UDP 查询和私有 Wi-Fi、热点 `/24` 网段探测兜底。结果按稳定安装标识合并并更新地址。选择 **局域网访问** 后，设置页提供“扫码配对”（扫描电脑端二维码）、局域网扫描、结果列表和手动地址输入（如跨子网、非默认端口或发现被防火墙拦截时，可输入 `https://IP:端口` 连接）。点击一台 DSH 后才输入它的密钥。手机浏览器首次使用时，可直接打开电脑端“复制配对链接”得到的链接（配对码自动填入），也可以打开 HTTPS 地址中的 `/mobile-access/pair`，输入生成密钥最后一个点号后的 43 位配对码。
 
 私有 CA 不属于发现数据。用户明确选择局域网或自签 FRP 入口并输入配对密钥后，Android 从所选 HTTPS Origin 无凭据读取网关 CA，核对有效期及其 SHA-256 指纹与密钥一致，再与加密设备凭据一同保存。原生请求和 WebView 此后只接受该固定 CA 为精确 Origin 签发的有效叶证书，其余 TLS 错误全部取消。公开 CA 远程入口不提供私有 CA，App 改用系统信任库。叶证书在同一 CA 下续签无需重配；CA 过期、更换或指纹不匹配时绝不静默信任，必须重新配对。私有 CA 不会安装进 Android 系统信任设置。
@@ -34,7 +38,7 @@ App 会在配对前读取独立的版本元数据，明确区分“App 过旧”
 ## 为什么使用 App
 
 - 没有浏览器地址栏和标签栏，纵向空间更完整。
-- 系统返回键先处理同源 WebView 历史。
+- 系统返回键先关闭支持的网页层级，再处理同源 WebView 历史，根页面退出 App；开发版还补齐了模型子菜单逐级返回。
 - 文件选择、同源下载、分享和清除站点数据使用受限的原生实现。
 - 与手机浏览器访问同一页面，不形成第二套 UI 或协议。
 
@@ -61,7 +65,7 @@ App 会在配对前读取独立的版本元数据，明确区分“App 过旧”
 
 认证后的页面可以通过 `dshMobile` 扩展调用 Android Bridge。Bridge 使用 `androidx.webkit` WebMessage listener，每条消息都校验配置的精确顶层 Origin 和 `isMainFrame`，绝不使用 `addJavascriptInterface`。入站消息上限为 1 MiB，剪贴板文本为 256 KiB，二进制结果为 8 MiB，回复为 12 MiB；它不暴露 Cookie、设备令牌、配对密钥、CA 私钥或任意 Android API。
 
-可用能力包括 `files.pick`、`camera.capture`、`share`、`clipboard.read`、`clipboard.write`、`notification.notify` 和 `notification.settings`。DSH 原生文件附件入口仍在输入栏的“添加”组；当前附件 owner 支持接收图片时，Mobile 只把“拍照”加入同一组。扩展可单独调用 `files.pick`：系统选择器遵循调用方声明的 MIME 类型，通过 Bridge 返回的文件上限为 8 MiB；这不是 DSH 原生文件选择的限制。拍照仅在使用时申请 Android 相机权限，通过 `FileProvider` 写入完整分辨率 JPEG，再作为浏览器 `File` 返回。任务提醒使用精确的 Host 完成事件和明确的待确认卡片，在页面仍存活于后台时触发；可从 App 内的 DSH **设置 → 通用设置** 打开通知授权或系统设置。锁屏只显示通用文案，不同任务的通知不会互相覆盖，点击通知可回到 App。文件选择和拍照同一时间只允许一个，最长等待五分钟；取消、旋转、WebView 销毁、超时或会话已变化时都会清理或拒绝旧结果。手机浏览器使用对应 Web API，不支持时返回 `unsupported`。
+可用能力包括 `files.pick`、`camera.capture`、`share`、`clipboard.read`、`clipboard.write`、`notification.notify` 和 `notification.settings`。DSH 原生文件附件入口仍在输入栏的“添加”组；当前附件 owner 支持接收图片时，Mobile 只把“拍照”加入同一组。扩展可单独调用 `files.pick`：系统选择器遵循调用方声明的 MIME 类型，通过 Bridge 返回的文件上限为 8 MiB；这不是 DSH 原生文件选择的限制。拍照仅在使用时申请 Android 相机权限，通过 `FileProvider` 写入完整分辨率 JPEG，再作为浏览器 `File` 返回。任务提醒使用精确的 Host 完成事件和明确的待确认卡片，在页面仍存活于后台时触发；可从 App 内的 DSH **设置 → 通用设置** 打开通知授权或系统设置。锁屏只显示通用文案，不同任务的通知不会互相覆盖，点击通知可回到 App。文件选择和拍照同一时间只允许一个，最长等待五分钟；取消、WebView 销毁、超时或会话已变化时都会清理或拒绝旧结果。手机浏览器使用对应 Web API，不支持时返回 `unsupported`。
 
 从 0.4.7 起，App 仅在屏幕软键盘占据窗口、且 Android 报告没有实体键盘时，将活动会话输入框中的普通回车用作换行；点击发送按钮仍可发送多行消息。浮动键盘、状态尚未确认、旧版 App 和手机浏览器保留 DSH 原有的回车行为；实体键盘仍可用 Shift+Enter 换行。
 

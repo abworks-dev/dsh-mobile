@@ -19,6 +19,14 @@ class SafeAreaPaddingTest {
     }
 
     @Test
+    fun nativeCardsFitPortraitLandscapeAndSmallResizedWindows() {
+        assertEquals(312, setupCardWidth(360, horizontalGutter = 24, maximumWidth = 560))
+        assertEquals(560, setupCardWidth(804, horizontalGutter = 24, maximumWidth = 560))
+        assertEquals(232, setupCardWidth(280, horizontalGutter = 24, maximumWidth = 560))
+        assertEquals(0, setupCardWidth(32, horizontalGutter = 24, maximumWidth = 560))
+    }
+
+    @Test
     fun unionsSystemBarsCutoutAndImePerEdge() {
         val systemBars = SafeAreaEdges(left = 0, top = 72, right = 24, bottom = 48)
         val displayCutout = SafeAreaEdges(left = 36, top = 96, right = 0, bottom = 0)

@@ -78,6 +78,7 @@ function visibleBackLayer(view: Window, element: HTMLElement): boolean {
 
 /**
  * Consume page-level surfaces and dismissible DSH overlays before layout navigation.
+ * Composer model popups use DSH's Escape handling to return from a pane before closing.
  * @param view - the page window receiving the native Back request.
  * @param page - the current DSH document.
  * @param blocked - feedback for a foreground layer without a safe close action.
@@ -95,11 +96,33 @@ export function installMobileNativeBack(view: Window, page: Document, blocked: (
       return
     }
 
-    const modalSelector = '[role="dialog"][aria-modal="true"], [role="menu"]'
-    const layers = [...page.querySelectorAll<HTMLElement>(modalSelector)].filter(element => visibleBackLayer(view, element))
+    const modelPopups = new Map<HTMLElement, HTMLElement>()
+    for (const trigger of page.querySelectorAll<HTMLElement>('[data-dsh-mobile-composer-model-trigger][aria-expanded="true"]')) {
+      const popupId = trigger.getAttribute('aria-controls')
+      const popup = popupId === null ? null : page.getElementById(popupId)
+      if (popup !== null && visibleBackLayer(view, trigger) && visibleBackLayer(view, popup)
+        && (popup.getAttribute('role') === 'menu' || popup.getAttribute('role') === 'group')) {
+        modelPopups.set(popup, trigger)
+      }
+    }
+    const modalSelector = '[role="dialog"][aria-modal="true"], [role="menu"], [role="group"][id]'
+    const layers = [...page.querySelectorAll<HTMLElement>(modalSelector)].filter(element => visibleBackLayer(view, element)
+      && (element.getAttribute('role') !== 'group' || modelPopups.has(element)))
     const top = layers.at(-1)
     if (top === undefined) return
     claim()
+    const modelEntry = [...modelPopups].find(([popup]) => popup.contains(top))
+    if (modelEntry !== undefined) {
+      const [modelPopup, trigger] = modelEntry
+      // Overlapping foreign layers do not establish that the model popup is foreground.
+      if (layers.some(layer => !modelPopup.contains(layer))) { blocked(); return }
+      const focused = page.activeElement
+      const target = focused !== null && modelPopup.contains(focused) ? focused : trigger
+      const escape = new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true, cancelable: true })
+      target.dispatchEvent(escape)
+      if (!escape.defaultPrevented) blocked()
+      return
+    }
     if (top.getAttribute('role') === 'dialog') {
       const wrapper = top.parentElement
       const mask = wrapper?.firstElementChild as HTMLElement | null | undefined

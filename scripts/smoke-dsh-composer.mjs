@@ -38,6 +38,11 @@ async function rpc(page, method, request) {
 }
 
 const frames = page => page.evaluate(() => new Promise(resolveFrame => { requestAnimationFrame(() => { requestAnimationFrame(resolveFrame) }) }))
+const nativeBack = page => page.evaluate(() => {
+  const event = new Event('dsh-mobile:native-back', { cancelable: true })
+  window.dispatchEvent(event)
+  return event.defaultPrevented
+})
 async function retained(page, expected) {
   const current = await page.evaluate(() => {
     const editor = document.querySelector('[data-composer-card] [data-composer-input]')
@@ -142,6 +147,7 @@ try {
       const expanded = await expandedHeight()
       assert(expanded > 72)
       const model = card.locator('[data-dsh-mobile-composer-model-trigger]')
+      const selectedModel = await model.textContent()
       await model.click()
       const menuId = await model.getAttribute('aria-controls')
       assert(menuId !== null, 'DSH model trigger did not open its own menu')
@@ -153,6 +159,7 @@ try {
       await search.focus()
       await frames(phone)
       assert.equal(await search.evaluate(node => node.closest('[data-composer-card]')), null, 'Search is not the actual body portal')
+      assert.equal(await search.evaluate(node => getComputedStyle(node).fontSize), `${font}px`, 'Actual model search did not preserve the mobile editable font floor')
       const folded = await expandedHeight()
       if (viewport.width <= 720) assert(folded <= 72.1, `Inactive real DSH composer remained ${folded}px`)
       else assert.equal(folded, expanded)
@@ -163,12 +170,15 @@ try {
       const bounds = await menu.boundingBox()
       assert(bounds !== null && bounds.width > 0 && bounds.height > 0, 'Actual model portal has no usable bounds')
       geometry.push({ ...viewport, font, expanded, folded, menu: { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height } })
-      await phone.keyboard.press('Escape')
-      await frames(phone)
-      // Stock ModelSelect returns from its model pane to the root menu first.
-      // A second Escape closes that root without choosing or submitting a model.
-      if (await menu.count() > 0) await phone.keyboard.press('Escape')
+      assert.equal(await nativeBack(phone), true, 'Mobile Back did not consume the actual model search pane')
+      await search.waitFor({ state: 'hidden', timeout: CLIENT_TIMEOUT_MS })
+      assert.equal(await menu.isVisible(), true, 'Mobile Back closed the whole menu instead of returning to its root')
+      assert(await menu.getByRole('menuitem').count() > 0, 'Mobile Back did not restore the stock root menu')
+      await retained(phone, expected)
+      assert.equal(await nativeBack(phone), true, 'Mobile Back did not consume the root model menu')
       await menu.waitFor({ state: 'detached', timeout: CLIENT_TIMEOUT_MS })
+      assert.equal(await model.textContent(), selectedModel, 'Mobile Back changed the model selection')
+      assert.equal(await nativeBack(phone), false, 'Mobile Back consumed the conversation without an open layer')
       await editor.focus()
       await frames(phone)
       assert.equal(await expandedHeight(), expanded)
@@ -181,7 +191,7 @@ try {
     }
   }
   assert.equal(prompts.length, 0, 'Composer acceptance attempted a model submission')
-  console.log(`Packed DSH composer acceptance passed: real Lexical draft, reference chip, image intake, model body-portal/search, 375px/landscape and 16px/20px fonts (${geometry.length} layouts).`)
+  console.log(`Packed DSH composer acceptance passed: real Lexical draft, reference chip, image intake, model body-portal/search/native Back, 375px/landscape and 16px/20px fonts (${geometry.length} layouts).`)
   console.log(JSON.stringify(geometry))
 } catch (error) {
   failure = new Error(`${sanitized(error instanceof Error ? error.stack ?? error.message : String(error))}\n${dsh?.logs() ?? ''}`)

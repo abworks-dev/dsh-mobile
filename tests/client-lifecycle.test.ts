@@ -54,7 +54,7 @@ class FakeWindow extends EventTarget {
   clearTimeout = ((id: number) => globalThis.clearTimeout(id)) as Window['clearTimeout']
 }
 
-class BackNode {
+class BackNode extends EventTarget {
   hidden = false
   inert = false
   display = 'block'
@@ -67,7 +67,7 @@ class BackNode {
   clicks = 0
   onClick?: () => void
 
-  constructor(readonly tagName = 'DIV', private readonly root = false) {}
+  constructor(readonly tagName = 'DIV', private readonly root = false) { super() }
 
   get isConnected(): boolean { return this.root || this.parentElement?.isConnected === true }
   get firstElementChild(): BackNode | null { return this.children[0] ?? null }
@@ -75,6 +75,10 @@ class BackNode {
   getClientRects(): readonly object[] { return this.rects > 0 ? [{}] : [] }
   getAttribute(name: string): string | null { return this.attributes.get(name) ?? null }
   setAttribute(name: string, value: string): void { this.attributes.set(name, value) }
+  contains(candidate: BackNode | null): boolean {
+    for (let node = candidate; node !== null; node = node.parentElement) { if (node === this) return true }
+    return false
+  }
   append(child: BackNode): void {
     if (child.parentElement !== null) child.parentElement.children.splice(child.parentElement.children.indexOf(child), 1)
     child.parentElement = this
@@ -96,16 +100,29 @@ class BackNode {
 
 class BackDocument extends EventTarget {
   readonly body = new BackNode('BODY', true)
+  activeElement: BackNode | null = null
 
-  querySelectorAll(selector: string): BackNode[] {
+  private nodes(): BackNode[] {
     const all: BackNode[] = []
     const visit = (node: BackNode): void => { for (const child of node.children) { all.push(child); visit(child) } }
     visit(this.body)
+    return all
+  }
+
+  getElementById(id: string): BackNode | null { return this.nodes().find(node => node.getAttribute('id') === id) ?? null }
+
+  querySelectorAll(selector: string): BackNode[] {
+    const all = this.nodes()
     if (selector.includes('dsh-mobile-surface-placement')) {
       return all.filter(node => node.dataset.dshMobileSurfacePlacement === 'page' || node.dataset.dshMobileSurfacePlacement === 'overlay')
     }
+    if (selector.includes('dsh-mobile-composer-model-trigger')) {
+      return all.filter(node => node.getAttribute('data-dsh-mobile-composer-model-trigger') !== null
+        && node.getAttribute('aria-expanded') === 'true')
+    }
     return all.filter(node => (node.getAttribute('role') === 'dialog' && node.getAttribute('aria-modal') === 'true')
-      || node.getAttribute('role') === 'menu')
+      || node.getAttribute('role') === 'menu'
+      || (selector.includes('[role="group"][id]') && node.getAttribute('role') === 'group' && node.getAttribute('id') !== null))
   }
 }
 
@@ -116,6 +133,32 @@ class BackWindow extends EventTarget {
 }
 
 function backEvent(cancelable = true): Event { return new Event('dsh-mobile:native-back', { cancelable, bubbles: true }) }
+
+class BackKeyboardEvent extends Event {
+  readonly key: string
+  readonly code: string
+  constructor(type: string, options: KeyboardEventInit) {
+    super(type, options)
+    this.key = options.key ?? ''
+    this.code = options.code ?? ''
+  }
+}
+
+function composerModelBackFixture(role: 'menu' | 'group' = 'menu'): {
+  readonly page: BackDocument; readonly trigger: BackNode; readonly popup: BackNode; readonly action: BackNode
+} {
+  vi.stubGlobal('KeyboardEvent', BackKeyboardEvent)
+  const page = new BackDocument()
+  const trigger = new BackNode('BUTTON')
+  trigger.setAttribute('data-dsh-mobile-composer-model-trigger', 'true')
+  trigger.setAttribute('aria-expanded', 'true')
+  trigger.setAttribute('aria-controls', 'composer-model-menu')
+  const popup = new BackNode(); popup.setAttribute('id', 'composer-model-menu'); popup.setAttribute('role', role)
+  popup.setAttribute('data-menu-material', 'translucent')
+  const action = new BackNode('BUTTON'); action.setAttribute('role', 'menuitemradio')
+  popup.append(action); page.body.append(trigger); page.body.append(popup)
+  return { page, trigger, popup, action }
+}
 
 afterEach(() => {
   vi.useRealTimers()
@@ -224,6 +267,143 @@ describe('mobile native Back before layout navigation', () => {
     page.body.append(otherMenu)
     view.dispatchEvent(backEvent())
     expect(outside).toHaveBeenCalledOnce()
+    expect(blocked).toHaveBeenCalledOnce()
+    stop()
+  })
+
+  it('closes the owned model root through Escape without activating an option or outside pointer handler', () => {
+    const view = new BackWindow()
+    const { page, trigger, popup, action } = composerModelBackFixture()
+    const editor = new BackNode('INPUT'); page.body.append(editor); page.activeElement = editor
+    const editorBack = vi.fn(); editor.addEventListener('keydown', editorBack)
+    const outside = vi.fn()
+    page.addEventListener('pointerdown', outside); page.addEventListener('mousedown', outside)
+    const escape = vi.fn((event: Event) => {
+      expect((event as KeyboardEvent).key).toBe('Escape')
+      expect((event as KeyboardEvent).code).toBe('Escape')
+      expect(event.bubbles).toBe(true)
+      event.preventDefault()
+      popup.remove()
+      trigger.setAttribute('aria-expanded', 'false')
+    })
+    trigger.addEventListener('keydown', escape)
+    const blocked = vi.fn()
+    const stop = installMobileNativeBack(view as never, page as never, blocked)
+    const event = backEvent(); view.dispatchEvent(event)
+    expect(event.defaultPrevented).toBe(true)
+    expect(popup.isConnected).toBe(false)
+    expect(escape).toHaveBeenCalledOnce()
+    expect(action.clicks).toBe(0)
+    expect(trigger.clicks).toBe(0)
+    expect(editorBack).not.toHaveBeenCalled()
+    expect(outside).not.toHaveBeenCalled()
+    expect(blocked).not.toHaveBeenCalled()
+    page.body.append(popup); trigger.setAttribute('aria-expanded', 'true')
+    stop()
+    const disposedBack = backEvent(); view.dispatchEvent(disposedBack)
+    expect(disposedBack.defaultPrevented).toBe(false)
+    expect(escape).toHaveBeenCalledOnce()
+  })
+
+  it('backs the model search pane out through its focused searchbox before closing the root', () => {
+    const view = new BackWindow()
+    const { page, trigger, popup, action } = composerModelBackFixture('group')
+    const search = new BackNode('INPUT'); search.setAttribute('role', 'searchbox')
+    const options = new BackNode(); options.setAttribute('role', 'menu')
+    popup.append(search); popup.append(options); options.append(action)
+    page.activeElement = search
+    const searchBack = vi.fn((event: Event) => {
+      expect((event as KeyboardEvent).key).toBe('Escape')
+      event.preventDefault()
+      popup.setAttribute('role', 'menu'); options.remove(); search.remove(); page.activeElement = trigger
+    })
+    search.addEventListener('keydown', searchBack)
+    const rootBack = vi.fn((event: Event) => { event.preventDefault(); popup.remove() })
+    trigger.addEventListener('keydown', rootBack)
+    const blocked = vi.fn()
+    const stop = installMobileNativeBack(view as never, page as never, blocked)
+    const submenuBack = backEvent(); view.dispatchEvent(submenuBack)
+    expect(submenuBack.defaultPrevented).toBe(true)
+    expect(popup.isConnected).toBe(true)
+    expect(popup.getAttribute('role')).toBe('menu')
+    expect(searchBack).toHaveBeenCalledOnce()
+    expect(rootBack).not.toHaveBeenCalled()
+    const rootEvent = backEvent(); view.dispatchEvent(rootEvent)
+    expect(rootEvent.defaultPrevented).toBe(true)
+    expect(popup.isConnected).toBe(false)
+    expect(rootBack).toHaveBeenCalledOnce()
+    expect(action.clicks).toBe(0)
+    expect(blocked).not.toHaveBeenCalled()
+    stop()
+  })
+
+  it.each(['menu', 'dialog', 'surface'] as const)('does not send Escape to a model popup underneath a foreground %s', kind => {
+    const view = new BackWindow()
+    const { page, trigger, popup } = composerModelBackFixture()
+    const foreground = new BackNode()
+    if (kind === 'surface') foreground.dataset.dshMobileSurfacePlacement = 'overlay'
+    else { foreground.setAttribute('role', kind); if (kind === 'dialog') foreground.setAttribute('aria-modal', 'true') }
+    page.body.append(foreground)
+    const escape = vi.fn(); trigger.addEventListener('keydown', escape)
+    const blocked = vi.fn()
+    const stop = installMobileNativeBack(view as never, page as never, blocked)
+    const event = backEvent(); view.dispatchEvent(event)
+    expect(event.defaultPrevented).toBe(true)
+    expect(escape).not.toHaveBeenCalled()
+    expect(popup.isConnected).toBe(true)
+    expect(blocked).toHaveBeenCalledTimes(kind === 'surface' ? 0 : 1)
+    expect(foreground.hidden).toBe(kind === 'surface')
+    stop()
+  })
+
+  it.each(['menu', 'dialog'] as const)('keeps overlapping %s blocked even when a model portal appears last in DOM order', kind => {
+    const view = new BackWindow()
+    const { page, trigger, popup } = composerModelBackFixture()
+    const foreign = new BackNode(); foreign.setAttribute('role', kind)
+    if (kind === 'dialog') foreign.setAttribute('aria-modal', 'true')
+    page.body.append(foreign); page.body.append(popup)
+    const escape = vi.fn(); trigger.addEventListener('keydown', escape)
+    const outside = vi.fn(); page.addEventListener('pointerdown', outside)
+    const blocked = vi.fn()
+    const stop = installMobileNativeBack(view as never, page as never, blocked)
+    view.dispatchEvent(backEvent())
+    expect(escape).not.toHaveBeenCalled()
+    expect(outside).not.toHaveBeenCalled()
+    expect(blocked).toHaveBeenCalledOnce()
+    stop()
+  })
+
+  it.each(['unmarked', 'closed', 'missing-controls', 'mismatched', 'unexpected-role', 'hidden-popup', 'hidden-trigger'] as const)('requires visible popup ownership instead of guessing for %s controls', state => {
+    const view = new BackWindow()
+    const { page, trigger, popup } = composerModelBackFixture('group')
+    const options = new BackNode(); options.setAttribute('role', 'menu'); popup.append(options)
+    if (state === 'unmarked') trigger.attributes.delete('data-dsh-mobile-composer-model-trigger')
+    else if (state === 'closed') trigger.setAttribute('aria-expanded', 'false')
+    else if (state === 'missing-controls') trigger.attributes.delete('aria-controls')
+    else if (state === 'mismatched') trigger.setAttribute('aria-controls', 'another-model-menu')
+    else if (state === 'unexpected-role') popup.setAttribute('role', 'presentation')
+    else if (state === 'hidden-popup') popup.hidden = true
+    else trigger.hidden = true
+    const escape = vi.fn(); trigger.addEventListener('keydown', escape)
+    const blocked = vi.fn()
+    const stop = installMobileNativeBack(view as never, page as never, blocked)
+    const event = backEvent(); view.dispatchEvent(event)
+    expect(escape).not.toHaveBeenCalled()
+    expect(event.defaultPrevented).toBe(state !== 'hidden-popup')
+    expect(blocked).toHaveBeenCalledTimes(state === 'hidden-popup' ? 0 : 1)
+    stop()
+  })
+
+  it('reports blocked rather than silently claiming an owned model popup whose Escape handler is unavailable', () => {
+    const view = new BackWindow()
+    const { page, trigger, popup } = composerModelBackFixture()
+    const escape = vi.fn(); trigger.addEventListener('keydown', escape)
+    const blocked = vi.fn()
+    const stop = installMobileNativeBack(view as never, page as never, blocked)
+    const event = backEvent(); view.dispatchEvent(event)
+    expect(event.defaultPrevented).toBe(true)
+    expect(escape).toHaveBeenCalledOnce()
+    expect(popup.isConnected).toBe(true)
     expect(blocked).toHaveBeenCalledOnce()
     stop()
   })
