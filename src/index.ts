@@ -153,7 +153,7 @@ export { DEFAULT_ORIGIN_LISTEN_PORT, OriginConfigStore, parseOriginSettings, val
 export type { OriginSettings, OriginConfigurationStatus } from './origin-proxy-config.js'
 export { OriginController } from './origin-proxy.js'
 export type { OriginControllerOptions, OriginState, OriginStatus } from './origin-proxy.js'
-export { CLOUDFLARED_COMPONENT_RELEASE, CloudflaredComponentManager } from './cloudflared-component.js'
+export { CLOUDFLARED_COMPONENT_RELEASE, CLOUDFLARED_COMPONENT_RELEASES, CloudflaredComponentManager } from './cloudflared-component.js'
 export type { CloudflaredComponentStatus } from './cloudflared-component.js'
 export { CloudflaredController, isCloudflaredRegistration, parseCloudflaredOrigin } from './cloudflared.js'
 export type { CloudflaredControllerOptions, CloudflaredState, CloudflaredStatus } from './cloudflared.js'
