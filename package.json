@@ -80,6 +80,7 @@
     "smoke:voice-session": "node ./scripts/smoke-voice-session.mjs",
     "smoke:composer-keyboard": "node ./scripts/smoke-composer-keyboard.mjs",
     "smoke:browser-auth-cookies": "node ./scripts/smoke-browser-auth-cookies.mjs",
+    "capture:screenshots": "node ./scripts/capture-mobile-screenshots.mjs",
     "check:release-tag": "node ./scripts/check-release-version.mjs --tag-env",
     "check:version": "node ./scripts/check-release-version.mjs",
     "clean": "node ./scripts/clean.mjs",
