@@ -29,6 +29,14 @@ describe('browser authentication page localization', () => {
     expect(script).toContain("/mobile-access/auth/pair")
   })
 
+  it('keeps pairing inputs above the Safari 16px focus-zoom threshold', () => {
+    // Pre-auth pages load before the mobile client, so no stylesheet floor
+    // exists yet; Safari zooms any focused editable under 16px and never
+    // zooms back.
+    const page = renderPairPage('en')
+    expect(page).toContain('<style>input,textarea{font-size:16px}</style>')
+  })
+
   it('renders localized reauthentication failure guidance', () => {
     const page = renderLoginPage('it')
     const script = renderLoginScript('zh')
