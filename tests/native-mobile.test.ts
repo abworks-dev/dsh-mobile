@@ -61,8 +61,16 @@ describe('native mobile presentation', () => {
   })
 
   it('uses a minimum editable font on narrow and wide native surfaces', () => {
+    // The html-level class exists on every non-desktop mobile page, so it also
+    // covers body-level portals (model picker search) the center column never
+    // contained.
     expect(NATIVE_MOBILE_STYLES).toContain(
-      '[data-dsh-mobile-center] :is(input,textarea,[contenteditable="true"],[contenteditable="plaintext-only"],[contenteditable=""]) { font-size:max(16px,1em,var(--dsh-content-font-size,1em)) !important; }',
+      'html.dsh-native-mobile-active :is(input,textarea,[contenteditable="true"],[contenteditable="plaintext-only"],[contenteditable=""])',
+    )
+    // The center marker scope survives a disposed surface, which removes the
+    // html class while its applied style string can outlive it.
+    expect(NATIVE_MOBILE_STYLES).toContain(
+      ' [data-dsh-mobile-center] :is(input,textarea,[contenteditable="true"],[contenteditable="plaintext-only"],[contenteditable=""]) { font-size:max(16px,1em,var(--dsh-content-font-size,1em)) !important; }',
     )
     expect(NATIVE_MOBILE_STYLES).not.toContain('[data-dsh-mobile-center] textarea { font-size:16px !important; }')
   })
@@ -173,7 +181,11 @@ describe('native mobile presentation', () => {
     expect(NATIVE_MOBILE_STYLES).toContain('grid-template-columns:16px minmax(0,1fr)')
     expect(NATIVE_MOBILE_STYLES).toContain('[data-context-fields]')
     expect(NATIVE_MOBILE_STYLES).toContain('[data-composer-card] ~ * [class*="_root"]')
-    expect(NATIVE_MOBILE_STYLES).toContain('[data-slot="conversation.composer.dock"] [class*="_root"] { font-size:10px !important; line-height:16px !important; }')
+    // The dock and hint rows pin small !important font sizes at (0,3,0),
+    // beating the 16px editable floor's (0,2,1); editables landing in those
+    // slots must stay exempt so Safari cannot zoom them.
+    expect(NATIVE_MOBILE_STYLES).toContain('[data-dsh-mobile-center] [data-composer-card] ~ * [class*="_root"]:not(:where(input,textarea,[contenteditable])) {')
+    expect(NATIVE_MOBILE_STYLES).toContain('[data-slot="conversation.composer.dock"] [class*="_root"]:not(:where(input,textarea,[contenteditable])) { font-size:10px !important; line-height:16px !important; }')
     expect(NATIVE_MOBILE_STYLES).toContain('[class*="_root"]:has(> [class*="_trigger"][aria-haspopup="dialog"]) { width:auto !important')
     expect(NATIVE_MOBILE_STYLES).toContain('[class*="_dock"]:has([data-composer-stats]) { display:flex !important; flex-wrap:wrap !important')
     expect(NATIVE_MOBILE_STYLES).toContain('[class*="_root"][data-composer-stats] { box-sizing:border-box !important; width:auto !important')

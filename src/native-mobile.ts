@@ -19,7 +19,13 @@ export const NATIVE_MOBILE_STYLES = `
    the query restores the fixed scrim, and its more specific [hidden] rule
    keeps winning there. */
  .dsh-native-mobile-backdrop,.dsh-mobile-branch-toast,.dsh-mobile-media-toast { display:none; }
- /* The content-font preference may exceed Safari's focused-editable minimum. */
+ /* The content-font preference may exceed Safari's focused-editable minimum.
+    The html-level class exists on every non-desktop mobile page, so it also
+    covers body-level portals (model picker search) the center column never
+    contained; the center marker stays alongside it because a disposed
+    surface removes the html class while styles applied from its string can
+    outlive the class on a page that still carries the center column. */
+ html.dsh-native-mobile-active :is(input,textarea,[contenteditable="true"],[contenteditable="plaintext-only"],[contenteditable=""]),
  [data-dsh-mobile-center] :is(input,textarea,[contenteditable="true"],[contenteditable="plaintext-only"],[contenteditable=""]) { font-size:max(16px,1em,var(--dsh-content-font-size,1em)) !important; }
  .dsh-mobile-settings_row { display:flex; align-items:center; gap:8px; padding:16px 0; border-bottom:0.5px solid var(--dsw-alias-border-l2); }
  .dsh-mobile-settings_rowText { flex:1; min-width:0; display:flex; flex-direction:column; gap:4px; padding-right:48px; }
@@ -139,12 +145,15 @@ export const NATIVE_MOBILE_STYLES = `
   [data-dsh-mobile-message-column] [class*="_body"] { max-width:100% !important; overflow-wrap:anywhere; }
   /* Keep folded and expanded reasoning visually separate from the reply. */
   [data-dsh-mobile-message-column] [class*="_body"] > div:has(> [data-variant="think"]) { margin-bottom:12px !important; }
-  [data-dsh-mobile-center] [data-composer-card] ~ [class*="_root"],
-  [data-dsh-mobile-center] [data-composer-card] ~ * [class*="_root"] { box-sizing:border-box !important; width:100% !important; max-width:100% !important; margin-bottom:-6px !important; padding:3px 4px 0 !important; font-size:11px !important; line-height:18px !important; white-space:normal !important; overflow:visible !important; text-overflow:clip !important; }
+  [data-dsh-mobile-center] [data-composer-card] ~ [class*="_root"]:not(:where(input,textarea,[contenteditable])),
+  [data-dsh-mobile-center] [data-composer-card] ~ * [class*="_root"]:not(:where(input,textarea,[contenteditable])) { box-sizing:border-box !important; width:100% !important; max-width:100% !important; margin-bottom:-6px !important; padding:3px 4px 0 !important; font-size:11px !important; line-height:18px !important; white-space:normal !important; overflow:visible !important; text-overflow:clip !important; }
   [data-dsh-mobile-center] [data-composer-card] ~ [class*="_root"] [class*="_sep"],
   [data-dsh-mobile-center] [data-composer-card] ~ * [class*="_root"] [class*="_sep"] { margin:0 6px !important; }
-  /* Composer dock stats strip (turns/steps/tokens) reads small on phones. */
-  [data-dsh-mobile-center] [data-slot="conversation.composer.dock"] [class*="_root"] { font-size:10px !important; line-height:16px !important; }
+  /* Composer dock stats strip (turns/steps/tokens) reads small on phones.
+     :not(:where(...)) keeps editables exempt at zero specificity cost, so
+     the small !important fonts cannot beat the 16px editable floor while
+     the dock spacing rules keep their cascade position. */
+  [data-dsh-mobile-center] [data-slot="conversation.composer.dock"] [class*="_root"]:not(:where(input,textarea,[contenteditable])) { font-size:10px !important; line-height:16px !important; }
   /* The context ring is a composer-metadata _root too, so the metadata rule
      above stretched it across the whole dock. It cannot shrink, which left the
      session statistics beside it a few pixels wide, every number clipped to an

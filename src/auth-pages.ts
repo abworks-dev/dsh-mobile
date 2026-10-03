@@ -72,6 +72,7 @@ export function renderPairPage(locale: AuthPageLocale): string {
 <html lang="${copy.lang}">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<style>input,textarea{font-size:16px}</style>
 <title>${copy.pairTitle}</title>
 <main>
   <h1>${copy.pairHeading}</h1>
