@@ -9,6 +9,7 @@ import android.content.ClipData
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.ColorStateList
+import android.content.res.Configuration
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.RippleDrawable
@@ -219,6 +220,17 @@ class MainActivity : Activity() {
         deferredBridgePermission?.let { outState.putIntArray(STATE_DEFERRED_BRIDGE_PERMISSION, it) }
         pendingDownload?.let { outState.putBundle(STATE_PENDING_DOWNLOAD, it.toBundle()) }
         super.onSaveInstanceState(outState)
+    }
+
+    /** Resize the live document without discarding its draft attachments or navigation state. */
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        val decor = window.decorView
+        val ime = decor.rootWindowInsets?.let(::resolveWebViewImeInset) ?: 0
+        nativeBridge?.updateKeyboardState(resolveNativeKeyboardState(ime, newConfig.keyboard))
+        decor.requestApplyInsets()
+        decor.requestLayout()
+        webView?.invalidate()
     }
 
     override fun onRetainNonConfigurationInstance(): Any = RetainedBridgeHandoff(
@@ -607,8 +619,10 @@ class MainActivity : Activity() {
     }
 
     private fun refreshDeviceStatuses(devices: List<PairedDeviceRecord>) {
+        deviceListRefreshRunnable?.let(deviceStatusHandler::removeCallbacks)
         val generation = ++deviceListGeneration
         devices.forEach { device ->
+            if (device.status == PairedDeviceStatus.REVOKED) return@forEach
             restoreExecutor.execute {
                 val result = runCatching {
                     NativeAuthClient.probe(device.origin, device.deviceToken, device.caCertificate, device.instanceId)
@@ -620,26 +634,18 @@ class MainActivity : Activity() {
                     NativeProbe(device.origin, device.instanceId, session.deviceId, device.expiresAt)
                 }
                 val probe = result.getOrNull()
-                val status = when {
-                    probe != null && (device.deviceId.isEmpty() || probe.deviceId == device.deviceId) -> PairedDeviceStatus.REACHABLE
-                    probe != null -> PairedDeviceStatus.ADDRESS_CHANGED
-                    (result.exceptionOrNull() as? NativeAuthFailure)?.kind == NativeAuthFailureKind.DEVICE_REVOKED -> PairedDeviceStatus.REVOKED
-                    (result.exceptionOrNull() as? NativeAuthFailure)?.kind == NativeAuthFailureKind.DEVICE_EXPIRED -> PairedDeviceStatus.EXPIRED
-                    (result.exceptionOrNull() as? NativeAuthFailure)?.kind == NativeAuthFailureKind.PAIRING_EXPIRED -> PairedDeviceStatus.EXPIRED
-                    else -> PairedDeviceStatus.UNREACHABLE
-                }
                 runOnUiThread {
                     if (generation != deviceListGeneration || isFinishing || isDestroyed) return@runOnUiThread
-                    val now = System.currentTimeMillis()
-                    pairedDeviceStore.update(device.key) { current ->
-                        current.copy(
-                            deviceId = if (probe != null && current.deviceId.isEmpty()) probe.deviceId else current.deviceId,
-                            expiresAt = probe?.deviceExpiresAt ?: current.expiresAt,
-                            status = status,
-                            lastReachableAt = if (status == PairedDeviceStatus.REACHABLE) now else current.lastReachableAt,
+                    val updated = pairedDeviceStore.update(device.key) { current ->
+                        PairedDeviceStatusPolicy.applyProbe(
+                            current,
+                            device,
+                            probe,
+                            (result.exceptionOrNull() as? NativeAuthFailure)?.kind,
+                            System.currentTimeMillis(),
                         )
                     }
-                    pairedDeviceStore.load().firstOrNull { it.key == device.key }?.let { setDeviceStatusText(deviceStatusViews[device.key] ?: return@let, it) }
+                    updated?.let { setDeviceStatusText(deviceStatusViews[device.key] ?: return@let, it) }
                 }
             }
         }
@@ -661,7 +667,8 @@ class MainActivity : Activity() {
         deviceListRefreshRunnable = null
     }
 
-    private fun showDeviceActions(device: PairedDeviceRecord) {
+    private fun showDeviceActions(snapshot: PairedDeviceRecord) {
+        val device = pairedDeviceStore.load().firstOrNull { it.key == snapshot.key } ?: return
         val needsRepair = device.status == PairedDeviceStatus.REVOKED
             || device.status == PairedDeviceStatus.EXPIRED
             || device.status == PairedDeviceStatus.ADDRESS_CHANGED
@@ -676,7 +683,7 @@ class MainActivity : Activity() {
                 when (which) {
                     0 -> if (needsRepair) repairPairedDevice(device) else connectPairedDevice(device)
                     1 -> editDeviceName(device)
-                    2 -> { pairedDeviceStore.update(device.key) { it.copy(status = PairedDeviceStatus.UNKNOWN) }; showDeviceList() }
+                    2 -> { pairedDeviceStore.update(device.key, PairedDeviceStatusPolicy::beginCheck); showDeviceList() }
                     3 -> confirmDeleteDevice(device)
                 }
             }
@@ -819,7 +826,8 @@ class MainActivity : Activity() {
             .show()
     }
 
-    private fun connectPairedDevice(device: PairedDeviceRecord) {
+    private fun connectPairedDevice(snapshot: PairedDeviceRecord) {
+        val device = pairedDeviceStore.load().firstOrNull { it.key == snapshot.key } ?: return
         if (device.status == PairedDeviceStatus.REVOKED
             || device.status == PairedDeviceStatus.EXPIRED
             || device.status == PairedDeviceStatus.ADDRESS_CHANGED
@@ -1277,6 +1285,12 @@ class MainActivity : Activity() {
                 bottomMargin = dp(24)
             },
         )
+        scroll.addOnLayoutChangeListener { _, left, _, right, _, _, _, _, _ ->
+            val width = setupCardWidth(right - left, dp(24), dp(560))
+            if (card.layoutParams.width != width) {
+                card.layoutParams = card.layoutParams.apply { this.width = width }
+            }
+        }
         setContentView(root)
         applySafeAreaInsets(root)
         return card
@@ -1414,7 +1428,7 @@ class MainActivity : Activity() {
                 preferences.getString(originPreference(mode), "").orEmpty(),
             ) ?: existingRecord?.origin
             val existingCredential = (existingRecord?.credential() ?: savedCredential).takeIf {
-                ConnectionRestorePolicy.shouldRenewBeforePairing(
+                existingRecord?.status != PairedDeviceStatus.REVOKED && ConnectionRestorePolicy.shouldRenewBeforePairing(
                     mode = mode,
                     credential = it,
                     instanceId = key.instanceId,
@@ -1933,8 +1947,15 @@ class MainActivity : Activity() {
         claimSuccess: () -> Boolean = { true },
         onFailure: (RestoreFailureDisposition) -> Unit,
     ) {
+        val requestedDevice = deviceKey?.let { key -> pairedDeviceStore.load().firstOrNull { it.key == key } }
+        if (deviceKey != null && (requestedDevice == null || requestedDevice.status == PairedDeviceStatus.REVOKED)) {
+            onFailure(RestoreFailureDisposition.REQUIRE_USER_ACTION)
+            return
+        }
         if (!RemoteHostPolicy.isAllowed(mode, preferredOrigin.host)) {
-            if (deviceKey != null) pairedDeviceStore.update(deviceKey) { it.copy(status = PairedDeviceStatus.ADDRESS_CHANGED) }
+            if (deviceKey != null) pairedDeviceStore.update(deviceKey) {
+                if (it.status == PairedDeviceStatus.REVOKED) it else it.copy(status = PairedDeviceStatus.ADDRESS_CHANGED)
+            }
             else {
                 preferences.edit().remove(originPreference(mode)).apply()
                 credentialStore(mode).clear()
@@ -1985,6 +2006,12 @@ class MainActivity : Activity() {
                 val failureKind = (lastFailure as? NativeAuthFailure)?.kind
                 runOnUiThread {
                     if (generation != restoreGeneration) return@runOnUiThread
+                    if (deviceKey != null) {
+                        val current = pairedDeviceStore.load().firstOrNull { it.key == deviceKey }
+                        if (current == null || requestedDevice == null ||
+                            !PairedDeviceStatusPolicy.mayApplyResult(current, requestedDevice)
+                        ) return@runOnUiThread
+                    }
                     if (renewed == null) {
                         if (deviceKey != null) {
                             val status = when (failureKind) {

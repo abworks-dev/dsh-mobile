@@ -11,7 +11,7 @@ GitHub's Contributors graph counts commits on the default branch; issue reports 
 | [@1624318455](https://github.com/1624318455) | [#93](https://github.com/saya-ch/dsh-mobile/pull/93) |
 | [@abworks-dev](https://github.com/abworks-dev) | [#91](https://github.com/saya-ch/dsh-mobile/pull/91), [#98](https://github.com/saya-ch/dsh-mobile/pull/98), [#99](https://github.com/saya-ch/dsh-mobile/pull/99), [#152](https://github.com/saya-ch/dsh-mobile/pull/152) |
 | [@ayiejosh](https://github.com/ayiejosh) | [#109](https://github.com/saya-ch/dsh-mobile/pull/109), [#110](https://github.com/saya-ch/dsh-mobile/pull/110), [#116](https://github.com/saya-ch/dsh-mobile/pull/116), [#117](https://github.com/saya-ch/dsh-mobile/pull/117), [#119](https://github.com/saya-ch/dsh-mobile/pull/119), [#124](https://github.com/saya-ch/dsh-mobile/pull/124), [#125](https://github.com/saya-ch/dsh-mobile/pull/125), [#133](https://github.com/saya-ch/dsh-mobile/pull/133), [#136](https://github.com/saya-ch/dsh-mobile/pull/136) |
-| [@chintoleung](https://github.com/chintoleung) | [#104](https://github.com/saya-ch/dsh-mobile/pull/104), [#147](https://github.com/saya-ch/dsh-mobile/pull/147), [#148](https://github.com/saya-ch/dsh-mobile/pull/148) |
+| [@chintoleung](https://github.com/chintoleung) | [#104](https://github.com/saya-ch/dsh-mobile/pull/104), [#147](https://github.com/saya-ch/dsh-mobile/pull/147), [#148](https://github.com/saya-ch/dsh-mobile/pull/148), [#158](https://github.com/saya-ch/dsh-mobile/pull/158) |
 | [@cjxh21](https://github.com/cjxh21) | [#154](https://github.com/saya-ch/dsh-mobile/pull/154), [#155](https://github.com/saya-ch/dsh-mobile/pull/155) |
 | [@fengfanfan-max](https://github.com/fengfanfan-max) | [#143](https://github.com/saya-ch/dsh-mobile/pull/143) |
 | [@idoall](https://github.com/idoall) | [#61](https://github.com/saya-ch/dsh-mobile/pull/61), [#66](https://github.com/saya-ch/dsh-mobile/pull/66), [#67](https://github.com/saya-ch/dsh-mobile/pull/67), [#77](https://github.com/saya-ch/dsh-mobile/pull/77) |
@@ -57,6 +57,7 @@ GitHub's Contributors graph counts commits on the default branch; issue reports 
 | [@LWping](https://github.com/LWping) | [#94](https://github.com/saya-ch/dsh-mobile/issues/94) |
 | [@oliverwan97](https://github.com/oliverwan97) | [#26](https://github.com/saya-ch/dsh-mobile/issues/26) |
 | [@optttt](https://github.com/optttt) | [#111](https://github.com/saya-ch/dsh-mobile/issues/111) |
+| [@qjjer](https://github.com/qjjer) | [#156](https://github.com/saya-ch/dsh-mobile/issues/156) |
 | [@reducm](https://github.com/reducm) | [#127](https://github.com/saya-ch/dsh-mobile/issues/127) |
 | [@rgshendong](https://github.com/rgshendong) | [#87](https://github.com/saya-ch/dsh-mobile/issues/87) |
 | [@RonaldinhoL](https://github.com/RonaldinhoL) | [#89](https://github.com/saya-ch/dsh-mobile/issues/89) |

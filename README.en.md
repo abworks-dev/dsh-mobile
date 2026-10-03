@@ -60,9 +60,11 @@ It also lets you customize the phone from a DSH conversation: `/mobile <what you
 
 A paired device can operate DSH on the computer and must be treated as fully trusted. Enable LAN access only on trusted networks, and use a reliable HTTPS channel for remote access. Revoke a lost phone from the computer immediately.
 
-## Mobile composer interactions (development branch)
+## Mobile improvements (development branch)
 
 At widths up to 720px, an inactive composer retains a scrollable 72px draft preview, leaving more room for the conversation; editor or toolbar focus restores the expanded view. Text, references, and attachments remain intact, and Send, Queue, Steer, and Stop controls have touch targets of at least 44px. Existing DSH and app mechanisms retain submission and IME behavior. This improvement is not included in the stable 0.5.4 package.
+
+The development branch also fixes model-search and pairing-page input sizes and lets Android Back navigate the model menu one level at a time. Rotation and window resizing retain the page, references and unsent images; a known **Removed on computer** status survives later checks. These changes are planned for a later release and require updating both the plugin and app. Unsent attachments are not guaranteed to survive app-process termination.
 
 ## Quick start
 

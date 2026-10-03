@@ -31,6 +31,10 @@ internal fun topSafeInset(statusBarTop: Int, displayCutoutTop: Int): Int =
 internal fun additionalImeInset(coveredBottom: Int, webSafeBottom: Int): Int =
     max(0, coveredBottom - webSafeBottom)
 
+/** Fits native setup cards inside the current safe window, including split-screen resizing. */
+internal fun setupCardWidth(availableWidth: Int, horizontalGutter: Int, maximumWidth: Int): Int =
+    (availableWidth - 2 * horizontalGutter).coerceIn(0, maximumWidth)
+
 /** Immutable content padding captured before system insets are installed. */
 internal data class ContentPadding(
     val left: Int,

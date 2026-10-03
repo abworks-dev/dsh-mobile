@@ -96,9 +96,16 @@ try {
       cases++
     } finally { await context.close() }
   }
+  const mountStyles = async (page, surface = 'native') => {
+    const css = await page.evaluate(surface => surface === 'native' ? window.nativeStyles : window.mobileLayout.MOBILE_LAYOUT_STYLES, surface)
+    await page.addStyleTag({ content: css })
+    // The capture above disposes the client, including its root marker. Model
+    // an active native surface again when testing its body-level portal rules.
+    await page.evaluate(surface => { document.documentElement.classList.toggle('dsh-native-mobile-active', surface === 'native') }, surface)
+  }
   for (const width of [320, 393, 720, 980]) {
     await withPage({ width }, async page => {
-      await page.addStyleTag({ content: await page.evaluate(() => window.nativeStyles) })
+      await mountStyles(page)
       await page.evaluate(() => {
         const editor = document.querySelector('#editor')
         editor.textContent = Array.from({ length: 20 }, (_, i) => `Draft line ${i}`).join('\n')
@@ -165,7 +172,7 @@ try {
   for (const viewport of [{ width: 375, height: 812 }, { width: 844, height: 393 }]) {
     for (const size of [14, 20]) {
       await withPage(viewport, async page => {
-        await page.addStyleTag({ content: await page.evaluate(() => window.nativeStyles) })
+        await mountStyles(page)
         await page.addStyleTag({ content: `#first{position:fixed;bottom:0;left:0;box-sizing:border-box;width:100%;background:white;display:flex;flex-direction:column;gap:12px}#first [data-input-scroll]{max-height:336px;overflow-y:auto}#editor{white-space:pre-wrap}#portal{position:fixed;left:8px;width:calc(100% - 16px);height:96px;background:white}` })
         await page.evaluate(size => {
           document.documentElement.style.setProperty('--dsh-content-font-size', `${size}px`)
@@ -218,6 +225,9 @@ try {
         const menuTop = await page.locator('#portal').evaluate(portal => portal.getBoundingClientRect().top)
         for (const selector of ['#portal-option', '#portal-search']) {
           await page.locator(selector).focus()
+          if (selector === '#portal-search') {
+            assert.equal(await page.locator(selector).evaluate(node => getComputedStyle(node).fontSize), `${Math.max(16, size)}px`)
+          }
           const folded = await geometry()
           assert.equal(folded.height, viewport.width <= 720 ? 72 : expanded.height)
           assert(Math.abs(folded.top - expanded.top) <= 1, `Toolbar anchor moved on portal focus: ${JSON.stringify({ expanded, folded })}`)
@@ -259,13 +269,33 @@ try {
         await page.evaluate(surface => {
           if (surface === 'native') document.querySelector('main').classList.remove('dshm-shell')
           else document.querySelector('main').removeAttribute('data-dsh-mobile-center')
+          const portal = document.createElement('div')
+          portal.id = 'font-portal'
+          portal.style.fontSize = '12px'
+          portal.innerHTML = '<input id="body-portal-search" role="searchbox"><textarea id="body-portal-textarea"></textarea><div id="body-portal-editor" contenteditable="true">Portal text</div>'
+          document.body.append(portal)
+          if (surface === 'native') {
+            const hint = document.createElement('input')
+            hint.id = 'editable-hint'
+            hint.className = 'Fixture_root'
+            document.querySelector('main').append(hint)
+            const dock = document.createElement('div')
+            dock.setAttribute('data-slot', 'conversation.composer.dock')
+            dock.innerHTML = '<input id="editable-stats" class="Fixture_root"><div id="static-stats" class="Fixture_root">Stats</div>'
+            document.querySelector('main').append(dock)
+          }
         }, surface)
-        const css = await page.evaluate(surface => surface === 'native' ? window.nativeStyles : window.mobileLayout.MOBILE_LAYOUT_STYLES, surface)
-        await page.addStyleTag({ content: css })
+        await mountStyles(page, surface)
+        assert.equal(await page.locator('#font-portal').evaluate(node => node.closest('.dshm-shell,[data-dsh-mobile-center]')), null)
         for (const size of [14, 18, 20]) {
           await page.evaluate(size => { document.documentElement.style.setProperty('--dsh-content-font-size', `${size}px`) }, size)
-          const sizes = await page.locator('#editor,#other-editor,#field,#area,#empty-attribute,#inherited-child').evaluateAll(nodes => nodes.map(node => parseFloat(getComputedStyle(node).fontSize)))
+          const sizes = await page.locator('#editor,#other-editor,#field,#area,#empty-attribute,#inherited-child,#body-portal-search,#body-portal-textarea,#body-portal-editor').evaluateAll(nodes => nodes.map(node => parseFloat(getComputedStyle(node).fontSize)))
           assert(sizes.every(value => value === Math.max(16, size)), `${surface} ${width}px: editable font did not preserve ${size}px preference: ${sizes}`)
+          if (surface === 'native') {
+            const metadataSizes = await page.locator('#editable-hint,#editable-stats').evaluateAll(nodes => nodes.map(node => parseFloat(getComputedStyle(node).fontSize)))
+            assert(metadataSizes.every(value => value === Math.max(16, size)), `Native metadata rules overrode editable fonts: ${metadataSizes}`)
+            if (width <= 720) assert.equal(await page.locator('#static-stats').evaluate(node => getComputedStyle(node).fontSize), '10px')
+          }
           assert.equal(await page.locator('#inherited').evaluate(node => getComputedStyle(node).fontSize), '20px')
         }
         await page.evaluate(() => { document.documentElement.style.removeProperty('--dsh-content-font-size') })
@@ -273,6 +303,23 @@ try {
       })
     }
   }
+  await withPage({ width: 980, touch: false }, async page => {
+    await page.evaluate(() => {
+      document.querySelector('main').classList.remove('dshm-shell')
+      document.querySelector('main').removeAttribute('data-dsh-mobile-center')
+      const portal = document.createElement('div')
+      portal.style.fontSize = '12px'
+      portal.innerHTML = '<input id="desktop-portal-search" role="searchbox">'
+      document.body.append(portal)
+    })
+    await mountStyles(page, 'shell')
+    await page.addStyleTag({ content: await page.evaluate(() => window.nativeStyles) })
+    const before = await page.locator('#desktop-portal-search').evaluate(node => getComputedStyle(node).fontSize)
+    assert.equal(before, '12px', 'Mobile stylesheet changed an ordinary desktop portal')
+    await page.evaluate(() => { document.documentElement.style.setProperty('--dsh-content-font-size', '20px') })
+    assert.equal(await page.locator('#desktop-portal-search').evaluate(node => getComputedStyle(node).fontSize), before)
+    assert.equal(await page.locator('#editor').evaluate(node => getComputedStyle(node).fontSize), '14px')
+  })
   await withPage({}, async page => { await prepare(page); await tap(page, '#send'); await expectCollapsed(page) })
   await withPage({ width: 980 }, async page => { await prepare(page); await tap(page, '#send'); await expectCollapsed(page) })
   await withPage({}, async page => {
