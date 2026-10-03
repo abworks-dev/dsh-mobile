@@ -26,6 +26,12 @@ function fakeRoot(elements: readonly HTMLElement[], dialogs: readonly HTMLElemen
 }
 
 describe('native mobile presentation', () => {
+  it('collapses the unfocused viewport and retains stock touch actions', () => {
+    expect(NATIVE_MOBILE_STYLES).toContain('[data-composer-card]:not(:focus-within) > [data-input-scroll] { max-height:72px !important; overflow-y:auto !important; }')
+    expect(NATIVE_MOBILE_STYLES).toContain('[data-dsh-mobile-composer-row] button { min-height:44px !important; touch-action:manipulation; }')
+    expect(NATIVE_MOBILE_STYLES).toContain('button[class*="_primary"] { min-width:44px !important; flex-shrink:0 !important; }')
+  })
+
   it('keeps touch focus quiet without removing keyboard focus globally', () => {
     expect(NATIVE_MOBILE_STYLES).toContain('-webkit-tap-highlight-color:transparent')
     expect(NATIVE_MOBILE_STYLES).toContain('data-dsh-mobile-input="touch"')

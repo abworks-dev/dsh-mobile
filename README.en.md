@@ -31,7 +31,7 @@
 
 > DSH Mobile is a DeepSeek Harness community plugin; the native app supports Android only.
 >
-> **Current version: 0.5.4**. Resolve pairing Cookie conflicts and third-party settings saves, improve editable text sizing and keyboard handling after touch sends, and add optional WebSocket compression and a slow-link guide. [Release notes](CHANGELOG.md#054---2026-10-02).
+> **Current stable release: 0.5.4**. Resolve pairing Cookie conflicts and third-party settings saves, improve editable text sizing and keyboard handling after touch sends, and add optional WebSocket compression and a slow-link guide. [Release notes](CHANGELOG.md#054---2026-10-02).
 >
 > **Upgrade reminder**: update the plugin and Android app together to 0.5.4; existing pairings remain usable. The app also updates WebView Cookie writes to help recover connections affected by stale Cookies. [Compatibility notes](#compatibility).
 
@@ -59,6 +59,10 @@ It also lets you customize the phone from a DSH conversation: `/mobile <what you
 - **Defense in depth**: a private CA pinned for LAN, trusted HTTPS for public remote paths, and a remote CA pinned by the 0.4.6 app for the self-signed FRP entry. Credentials are Keystore-backed, device tokens go only to their exact Origin, and third-party WebSockets are blocked by default.
 
 A paired device can operate DSH on the computer and must be treated as fully trusted. Enable LAN access only on trusted networks, and use a reliable HTTPS channel for remote access. Revoke a lost phone from the computer immediately.
+
+## Mobile composer interactions (development branch)
+
+At widths up to 720px, an inactive composer retains a scrollable 72px draft preview, leaving more room for the conversation; editor or toolbar focus restores the expanded view. Text, references, and attachments remain intact, and Send, Queue, Steer, and Stop controls have touch targets of at least 44px. Existing DSH and app mechanisms retain submission and IME behavior. This improvement is not included in the stable 0.5.4 package.
 
 ## Quick start
 
@@ -151,7 +155,7 @@ Managed self-hosted FRP uses an HTTP vhost to the DSH loopback gateway. Its plai
 
 The own-proxy HTTP backend must remain on a trusted private network: **never port-forward it publicly or bypass it by proxying to DSH or the existing LAN 3443 gateway**. CIDRs match the proxy's direct TCP peer, not forwarded headers. Preserve the external Host (including port), Origin, cookies and WebSocket. Clearing proxy settings keeps paired remote devices.
 
-The public remote origin still requires DSH device pairing. The bundled Funnel and the managed cpolar and cloudflared components support Windows x64 and Linux x64/arm64; on-demand FRP 0.70.1 supports Windows, Linux, and macOS on x64 and arm64. See [Compatibility](#compatibility) for the per-channel OS matrix.
+The public remote origin still requires DSH device pairing. The bundled Funnel and managed cpolar and cloudflared components support Windows x64 and Linux x64/arm64; the development branch also adds on-demand cloudflared installation for macOS x64/arm64. FRP 0.70.1 supports Windows, Linux, and macOS on x64 and arm64. See [Compatibility](#compatibility) for the per-channel OS matrix.
 
 ## Extend and customize
 
@@ -318,11 +322,11 @@ Version 0.5.2 keeps the DSH host peer names but does not block installation by D
 | Local network | Yes (firewall automated) | Yes (open the firewall yourself) | Yes | Yes |
 | Tailscale Funnel | Yes (bundled) | Yes (bundled) | Yes (bundled) | No |
 | cpolar | Yes (on-demand) | Yes (on-demand) | Yes (on-demand) | No |
-| cloudflared quick/named tunnel | Yes (on-demand) | Yes (on-demand) | Yes (on-demand) | No |
+| cloudflared quick/named tunnel | Yes (on-demand) | Yes (on-demand) | Yes (on-demand) | Development branch: x64/arm64 |
 | Self-hosted FRP | Yes (on-demand) | Yes (on-demand) | Yes (on-demand) | Yes (on-demand) |
 | Own reverse proxy | Yes (config only) | Yes (config only) | Yes (config only) | Yes (config only) |
 
-On macOS, local network, self-hosted FRP, and the own reverse proxy work; the three managed components have no macOS build yet. The diagnostics firewall check currently covers Windows only and reports “not applicable” elsewhere.
+On macOS, local network, self-hosted FRP, and the own reverse proxy work. cloudflared support is available in the development branch but not in the stable 0.5.4 package; Funnel and cpolar have no managed macOS component yet. The diagnostics firewall check currently covers Windows only and reports “not applicable” elsewhere.
 
 | DSH Mobile plugin | Verified DeepSeek Harness version |
 | --- | --- |

@@ -2,7 +2,7 @@ import { lstat, mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { CLOUDFLARED_COMPONENT_RELEASE, CLOUDFLARED_COMPONENT_RELEASES, CloudflaredComponentManager } from '../src/cloudflared-component.js'
+import { CLOUDFLARED_COMPONENT_RELEASE, CLOUDFLARED_COMPONENT_RELEASES, CloudflaredComponentManager, selectCloudflaredArchiveEntry } from '../src/cloudflared-component.js'
 
 const temporaryDirectories: string[] = []
 
@@ -38,13 +38,31 @@ describe('managed cloudflared component', () => {
     expect(CLOUDFLARED_COMPONENT_RELEASE.downloadUrl).toBe(
       `https://github.com/cloudflare/cloudflared/releases/download/${CLOUDFLARED_COMPONENT_RELEASE.version}/cloudflared-windows-amd64.exe`,
     )
-    expect(Object.keys(CLOUDFLARED_COMPONENT_RELEASES).sort()).toEqual(['linux-arm64', 'linux-x64', 'win32-x64'])
+    expect(Object.keys(CLOUDFLARED_COMPONENT_RELEASES).sort()).toEqual([
+      'darwin-arm64', 'darwin-x64', 'linux-arm64', 'linux-x64', 'win32-x64',
+    ])
     for (const release of Object.values(CLOUDFLARED_COMPONENT_RELEASES)) {
       expect(release.version).toBe(CLOUDFLARED_COMPONENT_RELEASE.version)
       expect(release.downloadUrl).toMatch(/^https:\/\/github\.com\/cloudflare\/cloudflared\//u)
       expect(release.downloadSha256).toMatch(/^[a-f0-9]{64}$/u)
       expect(release.downloadBytes).toBeGreaterThan(0)
+      expect(release.executableSha256).toMatch(/^[a-f0-9]{64}$/u)
+      expect(release.executableBytes).toBeGreaterThan(0)
       expect(release.executableName).toBe(release.platform === 'win32' ? 'cloudflared.exe' : 'cloudflared')
+      if (release.archive === undefined) {
+        // Bare artifacts are the executable, so both pairs describe one file.
+        expect(release.executableBytes).toBe(release.downloadBytes)
+        expect(release.executableSha256).toBe(release.downloadSha256)
+      } else {
+        // Cloudflare publishes macOS only as a `.tgz`: the archive and the
+        // binary inside it are two different byte/digest pairs.
+        expect(release.platform).toBe('darwin')
+        expect(release.archive.format).toBe('tgz')
+        expect(release.archive.member).toBe(release.executableName)
+        expect(release.downloadUrl.endsWith('.tgz')).toBe(true)
+        expect(release.executableBytes).not.toBe(release.downloadBytes)
+        expect(release.executableSha256).not.toBe(release.downloadSha256)
+      }
     }
   })
 
@@ -80,6 +98,84 @@ describe('managed cloudflared component', () => {
       expect(manager.executable.endsWith('.exe')).toBe(false)
     }
     expect(fetchArtifact).not.toHaveBeenCalled()
+  })
+
+  it('supports macOS hosts that ship a .tgz instead of a bare executable', async () => {
+    const directory = await stateDirectory()
+    const fetchArtifact = vi.fn()
+    for (const arch of ['x64', 'arm64'] as const) {
+      const manager = new CloudflaredComponentManager({ stateDirectory: directory, platform: 'darwin', arch, fetchArtifact })
+      await manager.initialize()
+      expect(manager.status()).toMatchObject({ supported: true, installed: false })
+      expect(manager.status().sourceUrl).toBe(CLOUDFLARED_COMPONENT_RELEASES[`darwin-${arch}`]?.downloadUrl)
+      expect(manager.executable.endsWith('cloudflared')).toBe(true)
+      // The archive is transport, never the installed path.
+      expect(manager.executable.endsWith('.tgz')).toBe(false)
+    }
+    expect(fetchArtifact).not.toHaveBeenCalled()
+  })
+
+  it('reports the unpacked size on macOS rather than the archive that carried it', async () => {
+    const directory = await stateDirectory()
+    const release = CLOUDFLARED_COMPONENT_RELEASES['darwin-arm64']
+    const manager = new CloudflaredComponentManager({ stateDirectory: directory, platform: 'darwin', arch: 'arm64' })
+    await manager.initialize()
+    const status = manager.status()
+    // A Mac user downloads ~19 MB of gzip and ends up with a ~39 MB Mach-O.
+    expect(status.downloadBytes).toBe(release?.downloadBytes)
+    expect(status.installedBytes).toBe(release?.executableBytes)
+    expect(status.installedBytes).toBeGreaterThan(status.downloadBytes)
+  })
+
+  it('verifies the macOS executable pair rather than the archive pair', async () => {
+    const directory = await stateDirectory()
+    const release = CLOUDFLARED_COMPONENT_RELEASES['darwin-arm64']
+    if (release === undefined) throw new Error('darwin-arm64 must be pinned')
+    const manager = new CloudflaredComponentManager({ stateDirectory: directory, platform: 'darwin', arch: 'arm64' })
+    await mkdir(manager.componentStorage, { recursive: true })
+    // Archive length: the executable size gate alone rejects it.
+    await writeFile(manager.executable, Buffer.alloc(release.downloadBytes, 0x41))
+    await manager.initialize()
+    expect(manager.status()).toMatchObject({ installed: false })
+    expect(manager.status().errorCode).toBeUndefined()
+    // Exactly the unpacked length but not the pinned bytes: only the digest can
+    // catch this, which is why macOS cannot reuse the archive pair.
+    await writeFile(manager.executable, Buffer.alloc(release.executableBytes, 0x42))
+    await manager.initialize()
+    expect(manager.status()).toMatchObject({ installed: false, errorCode: 'cloudflared_component_invalid' })
+  })
+
+  it('never unpacks an archive that failed its own digest gate', async () => {
+    const directory = await stateDirectory()
+    const extractArtifact = vi.fn()
+    const manager = new CloudflaredComponentManager({
+      stateDirectory: directory,
+      platform: 'darwin',
+      arch: 'arm64',
+      // Correct length, wrong bytes: the size gate passes, the digest gate must not.
+      fetchArtifact: async () => new Uint8Array(CLOUDFLARED_COMPONENT_RELEASES['darwin-arm64']?.downloadBytes ?? 0),
+      extractArtifact,
+    })
+    await manager.initialize()
+    await expect(manager.install()).rejects.toThrow('cloudflared_download_hash_mismatch')
+    expect(extractArtifact).not.toHaveBeenCalled()
+    expect(manager.status().installed).toBe(false)
+    expect(await missing(manager.executable)).toBe(true)
+    expect(await readdir(stagingRoot(manager))).toEqual([])
+  })
+
+  it('accepts the pinned macOS member while rejecting archive escapes', () => {
+    expect(selectCloudflaredArchiveEntry(['cloudflared'], 'cloudflared')).toBe('cloudflared')
+    // Cloudflare ships a flat archive today; a nested member must still resolve.
+    expect(selectCloudflaredArchiveEntry(['release/cloudflared'], 'cloudflared')).toBe('release/cloudflared')
+    expect(() => selectCloudflaredArchiveEntry([], 'cloudflared')).toThrow('cloudflared_archive_entries_invalid')
+    expect(() => selectCloudflaredArchiveEntry(['README.md'], 'cloudflared')).toThrow('cloudflared_archive_executable_missing')
+    expect(() => selectCloudflaredArchiveEntry(['cloudflared', 'nested/cloudflared'], 'cloudflared'))
+      .toThrow('cloudflared_archive_executable_ambiguous')
+    expect(() => selectCloudflaredArchiveEntry(['../cloudflared'], 'cloudflared')).toThrow('cloudflared_archive_path_invalid')
+    expect(() => selectCloudflaredArchiveEntry(['/etc/cloudflared'], 'cloudflared')).toThrow('cloudflared_archive_path_invalid')
+    expect(() => selectCloudflaredArchiveEntry(['C:cloudflared'], 'cloudflared')).toThrow('cloudflared_archive_path_invalid')
+    expect(() => selectCloudflaredArchiveEntry(['dir\\cloudflared'], 'cloudflared')).toThrow('cloudflared_archive_path_invalid')
   })
 
   it('rejects an artifact whose size does not match the pinned bytes', async () => {
@@ -125,6 +221,10 @@ describe('managed cloudflared component', () => {
     await writeFile(manager.executable, Buffer.alloc(CLOUDFLARED_COMPONENT_RELEASE.downloadBytes, 0x41))
     await manager.initialize()
     expect(manager.status()).toMatchObject({ installed: false, errorCode: 'cloudflared_component_invalid' })
+    await rm(manager.executable)
+    await manager.initialize()
+    expect(manager.status()).toMatchObject({ installed: false })
+    expect(manager.status().errorCode).toBeUndefined()
   })
 
   it('reports a wrong-length planted executable as simply not installed', async () => {
@@ -154,7 +254,7 @@ describe('managed cloudflared component', () => {
     }
   })
 
-  it('exposes one pinned byte/digest pair because the artifact is the executable', async () => {
+  it('exposes one pinned byte/digest pair for a bare artifact', async () => {
     const directory = await stateDirectory()
     const manager = new CloudflaredComponentManager({ stateDirectory: directory, platform: 'win32', arch: 'x64' })
     await manager.initialize()

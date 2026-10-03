@@ -55,6 +55,12 @@ jobs:
       - run: npm run smoke:browser-auth-cookies
       - run: npm run smoke:question-fixes
       - run: npm run smoke:dsh-boot
+      - name: Verify the stock composer through the packed Mobile profile
+        if: matrix.dsh == '0.2.0-rc.2'
+        run: npm run smoke:dsh-composer
+      - name: Capture credential-masked Mobile surfaces
+        if: matrix.dsh == '0.2.0-rc.2'
+        run: npm run capture:screenshots -- --out "$RUNNER_TEMP/mobile-capture"
       - name: Verify compressed DSH Workspace traffic
         if: matrix.dsh == '0.2.0-rc.2'
         run: npm run smoke:dsh-boot -- --compressed-websocket
@@ -125,6 +131,21 @@ jobs:
             FUNNEL_THIRD_PARTY_LICENSES.txt
             dsh-mobile-funnel-build-metadata.txt
           if-no-files-found: error
+
+  cloudflared-macos:
+    name: macOS cloudflared component
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24.x
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npx vitest run tests/cloudflared-component.test.ts --pool=threads --maxWorkers=1
+      - name: Install and inspect the pinned macOS components in temporary state
+        run: npm run smoke:cloudflared-component
 
   android:
     name: Android
