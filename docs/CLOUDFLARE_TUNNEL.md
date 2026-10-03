@@ -20,6 +20,8 @@
 2. Cloudflare Zero Trust（团队域名）已启用——隧道控制台位于其中。
 3. 面板中 cloudflared 组件已安装（命名隧道和快速隧道使用同一个官方客户端）。
 
+组件支持 Windows x64 与 Linux x64/arm64；开发分支新增 macOS x64/arm64 的官方压缩包安装，0.5.4 正式包尚不包含这项支持。所有平台都在安装前校验下载内容；macOS 另校验解压后的可执行文件，组件仅保存在 DSH Mobile 私有目录。
+
 ## 在 Cloudflare 控制台创建隧道
 
 1. 打开 **Zero Trust → Networks → Tunnels**，选择 **Create a tunnel**，类型选 **Cloudflared**。

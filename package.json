@@ -75,6 +75,8 @@
     "check:mobile-release": "node ./scripts/check-mobile-release.mjs",
     "check:dsh-compatibility": "node ./scripts/check-dsh-compatibility.mjs",
     "smoke:dsh-boot": "node ./scripts/smoke-dsh-mobile-boot.mjs",
+    "smoke:dsh-composer": "node ./scripts/smoke-dsh-composer.mjs",
+    "smoke:cloudflared-component": "node ./scripts/smoke-cloudflared-component.mjs",
     "smoke:question-fixes": "node ./scripts/smoke-question-fixes.mjs",
     "smoke:native-layout": "node ./scripts/smoke-native-mobile-layout.mjs",
     "smoke:voice-session": "node ./scripts/smoke-voice-session.mjs",

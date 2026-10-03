@@ -20,6 +20,8 @@ Cloudflare terminates DNS and TLS for the public hostname. The plugin only runs 
 2. Cloudflare Zero Trust (a team domain) enabled, because the tunnel console lives inside it.
 3. The cloudflared component installed in the panel. Named and quick tunnels share the same official client.
 
+The component supports Windows x64 and Linux x64/arm64. The development branch adds official macOS x64/arm64 archive installation, which is not included in the stable 0.5.4 package. Downloads are verified before installation; macOS also verifies the extracted executable. Components remain inside DSH Mobile's private directory.
+
 ## Create the tunnel in the Cloudflare dashboard
 
 1. Open **Zero Trust → Networks → Tunnels** and choose **Create a tunnel** → **Cloudflared**.

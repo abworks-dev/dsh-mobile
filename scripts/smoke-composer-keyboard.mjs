@@ -28,7 +28,7 @@ const browser = await chromium.launch({ headless: true })
 let cases = 0
 try {
   async function withPage(options, run) {
-    const context = await browser.newContext({ viewport: { width: options.width ?? 393, height: 844 }, hasTouch: options.touch !== false, isMobile: options.touch !== false, reducedMotion: 'reduce' })
+    const context = await browser.newContext({ viewport: { width: options.width ?? 393, height: options.height ?? 844 }, hasTouch: options.touch !== false, isMobile: options.touch !== false, reducedMotion: 'reduce' })
     try {
       const page = await context.newPage()
       await page.route('https://composer-keyboard.test/**', route => route.fulfill({ contentType: 'text/html', body: fixture }))
@@ -134,6 +134,14 @@ try {
         assert.equal(await page.evaluate(() => window.stops), 1)
         assert.equal(await page.locator('#send').isDisabled(), true)
         await page.evaluate(() => {
+          window.disabledSends = 0
+          document.querySelector('#send').addEventListener('click', () => { window.disabledSends++ })
+        })
+        const disabledBounds = await page.locator('#send').boundingBox()
+        await page.touchscreen.tap(disabledBounds.x + disabledBounds.width / 2, disabledBounds.y + disabledBounds.height / 2)
+        assert.equal(await page.evaluate(() => window.disabledSends), 0)
+        assert(await page.evaluate(() => document.querySelector('#editor').innerHTML === window.initialDraft))
+        await page.evaluate(() => {
           const queue = document.querySelector('#send')
           queue.disabled = false
           queue.setAttribute('aria-label', 'Queue message')
@@ -144,8 +152,85 @@ try {
         await page.locator('#send').tap()
         assert.equal(await page.evaluate(() => window.queues), 1)
         assert(await page.evaluate(() => document.querySelector('#editor').innerHTML === window.initialDraft))
+        await page.locator('#send').evaluate(button => { button.setAttribute('aria-label', 'Steer message') })
+        await page.locator('#send').tap()
+        assert.equal(await page.evaluate(() => window.queues), 2, 'Steer activation changed the stock primary-button handler')
+        assert(await page.evaluate(() => document.querySelector('#editor').innerHTML === window.initialDraft))
       }
     })
+  }
+  // The stock dock is bottom-anchored. A body portal changes :focus-within
+  // without moving its toolbar anchor; reference and attachment DOM stays owned
+  // by the composer throughout collapse, search, and focus return.
+  for (const viewport of [{ width: 375, height: 812 }, { width: 844, height: 393 }]) {
+    for (const size of [14, 20]) {
+      await withPage(viewport, async page => {
+        await page.addStyleTag({ content: await page.evaluate(() => window.nativeStyles) })
+        await page.addStyleTag({ content: `#first{position:fixed;bottom:0;left:0;box-sizing:border-box;width:100%;background:white;display:flex;flex-direction:column;gap:12px}#first [data-input-scroll]{max-height:336px;overflow-y:auto}#editor{white-space:pre-wrap}#portal{position:fixed;left:8px;width:calc(100% - 16px);height:96px;background:white}` })
+        await page.evaluate(size => {
+          document.documentElement.style.setProperty('--dsh-content-font-size', `${size}px`)
+          const editor = document.querySelector('#editor')
+          editor.textContent = Array.from({ length: 24 }, (_, index) => `Preserved draft ${index}`).join('\n')
+          const reference = document.createElement('span')
+          reference.contentEditable = 'false'
+          reference.setAttribute('data-lexical-decorator', 'true')
+          reference.textContent = '@saved-reference'
+          editor.append(reference)
+          const scroll = document.createElement('div')
+          scroll.setAttribute('data-input-scroll', '')
+          editor.before(scroll)
+          scroll.append(editor)
+          const row = document.createElement('div')
+          row.setAttribute('data-dsh-mobile-composer-row', '')
+          const tools = document.createElement('div')
+          tools.setAttribute('data-dsh-mobile-composer-tools', '')
+          const trailing = document.createElement('div')
+          trailing.setAttribute('data-dsh-mobile-composer-trailing', '')
+          row.append(tools, trailing)
+          tools.append(document.querySelector('#add'))
+          const model = document.createElement('button')
+          model.id = 'model-trigger'
+          model.textContent = 'Model'
+          model.setAttribute('aria-haspopup', 'menu')
+          model.setAttribute('aria-expanded', 'true')
+          trailing.append(model, document.querySelector('#stop'), document.querySelector('#send'))
+          scroll.after(row)
+          const attachments = document.querySelector('[data-slot="conversation.input.attachments"]')
+          attachments.innerHTML = '<div role="group"><span data-attachment-id="saved">Saved image</span></div>'
+          const portal = document.createElement('div')
+          portal.id = 'portal'
+          portal.setAttribute('role', 'menu')
+          portal.innerHTML = '<button id="portal-option">Model option</button><input id="portal-search" aria-label="Search models">'
+          document.body.append(portal)
+          window.preservedDraft = editor.innerHTML
+          window.preservedAttachments = attachments.innerHTML
+        }, size)
+        await page.locator('#editor').focus()
+        await page.locator('#first [data-input-scroll]').evaluate(scroll => { scroll.scrollTop = scroll.scrollHeight })
+        await page.locator('#model-trigger').focus()
+        const geometry = () => page.locator('#model-trigger').evaluate(trigger => {
+          const scroll = document.querySelector('#first [data-input-scroll]')
+          return { top: trigger.getBoundingClientRect().top, height: scroll.getBoundingClientRect().height, scrollTop: scroll.scrollTop }
+        })
+        const expanded = await geometry()
+        assert(expanded.height > 72)
+        await page.locator('#portal').evaluate(portal => { portal.style.top = `${document.querySelector('#model-trigger').getBoundingClientRect().top - 104}px` })
+        const menuTop = await page.locator('#portal').evaluate(portal => portal.getBoundingClientRect().top)
+        for (const selector of ['#portal-option', '#portal-search']) {
+          await page.locator(selector).focus()
+          const folded = await geometry()
+          assert.equal(folded.height, viewport.width <= 720 ? 72 : expanded.height)
+          assert(Math.abs(folded.top - expanded.top) <= 1, `Toolbar anchor moved on portal focus: ${JSON.stringify({ expanded, folded })}`)
+          assert.equal(folded.scrollTop, expanded.scrollTop)
+          assert.equal(await page.locator('#portal').evaluate(portal => portal.getBoundingClientRect().top), menuTop)
+          assert(await page.evaluate(() => document.querySelector('#editor').innerHTML === window.preservedDraft))
+          assert(await page.evaluate(() => document.querySelector('[data-slot="conversation.input.attachments"]').innerHTML === window.preservedAttachments))
+        }
+        await page.locator('#editor').focus()
+        assert.equal((await geometry()).height, expanded.height)
+        assert(await page.evaluate(() => document.querySelector('#editor').innerHTML === window.preservedDraft))
+      })
+    }
   }
   const frames = page => page.evaluate(() => new Promise(resolveFrames => { requestAnimationFrame(() => { requestAnimationFrame(() => { requestAnimationFrame(resolveFrames) }) }) }))
   const focused = page => page.evaluate(() => document.activeElement.id)

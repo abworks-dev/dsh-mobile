@@ -295,6 +295,7 @@ export class CloudflaredComponentManager {
   /** Inspect the managed binary without using any global cloudflared state. */
   async initialize(): Promise<void> {
     const release = this.release
+    this.errorCode = undefined
     this.installed = release !== undefined && await regularFile(this.executable, release.executableBytes)
     if (this.installed && release !== undefined && await sha256(this.executable) !== release.executableSha256) {
       this.installed = false

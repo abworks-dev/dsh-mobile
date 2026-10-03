@@ -2,6 +2,12 @@
 
 Notable changes to DSH Mobile are recorded here. GitHub Releases remain the source for downloadable packages and complete generated commit notes.
 
+## Unreleased
+
+- Support on-demand cloudflared installation on macOS x64 and arm64. Verify the official compressed artifact and extracted executable separately, retain the pinned Windows/Linux files, and add isolated installation, reinitialization, and cleanup checks. Thanks @cjxh21 for [PR #155](https://github.com/saya-ch/dsh-mobile/pull/155).
+- Keep an unfocused narrow-screen composer as a scrollable 72px draft preview and enlarge existing touch controls without changing DSH's draft or submission handlers. Expand browser coverage for focus, portaled menus, references, attachments, and keyboard states. Thanks @abworks-dev for [PR #152](https://github.com/saya-ch/dsh-mobile/pull/152).
+- Add a real packed-profile screenshot tool for pairing, conversation, drawer, and settings surfaces. Mask pairing credentials and share isolated startup, readiness, and cleanup with browser checks. Thanks @cjxh21 for [PR #154](https://github.com/saya-ch/dsh-mobile/pull/154).
+
 ## 0.5.4 - 2026-10-02
 
 - Allow authenticated `PUT`, `PATCH`, and `DELETE` requests to ordinary DSH plugin routes, fixing mobile settings saves that returned `method_not_allowed`. Preserve same-origin, Session, CSRF, body-size, and request limits; document that paired devices operate through the gateway with local DSH privileges. Thanks @Ann-luo for [#150](https://github.com/saya-ch/dsh-mobile/issues/150).

@@ -221,6 +221,10 @@ describe('managed cloudflared component', () => {
     await writeFile(manager.executable, Buffer.alloc(CLOUDFLARED_COMPONENT_RELEASE.downloadBytes, 0x41))
     await manager.initialize()
     expect(manager.status()).toMatchObject({ installed: false, errorCode: 'cloudflared_component_invalid' })
+    await rm(manager.executable)
+    await manager.initialize()
+    expect(manager.status()).toMatchObject({ installed: false })
+    expect(manager.status().errorCode).toBeUndefined()
   })
 
   it('reports a wrong-length planted executable as simply not installed', async () => {
