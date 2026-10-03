@@ -42,7 +42,23 @@ try {
       })
       await page.addScriptTag({ content: layout })
       await page.addScriptTag({ content: client })
-      await page.evaluate(() => {
+      if (options.enter) await page.evaluate(() => {
+        const main = document.querySelector('main')
+        main.classList.add('dshm-main')
+        const editor = document.querySelector('#editor')
+        editor.setAttribute('data-composer-input', '')
+        const scroll = document.createElement('div')
+        scroll.setAttribute('data-input-scroll', '')
+        editor.before(scroll)
+        scroll.append(editor)
+        const row = document.createElement('div')
+        row.append(document.createElement('div'))
+        scroll.after(row)
+        const area = document.createElement('textarea')
+        area.id = 'composer-area'
+        document.querySelector('#first').append(area)
+      })
+      await page.evaluate(keepNative => {
         const cleanup = []
         try {
           window.mobileClient.apply({
@@ -52,7 +68,7 @@ try {
           })
           window.nativeStyles = document.querySelector('style[data-plugin="dsh-mobile"]')?.textContent
           if (window.nativeStyles === undefined) throw new Error('Built client did not install native styles')
-        } finally { cleanup.reverse().forEach(dispose => dispose()) }
+        } finally { if (!keepNative) cleanup.reverse().forEach(dispose => dispose()) }
         window.collapses = 0
         window.disposePolicy = window.mobileLayout.installComposerSendKeyboardPolicy(() => { window.collapses++ })
         window.mode = 'immediate'
@@ -75,10 +91,61 @@ try {
           commit()
           if (window.mode === 'immediate-failure') queueMicrotask(() => { document.querySelector('#editor').textContent = 'Restored draft' })
         })
-      })
+      }, options.enter === true)
       await run(page)
       cases++
     } finally { await context.close() }
+  }
+  for (const width of [320, 393, 720, 980]) {
+    await withPage({ width }, async page => {
+      await page.addStyleTag({ content: await page.evaluate(() => window.nativeStyles) })
+      await page.evaluate(() => {
+        const editor = document.querySelector('#editor')
+        editor.textContent = Array.from({ length: 20 }, (_, i) => `Draft line ${i}`).join('\n')
+        editor.style.whiteSpace = 'pre-wrap'
+        const scroll = document.createElement('div')
+        scroll.setAttribute('data-input-scroll', '')
+        editor.before(scroll)
+        scroll.append(editor)
+        const row = document.createElement('div')
+        row.setAttribute('data-dsh-mobile-composer-row', '')
+        scroll.after(row)
+        row.append(document.querySelector('#stop'), document.querySelector('#send'))
+        for (const button of row.querySelectorAll('button')) button.style.cssText = 'min-width:20px;min-height:20px;width:20px;height:20px;padding:0'
+        document.querySelector('#send').disabled = true
+        window.initialDraft = editor.innerHTML
+        window.stops = 0
+        document.querySelector('#stop').addEventListener('click', () => { window.stops++ })
+      })
+      const height = () => page.locator('[data-input-scroll]').evaluate(node => node.getBoundingClientRect().height)
+      const collapsed = await height()
+      if (width <= 720) assert(collapsed <= 72)
+      else assert(collapsed > 72)
+      await page.locator('#editor').focus()
+      assert(await height() > 72)
+      await page.locator('#stop').focus()
+      assert(await height() > 72)
+      await page.locator('#field').focus()
+      assert.equal(await height(), collapsed)
+      assert(await page.evaluate(() => document.querySelector('#editor').innerHTML === window.initialDraft))
+      if (width <= 720) {
+        for (const selector of ['#stop', '#send']) { const box = await page.locator(selector).boundingBox(); assert(box.width >= 44 && box.height >= 44) }
+        await page.locator('#stop').tap()
+        assert.equal(await page.evaluate(() => window.stops), 1)
+        assert.equal(await page.locator('#send').isDisabled(), true)
+        await page.evaluate(() => {
+          const queue = document.querySelector('#send')
+          queue.disabled = false
+          queue.setAttribute('aria-label', 'Queue message')
+          window.mode = 'no-consumption'
+          window.queues = 0
+          queue.addEventListener('click', () => { window.queues++ })
+        })
+        await page.locator('#send').tap()
+        assert.equal(await page.evaluate(() => window.queues), 1)
+        assert(await page.evaluate(() => document.querySelector('#editor').innerHTML === window.initialDraft))
+      }
+    })
   }
   const frames = page => page.evaluate(() => new Promise(resolveFrames => { requestAnimationFrame(() => { requestAnimationFrame(() => { requestAnimationFrame(resolveFrames) }) }) }))
   const focused = page => page.evaluate(() => document.activeElement.id)
@@ -195,6 +262,113 @@ try {
     await prepare(page); await tap(page, '#send'); await expectCollapsed(page)
     await page.locator('#editor').evaluate(node => { node.textContent = 'Late API failure restored the draft' })
     assert.equal(await page.locator('#editor').textContent(), 'Late API failure restored the draft')
+  })
+  // Keep the built native surface alive alongside the send-collapse policy.
+  // The fixture models the stock editor's Shift+Enter command with a real DOM
+  // line break; plain Enter submits, and composition/menu Enter is consumed.
+  const softState = { imeVisible: true, noHardwareKeyboard: true }
+  const expectEnter = async (page, key, expected, safeguard) => {
+    await page.evaluate(() => {
+      window.enterCounts = { sends: 0, newlines: 0, menus: 0, compositions: 0 }
+      window.mode = 'no-consumption'
+      document.querySelector('#send').addEventListener('click', () => { window.enterCounts.sends++ })
+      const editor = document.querySelector('#editor')
+      window.fixtureComposing = false
+      window.fixtureConfirming = false
+      editor.addEventListener('compositionstart', () => { window.fixtureComposing = true })
+      editor.addEventListener('compositionend', () => { window.fixtureComposing = false })
+      editor.addEventListener('keydown', event => {
+        if (event.key !== 'Enter') return
+        if (window.fixtureComposing || window.fixtureConfirming || editor.hasAttribute('data-composer-composing') || event.isComposing || event.keyCode === 229) {
+          event.preventDefault(); window.enterCounts.compositions++; return
+        }
+        if (document.querySelector('#add').getAttribute('aria-expanded') === 'true' || document.querySelector('[data-trigger-menu]')) {
+          event.preventDefault(); window.enterCounts.menus++; return
+        }
+        if (event.shiftKey) {
+          event.preventDefault()
+          document.execCommand('insertLineBreak')
+          window.enterCounts.newlines++
+        } else {
+          event.preventDefault(); document.querySelector('#send').click()
+        }
+      })
+    })
+    await page.locator('#editor').focus()
+    await page.keyboard.press('End')
+    await page.evaluate(safeguard => {
+      const editor = document.querySelector('#editor')
+      if (safeguard === 'composition') editor.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }))
+      if (safeguard === 'composition-marker') editor.setAttribute('data-composer-composing', '')
+      if (safeguard === 'recent-composition') {
+        // Freeze only the policy clock to test the 10ms confirmation window
+        // deterministically while the subsequent keyboard event stays trusted.
+        performance.now = () => 100
+        window.fixtureConfirming = true
+        editor.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true }))
+      }
+      if (safeguard === 'menu') document.querySelector('#add').setAttribute('aria-expanded', 'true')
+      if (safeguard === 'menu-marker') {
+        const menu = document.createElement('div')
+        menu.setAttribute('data-trigger-menu', '')
+        document.querySelector('#first').append(menu)
+      }
+    }, safeguard)
+    await page.keyboard.press(key)
+    assert.deepEqual(await page.evaluate(() => window.enterCounts), { sends: 0, newlines: 0, menus: 0, compositions: 0, ...expected })
+    const text = await page.locator('#editor').innerText()
+    if (expected.newlines) assert(text.includes('\n'), `No DOM newline for ${key}: ${JSON.stringify(text)}`)
+    else assert.equal(text, 'Draft')
+  }
+  for (const nativeState of [undefined, null, { imeVisible: true, noHardwareKeyboard: false }, { imeVisible: false, noHardwareKeyboard: true }, softState]) {
+    await withPage({ enter: true }, async page => {
+      await page.evaluate(nativeState => { window.__DSH_MOBILE_NATIVE__ = {}; window.__DSH_MOBILE_KEYBOARD_STATE__ = nativeState }, nativeState)
+      await expectEnter(page, 'Enter', nativeState === softState ? { newlines: 1 } : { sends: 1 })
+    })
+  }
+  await withPage({ enter: true }, async page => { await expectEnter(page, 'Enter', { sends: 1 }) })
+  await withPage({ enter: true, touch: false, width: 980 }, async page => { await expectEnter(page, 'Enter', { sends: 1 }) })
+  for (const key of ['Shift+Enter', 'Control+Enter', 'Alt+Enter', 'Meta+Enter']) {
+    await withPage({ enter: true }, async page => {
+      await page.evaluate(state => { window.__DSH_MOBILE_NATIVE__ = {}; window.__DSH_MOBILE_KEYBOARD_STATE__ = state }, softState)
+      await expectEnter(page, key, key === 'Shift+Enter' ? { newlines: 1 } : { sends: 1 })
+    })
+  }
+  for (const safeguard of ['composition', 'composition-marker', 'recent-composition', 'menu', 'menu-marker']) {
+    await withPage({ enter: true }, async page => {
+      await page.evaluate(state => { window.__DSH_MOBILE_NATIVE__ = {}; window.__DSH_MOBILE_KEYBOARD_STATE__ = state }, softState)
+      // Install the fixture handler first, then arm the safeguard before Enter.
+      await expectEnter(page, 'Enter', safeguard.startsWith('menu') ? { menus: 1 } : { compositions: 1 }, safeguard)
+    })
+  }
+  await withPage({ enter: true }, async page => {
+    await page.evaluate(state => {
+      window.__DSH_MOBILE_NATIVE__ = {}; window.__DSH_MOBILE_KEYBOARD_STATE__ = state
+      window.textareaSends = 0
+      window.mode = 'no-consumption'
+      document.querySelector('#send').addEventListener('click', () => { window.textareaSends++ })
+      document.querySelector('#composer-area').addEventListener('keydown', event => {
+        if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); document.querySelector('#send').click() }
+      })
+    }, softState)
+    await page.locator('#composer-area').fill('Area draft')
+    await page.keyboard.press('Enter')
+    assert.equal(await page.evaluate(() => window.textareaSends), 1)
+    assert.equal(await page.locator('#composer-area').inputValue(), 'Area draft')
+    await page.keyboard.press('Shift+Enter')
+    assert.equal(await page.locator('#composer-area').inputValue(), 'Area draft\n')
+    assert.equal(await page.evaluate(() => window.textareaSends), 1)
+    await page.evaluate(() => {
+      window.mode = 'immediate'
+      const attachment = document.createElement('div')
+      attachment.setAttribute('role', 'group')
+      attachment.append(document.createElement('img'))
+      document.querySelector('[data-slot="conversation.input.attachments"]').append(attachment)
+    })
+    await tap(page, '#send'); await frames(page)
+    assert.equal(await page.locator('#composer-area').inputValue(), 'Area draft\n')
+    assert.equal(await page.evaluate(() => window.collapses), 0)
+    assert.equal(await focused(page), 'composer-area')
   })
   console.log(`Composer keyboard and editable-font smoke passed (${cases} browser cases).`)
 } finally { await browser.close() }

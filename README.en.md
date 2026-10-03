@@ -60,6 +60,10 @@ It also lets you customize the phone from a DSH conversation: `/mobile <what you
 
 A paired device can operate DSH on the computer and must be treated as fully trusted. Enable LAN access only on trusted networks, and use a reliable HTTPS channel for remote access. Revoke a lost phone from the computer immediately.
 
+## Mobile composer interactions
+
+At widths up to 720px, an unfocused composer retains a scrollable 72px draft preview. Editor or toolbar focus restores the stock expanded view without clearing text, references, or attachments. Composer buttons have 44px-high touch targets, with 44px-wide Send/Queue/Steer and Stop actions. DSH retains submission, queue, interruption, and disabled-state ownership. Existing compact toolbar, wrapping response metadata, horizontal table scrolling, and native Enter handling remain unchanged. Pinch zoom and browser history are not overridden. Physical-device IME validation remains necessary.
+
 ## Quick start
 
 With an installed `dsh` command:
