@@ -31,14 +31,14 @@
 
 > DSH Mobile is a DeepSeek Harness community plugin; the native app supports Android only.
 >
-> **Current stable release: 0.5.4**. Resolve pairing Cookie conflicts and third-party settings saves, improve editable text sizing and keyboard handling after touch sends, and add optional WebSocket compression and a slow-link guide. [Release notes](CHANGELOG.md#054---2026-10-02).
+> **Current stable release: 0.5.5**. Improve the phone composer and model-search input sizes, fix Android model-menu Back, rotation attachment loss and revocation status, and add macOS cloudflared support. [Release notes](CHANGELOG.md#055---2026-10-04).
 >
-> **Upgrade reminder**: update the plugin and Android app together to 0.5.4; existing pairings remain usable. The app also updates WebView Cookie writes to help recover connections affected by stale Cookies. [Compatibility notes](#compatibility).
+> **Upgrade reminder**: update the plugin and Android app together to 0.5.5 for all fixes. Older official apps with the same signer can be upgraded in place while keeping pairings. [Compatibility notes](#compatibility).
 
 <p align="center">
-  <a href="https://github.com/saya-ch/dsh-mobile/releases/download/v0.5.4/dsh-mobile-android-v0.5.4.apk"><img src="assets/brand/app-icon-rounded.svg" alt="DSH Mobile Android app icon" width="72" height="72"></a><br>
-  <a href="https://github.com/saya-ch/dsh-mobile/releases/download/v0.5.4/dsh-mobile-android-v0.5.4.apk"><strong>Download Android app 0.5.4</strong></a><br>
-  <sub><a href="https://github.com/saya-ch/dsh-mobile/releases/tag/v0.5.4">Release notes and checksums</a></sub>
+  <a href="https://github.com/saya-ch/dsh-mobile/releases/download/v0.5.5/dsh-mobile-android-v0.5.5.apk"><img src="assets/brand/app-icon-rounded.svg" alt="DSH Mobile Android app icon" width="72" height="72"></a><br>
+  <a href="https://github.com/saya-ch/dsh-mobile/releases/download/v0.5.5/dsh-mobile-android-v0.5.5.apk"><strong>Download Android app 0.5.5</strong></a><br>
+  <sub><a href="https://github.com/saya-ch/dsh-mobile/releases/tag/v0.5.5">Release notes and checksums</a></sub>
 </p>
 
 DSH Mobile is a DeepSeek Harness plugin that lets a mobile browser or the Android app connect over a protected LAN or an optional Tailscale Funnel, cpolar, cloudflared, self-hosted FRP, or own reverse-proxy remote path. Both routes reach the same sessions, Workspaces, messages, and tools. The computer manages their switches and pairing authorizations separately; the Android app lists paired computers together. The plugin does not modify DeepSeek Harness source.
@@ -60,11 +60,11 @@ It also lets you customize the phone from a DSH conversation: `/mobile <what you
 
 A paired device can operate DSH on the computer and must be treated as fully trusted. Enable LAN access only on trusted networks, and use a reliable HTTPS channel for remote access. Revoke a lost phone from the computer immediately.
 
-## Mobile improvements (development branch)
+## Mobile improvements in 0.5.5
 
-At widths up to 720px, an inactive composer retains a scrollable 72px draft preview, leaving more room for the conversation; editor or toolbar focus restores the expanded view. Text, references, and attachments remain intact, and Send, Queue, Steer, and Stop controls have touch targets of at least 44px. Existing DSH and app mechanisms retain submission and IME behavior. This improvement is not included in the stable 0.5.4 package.
+At widths up to 720px, an inactive composer retains a scrollable 72px draft preview, leaving more room for the conversation; editor or toolbar focus restores the expanded view. Text, references, and attachments remain intact, and Send, Queue, Steer, and Stop controls have touch targets of at least 44px. Existing DSH and app mechanisms retain submission and IME behavior.
 
-The development branch also fixes model-search and pairing-page input sizes and lets Android Back navigate the model menu one level at a time. Rotation and window resizing retain the page, references and unsent images; a known **Removed on computer** status survives later checks. These changes are planned for a later release and require updating both the plugin and app. Unsent attachments are not guaranteed to survive app-process termination.
+Model-search and pairing-page input sizes are corrected, and Android Back navigates the model menu one level at a time. Rotation and window resizing retain the page, references and unsent images; a known **Removed on computer** status survives later checks. Update both the plugin and app. Unsent attachments may still be lost after app-process termination.
 
 ## Quick start
 
@@ -157,7 +157,7 @@ Managed self-hosted FRP uses an HTTP vhost to the DSH loopback gateway. Its plai
 
 The own-proxy HTTP backend must remain on a trusted private network: **never port-forward it publicly or bypass it by proxying to DSH or the existing LAN 3443 gateway**. CIDRs match the proxy's direct TCP peer, not forwarded headers. Preserve the external Host (including port), Origin, cookies and WebSocket. Clearing proxy settings keeps paired remote devices.
 
-The public remote origin still requires DSH device pairing. The bundled Funnel and managed cpolar and cloudflared components support Windows x64 and Linux x64/arm64; the development branch also adds on-demand cloudflared installation for macOS x64/arm64. FRP 0.70.1 supports Windows, Linux, and macOS on x64 and arm64. See [Compatibility](#compatibility) for the per-channel OS matrix.
+The public remote origin still requires DSH device pairing. The bundled Funnel and managed cpolar and cloudflared components support Windows x64 and Linux x64/arm64; cloudflared also supports on-demand installation for macOS x64/arm64. FRP 0.70.1 supports Windows, Linux, and macOS on x64 and arm64. See [Compatibility](#compatibility) for the per-channel OS matrix.
 
 ## Extend and customize
 
@@ -302,7 +302,7 @@ See [SECURITY.md](SECURITY.md).
 
 ## Troubleshooting
 
-- **Pairing succeeds but renewal returns `401` or repeatedly asks to pair again**: other services on the same hostname or stale Cookies may interfere with authentication. Update the plugin and app to 0.5.4 and retry through the current Mobile Access entry. In a browser, scanning the current QR code again refreshes this plugin's authentication Cookies without clearing all website data. If it still fails, inspect the failed request and sanitized logs; other authentication or proxy errors can also return `401`.
+- **Pairing succeeds but renewal returns `401` or repeatedly asks to pair again**: other services on the same hostname or stale Cookies may interfere with authentication. Update to the latest plugin and app, then retry through the current Mobile Access entry. In a browser, scanning the current QR code again refreshes this plugin's authentication Cookies without clearing all website data. If it still fails, inspect the failed request and sanitized logs; other authentication or proxy errors can also return `401`.
 - **The testing notice cannot be confirmed or settings cannot be saved**: open DSH directly at its local address on the computer, then inspect the terminal log or the failed settings request in the browser's Network panel. Connection diagnostics do not test settings writes. Keep the existing configuration and `settings.yaml.imported`, and investigate the specific error; the same UI message can have different causes. See [DSH #860](https://github.com/deepseek-ai/deepseek-harness/discussions/860).
 - **A settings request returns HTTP `403`**: first inspect DSH's Host/Origin trust checks and any proxy response. Check whether an iframe, proxy, or browser extension changes the request's origin, and verify direct local access. Keep the trust checks enabled.
 - **The error contains `profile reload requires the root Include entry`**: this error occurs while DSH reloads the profile. [Issue #132](https://github.com/saya-ch/dsh-mobile/issues/132) reports it after two copies of `dsh-app-boot` were loaded, but the message alone does not establish that cause. Compare the versions and installation paths used by the running DSH command and the active profile; keep the configuration and follow the [official DSH documentation](https://deepseek-harness.github.io/deepseek-harness/) to repair the dependencies. If it still fails, report the versions, module paths, and full sanitized error upstream.
@@ -324,14 +324,15 @@ Version 0.5.2 keeps the DSH host peer names but does not block installation by D
 | Local network | Yes (firewall automated) | Yes (open the firewall yourself) | Yes | Yes |
 | Tailscale Funnel | Yes (bundled) | Yes (bundled) | Yes (bundled) | No |
 | cpolar | Yes (on-demand) | Yes (on-demand) | Yes (on-demand) | No |
-| cloudflared quick/named tunnel | Yes (on-demand) | Yes (on-demand) | Yes (on-demand) | Development branch: x64/arm64 |
+| cloudflared quick/named tunnel | Yes (on-demand) | Yes (on-demand) | Yes (on-demand) | Yes, x64/arm64 (on-demand) |
 | Self-hosted FRP | Yes (on-demand) | Yes (on-demand) | Yes (on-demand) | Yes (on-demand) |
 | Own reverse proxy | Yes (config only) | Yes (config only) | Yes (config only) | Yes (config only) |
 
-On macOS, local network, self-hosted FRP, and the own reverse proxy work. cloudflared support is available in the development branch but not in the stable 0.5.4 package; Funnel and cpolar have no managed macOS component yet. The diagnostics firewall check currently covers Windows only and reports “not applicable” elsewhere.
+On macOS, local network, cloudflared, self-hosted FRP and the own reverse proxy work; Funnel and cpolar have no managed macOS component yet. The diagnostics firewall check currently covers Windows only and reports “not applicable” elsewhere.
 
 | DSH Mobile plugin | Verified DeepSeek Harness version |
 | --- | --- |
+| `0.5.5` | `0.1.7-alpha.2`, `0.1.7-rc.1`, `0.1.7-rc.2`, `0.2.0-rc.1`, and `0.2.0-rc.2` (npm installation, isolated pairing, mobile-page boot, and WebSocket Workspace baseline) |
 | `0.5.4` | `0.1.7-alpha.2`, `0.1.7-rc.1`, `0.1.7-rc.2`, `0.2.0-rc.1`, and `0.2.0-rc.2` (npm installation, isolated pairing, mobile-page boot, and WebSocket Workspace baseline) |
 | `0.5.3` | `0.1.7-alpha.2`, `0.1.7-rc.1`, `0.1.7-rc.2`, `0.2.0-rc.1`, and `0.2.0-rc.2` (source contract, npm installation, isolated pairing, mobile-page boot, and WebSocket Workspace baseline) |
 | `0.5.2` | `0.1.7-alpha.2`, `0.1.7-rc.1`, `0.1.7-rc.2`, and `0.2.0-rc.1` (carried forward from earlier verification); `0.2.0-rc.2` (source contract, isolated pairing, mobile-page boot, and WebSocket Workspace baseline) |
@@ -354,7 +355,7 @@ On macOS, local network, self-hosted FRP, and the own reverse proxy work. cloudf
 
 Existing apps (0.3.3 and later) do not need re-pairing. cpolar users should use app 0.3.15 or later because earlier apps may time out before a slow first load over the free route finishes; earlier apps also use a different status-bar strategy. The 0.4.0 app adds the multi-device list, startup behavior, and computer-side revocation status; older apps continue to connect to their saved single device. App 0.1.3 or earlier requires reinstalling and pairing again.
 
-Version 0.5.4 keeps the native pairing and renewal protocol compatible, so normally working older apps can continue connecting. Update to the 0.5.4 app (build 74) to refresh authentication Cookies in WebView, particularly on devices whose connection previously failed because of a shared hostname or stale Cookies.
+Version 0.5.5 keeps the native pairing and renewal protocol compatible, so normally working older apps can continue connecting. Update to app 0.5.5 (build 75) for rotation state preservation, model-menu Back and revocation-status fixes, while retaining the authentication Cookie corrections from 0.5.4.
 
 GitHub Release APKs use a stable signing certificate, so an older official APK with the same signer can be upgraded in place while retaining pairings. A locally built Debug APK with a different signer cannot be overwritten by the official APK; plan to pair again when switching between them.
 

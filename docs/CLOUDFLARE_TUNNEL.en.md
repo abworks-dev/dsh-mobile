@@ -20,7 +20,7 @@ Cloudflare terminates DNS and TLS for the public hostname. The plugin only runs 
 2. Cloudflare Zero Trust (a team domain) enabled, because the tunnel console lives inside it.
 3. The cloudflared component installed in the panel. Named and quick tunnels share the same official client.
 
-The component supports Windows x64 and Linux x64/arm64. The development branch adds official macOS x64/arm64 archive installation, which is not included in the stable 0.5.4 package. Downloads are verified before installation; macOS also verifies the extracted executable. Components remain inside DSH Mobile's private directory.
+The component supports Windows x64, Linux x64/arm64 and macOS x64/arm64. Official downloads are verified before installation; macOS also verifies the extracted executable. Components remain inside DSH Mobile's private directory.
 
 ## Create the tunnel in the Cloudflare dashboard
 
@@ -81,7 +81,7 @@ The old address may show **Address may have changed** or temporarily unreachable
 | Could not reserve a local port | `cloudflared_port_reservation_failed` | Reserving the loopback port failed for a reason other than the port being busy. Retry, and check system resources if it persists. |
 | Component download failed verification | `cloudflared_download_hash_mismatch` / `cloudflared_download_size_mismatch` | The downloaded binary does not match the pinned size or SHA-256. Install again; repeated failures mean something is rewriting the transfer. |
 | Installed component failed verification | `cloudflared_executable_hash_mismatch` | The local cloudflared no longer matches the verified build. Remove it completely and install again. |
-| This build cannot run the component | `cloudflared_component_unsupported` | The platform is outside the supported set (currently Windows x64 and Linux x64/arm64). |
+| This build cannot run the component | `cloudflared_component_unsupported` | The platform is outside the supported set (Windows x64, Linux x64/arm64 and macOS x64/arm64). |
 | Timed out waiting for the tunnel | `cloudflared_start_timeout` | The connector did not print `Registered tunnel connection` within the startup budget. In named mode a live connector keeps waiting (up to about 5 minutes); usually it cannot reach a Cloudflare edge. |
 | Component not installed | `cloudflared_component_missing` | The official component is absent. Complete the preparation steps above. |
 | Component verification failed | `cloudflared_component_invalid` | The local component does not match the verified build. Remove it completely and install again. |
