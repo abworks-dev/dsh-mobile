@@ -444,15 +444,23 @@ class MobileLayoutController {
   /**
    * Select the main panel rendered in the center column; null means the
    * conversation. Mirrors the official LayoutController so the `panelInfo`
-   * root hook stays truthful.
+   * root hook stays truthful. Selecting a panel while the narrow overlay
+   * drawer covers the center column dismisses that drawer — the user asked to
+   * see the panel, not the navigation over it — while a docked wide sidebar
+   * stays open.
    */
   selectPanel(panelId: string | null): void {
     if (panelId !== null && this.hasMainPanel?.(panelId) !== true) {
       throw new Error(`layout.selectPanel: main panel "${panelId}" is not registered`)
     }
     this.navigation.abort()
-    if (this.snapshot.panelInfo.activePanelId === panelId) return
-    this.update({ panelInfo: Object.freeze({ activePanelId: panelId }) })
+    const dismissDrawer = this.snapshot.sidebarOpen && !viewportIsWide()
+    const samePanel = this.snapshot.panelInfo.activePanelId === panelId
+    if (!dismissDrawer && samePanel) return
+    this.update({
+      ...(dismissDrawer ? { sidebarOpen: false } : {}),
+      ...(samePanel ? {} : { panelInfo: Object.freeze({ activePanelId: panelId }) }),
+    })
   }
 
   /** Drop a selected panel once no main-slot entry declares it. */

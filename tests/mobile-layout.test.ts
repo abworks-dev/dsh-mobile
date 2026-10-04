@@ -989,6 +989,79 @@ describe('dedicated mobile layout boot', () => {
     }
   })
 
+  it('closes the narrow overlay drawer when a sidebar panel row is selected', () => {
+    // Selecting Plugins (or any sidebar.panellist row) renders the panel in the
+    // center column, which the open overlay drawer covers; the selection must
+    // dismiss the drawer the way a session-row navigation does.
+    const viewport = { wide: false }
+    const restore = stubClientGlobals(viewport)
+    const cleanups: Array<() => void> = []
+    let layout: {
+      getSnapshot: () => { sidebarOpen: boolean; panelInfo: { activePanelId: string | null } }
+      selectPanel: (id: string | null) => void
+      toggleSidebar: () => void
+    } | undefined
+    const dispose = (): void => {
+      for (const cleanup of cleanups.reverse()) cleanup()
+      cleanups.length = 0
+    }
+    try {
+      applyMobileLayout({
+        effect: (effect: () => void | (() => void)) => {
+          const cleanup = effect()
+          if (typeof cleanup === 'function') cleanups.push(cleanup)
+        },
+        get: () => undefined,
+        on: () => () => {},
+        reflect: { provide: (name: string, value: unknown) => {
+          if (name === 'layout') layout = value as typeof layout
+          return () => {}
+        } },
+        slots: {
+          register: () => () => {},
+          entries: (name: string) => name === 'main'
+            ? [{ options: { key: 'alpha' } }, { options: { key: 'beta' } }]
+            : [],
+          subscribe: () => () => {},
+        },
+        theme: { getTheme: () => ({ active: { colorScheme: 'light' as const, tokens: {} } }) },
+      } as never)
+      const controller = layout
+      expect(controller).toBeDefined()
+      controller?.selectPanel(null)
+      if (controller?.getSnapshot().sidebarOpen) controller.toggleSidebar()
+
+      controller?.toggleSidebar()
+      expect(controller?.getSnapshot().sidebarOpen).toBe(true)
+      controller?.selectPanel('alpha')
+      expect(controller?.getSnapshot()).toMatchObject({ sidebarOpen: false, panelInfo: { activePanelId: 'alpha' } })
+
+      // Re-tapping the active row while the drawer covers the panel still means
+      // "take me there", so the drawer dismisses without changing the panel.
+      controller?.toggleSidebar()
+      controller?.selectPanel('alpha')
+      expect(controller?.getSnapshot()).toMatchObject({ sidebarOpen: false, panelInfo: { activePanelId: 'alpha' } })
+
+      // An unregistered id stays a validation throw and never dismisses the drawer.
+      controller?.toggleSidebar()
+      expect(() => controller?.selectPanel('missing')).toThrow('main panel "missing" is not registered')
+      expect(controller?.getSnapshot().sidebarOpen).toBe(true)
+      controller?.toggleSidebar()
+
+      // A docked desktop sidebar (>=900px) survives panel selection.
+      viewport.wide = true
+      controller?.toggleSidebar()
+      controller?.selectPanel('beta')
+      expect(controller?.getSnapshot()).toMatchObject({ sidebarOpen: true, panelInfo: { activePanelId: 'beta' } })
+    } finally {
+      viewport.wide = false
+      layout?.selectPanel(null)
+      if (layout?.getSnapshot().sidebarOpen) layout.toggleSidebar()
+      dispose()
+      restore()
+    }
+  })
+
   it('keeps the legacy layout usable when the renderer cannot publish root hooks', () => {
     const restore = stubClientGlobals()
     const cleanups: Array<() => void> = []
