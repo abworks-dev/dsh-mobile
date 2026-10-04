@@ -599,6 +599,13 @@ interface BrowserSoftEnterContext {
   readonly activeSession: boolean
   readonly commandMenuOpen: boolean
   readonly recentlyComposing: boolean
+  /**
+   * Whether the composer holds a draft. Stock no-ops a plain Enter on an empty draft
+   * (its submit refuses), and translating it would insert an invisible line break into
+   * the empty editor — perceived as a swallowed key — and leak a leading newline into
+   * the next typed draft, so only real drafts keep the native line break.
+   */
+  readonly hasDraft: boolean
 }
 
 /**
@@ -611,9 +618,20 @@ interface BrowserSoftEnterContext {
  */
 export function isBrowserTouchEnterLineBreak(event: KeyboardEvent, context: BrowserSoftEnterContext): boolean {
   if (context.appBridge || !context.browserTouch || !context.editable || !context.activeSession
-    || context.commandMenuOpen || context.recentlyComposing) return false
+    || context.commandMenuOpen || context.recentlyComposing || !context.hasDraft) return false
   if (!event.isTrusted || event.key !== 'Enter' || event.defaultPrevented || event.isComposing || event.keyCode === 229) return false
   return !event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey && !event.getModifierState('AltGraph')
+}
+
+/**
+ * Whether the stock composer still holds a draft. Mirrors `composerHasDraft` in
+ * mobile-layout.ts, which builds a separate bundle entry this module must not import;
+ * keep the two shapes aligned (checked against text, embedded decorators, attachments).
+ */
+function browserComposerHasDraft(editor: HTMLElement, card: HTMLElement): boolean {
+  return (editor.textContent ?? '').replaceAll('\u200b', '').trim() !== ''
+    || editor.querySelector('[contenteditable="false"],[data-lexical-decorator],img') !== null
+    || card.querySelector('[data-slot="conversation.input.attachments"] [role="group"] > *') !== null
 }
 
 /** Document-level composition window shared by every editor the browser binding covers. */
@@ -672,7 +690,7 @@ export function resolveBrowserComposerEditor(target: EventTarget | null): Browse
  */
 export function bindBrowserComposerSoftEnter(
   view: Document,
-  context: (editor: HTMLElement, card: HTMLElement) => Omit<BrowserSoftEnterContext, 'browserTouch' | 'recentlyComposing'>,
+  context: (editor: HTMLElement, card: HTMLElement) => Omit<BrowserSoftEnterContext, 'browserTouch' | 'recentlyComposing' | 'hasDraft'>,
 ): () => void {
   const guard = createDocumentCompositionGuard(view)
   const touchPrimary = typeof window === 'object' && typeof window.matchMedia === 'function'
@@ -684,6 +702,7 @@ export function bindBrowserComposerSoftEnter(
     if (!isBrowserTouchEnterLineBreak(event, {
       ...context(target.editor, target.card),
       browserTouch: touchPrimary?.matches === true,
+      hasDraft: browserComposerHasDraft(target.editor, target.card),
       recentlyComposing: guard.recentlyComposing() || target.editor.hasAttribute('data-composer-composing'),
     })) return
     event.stopPropagation()

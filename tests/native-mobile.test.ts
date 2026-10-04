@@ -613,6 +613,7 @@ describe('browser composer touch Enter', () => {
     activeSession: true,
     commandMenuOpen: false,
     recentlyComposing: false,
+    hasDraft: true,
   })
 
   it('translates a plain trusted Enter only on a touch-primary browser without the App bridge', () => {
@@ -625,6 +626,7 @@ describe('browser composer touch Enter', () => {
     expect(isBrowserTouchEnterLineBreak(event, { ...context, activeSession: false })).toBe(false)
     expect(isBrowserTouchEnterLineBreak(event, { ...context, commandMenuOpen: true })).toBe(false)
     expect(isBrowserTouchEnterLineBreak(event, { ...context, recentlyComposing: true })).toBe(false)
+    expect(isBrowserTouchEnterLineBreak(event, { ...context, hasDraft: false })).toBe(false)
   })
 
   it('keeps synthetic, modified, and composing Enters but follows native held-key repeat', () => {
@@ -689,6 +691,7 @@ describe('browser composer touch Enter', () => {
     expect(source).toContain('appBridge: window.__DSH_MOBILE_NATIVE__ !== undefined')
     expect(source).toContain('typeof window.matchMedia === \'function\'')
     expect(source).toContain("editor.getAttribute('inputmode') !== 'none'")
+    expect(source).toContain('browserComposerHasDraft(target.editor, target.card)')
     expect(source).toContain('event.stopPropagation()')
     expect(source).toContain('bindBrowserComposerSoftEnter(document')
     expect(source).toContain('disposeBrowserComposerSoftEnter')

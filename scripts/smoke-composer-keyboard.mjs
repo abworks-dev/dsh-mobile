@@ -468,6 +468,22 @@ try {
       'mobile emulation must report a touch-primary pointer')
     await expectEnter(page, 'Enter', { nativeNewline: 1 })
   })
+  // An empty draft keeps stock's no-op: Enter neither submits nor plants an
+  // invisible line break that would lead the next typed message.
+  await withPage({ enter: true }, async page => {
+    await page.evaluate(() => {
+      const editor = document.querySelector('#editor')
+      editor.textContent = ''
+      window.emptyEnters = 0
+      editor.addEventListener('keydown', event => {
+        if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); window.emptyEnters++ }
+      })
+    })
+    await page.locator('#editor').focus()
+    await page.keyboard.press('Enter')
+    assert.equal(await page.evaluate(() => window.emptyEnters), 1, 'stock must still see an empty-draft Enter')
+    assert.equal(await page.locator('#editor').innerText(), '', 'empty-draft Enter must not insert a line break')
+  })
   await withPage({ enter: true, touch: false, width: 980 }, async page => { await expectEnter(page, 'Enter', { sends: 1 }) })
   // Modified Enter keeps its stock path in browsers: Shift+Enter stays the
   // stock newline command, and Cmd/Ctrl+Enter keeps sending for keyboards
