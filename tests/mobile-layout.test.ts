@@ -1382,6 +1382,21 @@ describe('composer soft-keyboard policy', () => {
     expect(source.indexOf('isSessionRowNavigation(event.target)')).toBeLessThan(source.indexOf('if (viewportIsWide()) return', source.indexOf('const closeDrawerAfterSessionAction')))
   })
 
+  it('keeps the soft keyboard down when the panel back button returns to the conversation', () => {
+    // Returning from a panel remounts the conversation, whose composer
+    // autofocus summons the iOS keyboard over the chat the user just reopened;
+    // the button must arm the same suppression window session rows use.
+    const source = readFileSync(new URL('../src/mobile-layout.ts', import.meta.url), 'utf8')
+    const button = source.indexOf("className: 'dshm-panelBack'")
+    expect(button).toBeGreaterThan(-1)
+    const deselect = source.indexOf('props.controller.selectPanel(null)', button)
+    // The slice ends at the deselect call, so anything it contains precedes it.
+    const handler = source.slice(button, deselect)
+    expect(deselect).toBeGreaterThan(button)
+    expect(handler).toContain('TOUCH_PRIMARY_QUERY')
+    expect(handler).toContain('suppressComposerUntil.current')
+  })
+
   it('recognizes another Session row without treating the current row or its menu as navigation', () => {
     const target = (selected: boolean, menu: boolean): Element => {
       const row = { getAttribute: () => String(selected) }

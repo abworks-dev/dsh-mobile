@@ -786,7 +786,20 @@ function MobileAppFrame(props: MobileRootProps & {
         type: 'button',
         className: 'dshm-panelBack',
         'aria-label': messages.backToConversation,
-        onClick: () => { props.controller.selectPanel(null) },
+        onClick: () => {
+          // Returning remounts the conversation, whose composer autofocuses;
+          // arm the same touch-only window session navigation uses so the
+          // soft keyboard stays down over the chat the user just reopened.
+          if (window.matchMedia(TOUCH_PRIMARY_QUERY).matches) {
+            const deadline = performance.now() + 500
+            suppressComposerUntil.current = deadline
+            window.setTimeout(() => {
+              if (suppressComposerUntil.current !== deadline) return
+              suppressComposerUntil.current = 0
+            }, 500)
+          }
+          props.controller.selectPanel(null)
+        },
       }, createElement('svg', {
         'aria-hidden': true, viewBox: '0 0 24 24', fill: 'none',
       }, createElement('path', {
