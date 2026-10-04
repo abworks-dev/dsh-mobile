@@ -540,6 +540,11 @@ html,body,#root{width:100%;height:100%;overflow:hidden}
 .dshm-scrim{position:fixed;z-index:65;inset:0;border:0;background:rgb(15 23 42 / 40%);opacity:0;pointer-events:none;transition:opacity 180ms ease-out}
 .dshm-scrim[data-open=true]{opacity:1;pointer-events:auto}
 .dshm-overlay{position:fixed;z-index:90;inset:0;pointer-events:none}.dshm-overlay>*{pointer-events:auto}
+/* One-tap return from a main panel (no stock close control); floats above
+   panel content but below the drawer (70) and details overlay (80). */
+.dshm-panelBack{position:absolute;z-index:60;right:12px;bottom:max(16px,env(safe-area-inset-bottom));display:inline-flex;align-items:center;justify-content:center;width:44px;height:44px;padding:0;border:0;border-radius:50%;background:var(--dsw-alias-bg-layer-1,#fff);color:var(--dsw-alias-label-primary,#171a21);box-shadow:0 4px 14px rgb(15 23 42 / 20%);cursor:pointer}
+.dshm-panelBack:hover{background:var(--dsw-alias-interactive-bg-hover,#f1f3f6)}
+.dshm-panelBack svg{width:22px;height:22px}
 .dshm-shell header{min-width:0;padding-left:52px}
 /* Keep focused editables above Safari's 16px zoom threshold while retaining
    the DSH content-font preference and larger inherited text. Stock menus
@@ -768,11 +773,27 @@ function MobileAppFrame(props: MobileRootProps & {
       // Legacy dsh-web community plugins use semantic pane attributes as their
       // compatibility path when the stock CSS-module column names are absent.
       'data-pane': 'conversation',
-    },
+    }, [
       props.renderSlot('main', {}, {
         entryKey: state.panelInfo.activePanelId ?? 'conversation',
         fallback: props.renderSlot('conversation', {}),
-      })),
+      }),
+      // Stock main panels (Plugins, Schedules) ship no close control of their
+      // own, so the phone offers the Settings-modal-parity exit through the
+      // stock return API: selectPanel(null) yields the center column back to
+      // the conversation. Docked wide sidebars keep stock desktop behaviour.
+      ...(state.panelInfo.activePanelId !== null && !wideViewport ? [createElement('button', {
+        type: 'button',
+        className: 'dshm-panelBack',
+        'aria-label': messages.backToConversation,
+        onClick: () => { props.controller.selectPanel(null) },
+      }, createElement('svg', {
+        'aria-hidden': true, viewBox: '0 0 24 24', fill: 'none',
+      }, createElement('path', {
+        d: 'M15 5l-7 7 7 7',
+        stroke: 'currentColor', 'stroke-width': 2.5, 'stroke-linecap': 'round', 'stroke-linejoin': 'round',
+      })))] : []),
+    ]),
     createElement('button', {
       'aria-label': messages.closePanels,
       className: 'dshm-scrim',

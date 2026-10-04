@@ -570,9 +570,12 @@ describe('dedicated mobile layout boot', () => {
     expect(MOBILE_LAYOUT_MESSAGES.it).toEqual({
       closePanels: 'Chiudi pannelli',
       workspaceNavigation: 'Navigazione area di lavoro e sessioni',
+      backToConversation: 'Torna alla conversazione',
     })
     expect(MOBILE_LAYOUT_MESSAGES.en.closePanels).toBe('Close panels')
+    expect(MOBILE_LAYOUT_MESSAGES.en.backToConversation).toBe('Back to conversation')
     expect(MOBILE_LAYOUT_MESSAGES.zh.workspaceNavigation).toBe('工作区与会话导航')
+    expect(MOBILE_LAYOUT_MESSAGES.zh.backToConversation).toBe('返回会话')
   })
 
   it('adapts stable DSH question surfaces for touch screens', () => {
@@ -1059,6 +1062,23 @@ describe('dedicated mobile layout boot', () => {
       if (layout?.getSnapshot().sidebarOpen) layout.toggleSidebar()
       dispose()
       restore()
+    }
+  })
+
+  it('exposes a one-tap return from a main panel on narrow screens', () => {
+    // A selected main panel (Plugins, Schedules) replaces the conversation and
+    // stock ships no close control for it; the frame must offer the same
+    // one-tap exit the Settings modal has, without touching stock surfaces.
+    const source = readFileSync(new URL('../src/mobile-layout.ts', import.meta.url), 'utf8')
+    expect(source).toContain('messages.backToConversation')
+    expect(source).toContain('props.controller.selectPanel(null)')
+    expect(source).toMatch(/panelInfo\.activePanelId !== null && !wideViewport/)
+    expect(MOBILE_LAYOUT_STYLES).toContain('.dshm-panelBack{')
+    // A 44px touch target floating above panel content, below the drawer.
+    expect(MOBILE_LAYOUT_STYLES).toMatch(/\.dshm-panelBack\{[^}]*width:44px/)
+    expect(MOBILE_LAYOUT_STYLES).toMatch(/\.dshm-panelBack\{[^}]*z-index:60/)
+    for (const language of ['en', 'zh', 'it'] as const) {
+      expect(MOBILE_LAYOUT_MESSAGES[language].backToConversation).not.toBe('')
     }
   })
 
