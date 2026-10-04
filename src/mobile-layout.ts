@@ -544,6 +544,7 @@ html,body,#root{width:100%;height:100%;overflow:hidden}
    panel content but below the drawer (70) and details overlay (80). */
 .dshm-panelBack{position:absolute;z-index:60;right:12px;bottom:max(16px,env(safe-area-inset-bottom));display:inline-flex;align-items:center;justify-content:center;width:44px;height:44px;padding:0;border:0;border-radius:50%;background:var(--dsw-alias-bg-layer-1,#fff);color:var(--dsw-alias-label-primary,#171a21);box-shadow:0 4px 14px rgb(15 23 42 / 20%);cursor:pointer}
 .dshm-panelBack:hover{background:var(--dsw-alias-interactive-bg-hover,#f1f3f6)}
+.dshm-panelBack:focus-visible{outline:2px solid var(--dsw-alias-label-primary,#171a21);outline-offset:2px}
 .dshm-panelBack svg{width:22px;height:22px}
 .dshm-shell header{min-width:0;padding-left:52px}
 /* Keep focused editables above Safari's 16px zoom threshold while retaining
@@ -773,7 +774,7 @@ function MobileAppFrame(props: MobileRootProps & {
       // Legacy dsh-web community plugins use semantic pane attributes as their
       // compatibility path when the stock CSS-module column names are absent.
       'data-pane': 'conversation',
-    }, [
+    },
       props.renderSlot('main', {}, {
         entryKey: state.panelInfo.activePanelId ?? 'conversation',
         fallback: props.renderSlot('conversation', {}),
@@ -782,6 +783,8 @@ function MobileAppFrame(props: MobileRootProps & {
       // own, so the phone offers the Settings-modal-parity exit through the
       // stock return API: selectPanel(null) yields the center column back to
       // the conversation. Docked wide sidebars keep stock desktop behaviour.
+      // Passed variadically: the stock slot element carries no key, and an
+      // array child would raise React's unique-key warning.
       ...(state.panelInfo.activePanelId !== null && !wideViewport ? [createElement('button', {
         type: 'button',
         className: 'dshm-panelBack',
@@ -805,8 +808,7 @@ function MobileAppFrame(props: MobileRootProps & {
       }, createElement('path', {
         d: 'M15 5l-7 7 7 7',
         stroke: 'currentColor', 'stroke-width': 2.5, 'stroke-linecap': 'round', 'stroke-linejoin': 'round',
-      })))] : []),
-    ]),
+      })))] : [])),
     createElement('button', {
       'aria-label': messages.closePanels,
       className: 'dshm-scrim',

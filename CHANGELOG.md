@@ -4,6 +4,7 @@ Notable changes to DSH Mobile are recorded here. GitHub Releases remain the sour
 
 ## Unreleased
 
+- Dismiss the narrow-screen drawer when a sidebar panel row (Plugins, Schedules) is selected, and float a one-tap back button on phone-width panel surfaces that returns to the conversation through the stock `selectPanel(null)` path without raising the soft keyboard. Docked desktop-width sidebars and Android's Back ordering are unchanged.
 - Extend the mobile editable font floor to body-level model-search portals and the pairing page, while keeping desktop text and composer-dock spacing unchanged. Thanks @chintoleung for [PR #158](https://github.com/saya-ch/dsh-mobile/pull/158).
 - Let Android Back return from the model list to its root menu, then close that menu through DSH's existing Escape handling, without selecting a model or submitting the draft.
 - Keep the live Android WebView through rotation, window resizing and keyboard-availability changes, preserving the page, reference chips and unsent images. Locale, font-scale and system-theme changes retain Android's normal Activity recreation.

@@ -1077,6 +1077,8 @@ describe('dedicated mobile layout boot', () => {
     // A 44px touch target floating above panel content, below the drawer.
     expect(MOBILE_LAYOUT_STYLES).toMatch(/\.dshm-panelBack\{[^}]*width:44px/)
     expect(MOBILE_LAYOUT_STYLES).toMatch(/\.dshm-panelBack\{[^}]*z-index:60/)
+    // Keyboard users on a narrow desktop need a visible focus ring too.
+    expect(MOBILE_LAYOUT_STYLES).toMatch(/\.dshm-panelBack:focus-visible\{[^}]*outline/)
     for (const language of ['en', 'zh', 'it'] as const) {
       expect(MOBILE_LAYOUT_MESSAGES[language].backToConversation).not.toBe('')
     }
@@ -1395,6 +1397,8 @@ describe('composer soft-keyboard policy', () => {
     expect(deselect).toBeGreaterThan(button)
     expect(handler).toContain('TOUCH_PRIMARY_QUERY')
     expect(handler).toContain('suppressComposerUntil.current')
+    // The window is armed before the deselect call, not merely present.
+    expect(source.indexOf('suppressComposerUntil.current', button)).toBeLessThan(deselect)
   })
 
   it('recognizes another Session row without treating the current row or its menu as navigation', () => {
