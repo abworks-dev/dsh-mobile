@@ -31,14 +31,14 @@
 
 > DSH Mobile 是 DeepSeek Harness 社区插件，原生 App 仅支持 Android。
 >
-> **当前正式版本：0.5.4**。修复配对 Cookie 冲突与第三方插件设置保存，优化输入字号和触屏发送后的键盘处理，新增可选 WebSocket 压缩与慢链路排查指南。[更新记录](CHANGELOG.md#054---2026-10-02)。
+> **当前正式版本：0.5.5**。优化手机输入栏与模型搜索字号，修复 Android 模型菜单返回、旋转时附件丢失和撤销状态覆盖，新增 macOS cloudflared 支持。[更新记录](CHANGELOG.md#055---2026-10-04)。
 >
-> **升级提醒**：建议同步更新插件与 Android App 至 0.5.4，已有配对可继续使用。App 同步修正 WebView Cookie 写入，便于恢复受旧 Cookie 干扰的连接。[兼容说明](#兼容性)。
+> **升级提醒**：请同步更新插件与 Android App 至 0.5.5，以获得完整修复；同一正式签名的旧 App 可原位升级并保留配对。[兼容说明](#兼容性)。
 
 <p align="center">
-  <a href="https://github.com/saya-ch/dsh-mobile/releases/download/v0.5.4/dsh-mobile-android-v0.5.4.apk"><img src="assets/brand/app-icon-rounded.svg" alt="DSH Mobile 安卓应用图标" width="72" height="72"></a><br>
-  <a href="https://github.com/saya-ch/dsh-mobile/releases/download/v0.5.4/dsh-mobile-android-v0.5.4.apk"><strong>下载 Android App 0.5.4</strong></a><br>
-  <sub><a href="https://github.com/saya-ch/dsh-mobile/releases/tag/v0.5.4">版本说明与校验文件</a></sub>
+  <a href="https://github.com/saya-ch/dsh-mobile/releases/download/v0.5.5/dsh-mobile-android-v0.5.5.apk"><img src="assets/brand/app-icon-rounded.svg" alt="DSH Mobile 安卓应用图标" width="72" height="72"></a><br>
+  <a href="https://github.com/saya-ch/dsh-mobile/releases/download/v0.5.5/dsh-mobile-android-v0.5.5.apk"><strong>下载 Android App 0.5.5</strong></a><br>
+  <sub><a href="https://github.com/saya-ch/dsh-mobile/releases/tag/v0.5.5">版本说明与校验文件</a></sub>
 </p>
 
 DSH Mobile 是一个 DeepSeek Harness 插件，让手机浏览器或 Android App 通过局域网，或可选的 Tailscale Funnel、cpolar、cloudflared、自建 FRP 或自有反向代理远程通道连接电脑，继续使用同一份会话、工作区、消息和工具。电脑端分别启停局域网与远程访问、分别管理配对授权；Android App 统一显示已配对电脑。插件不修改 DeepSeek Harness 源码。
@@ -60,11 +60,11 @@ DSH Mobile 是一个 DeepSeek Harness 插件，让手机浏览器或 Android App
 
 配对设备可以操作电脑上的 DSH，应视为完全受信任的设备。局域网只在可信网络开启；远程访问应使用可靠的 HTTPS 通道。手机丢失时，请立即从电脑端撤销设备。
 
-## 移动体验改进（开发分支）
+## 0.5.5 移动体验改进
 
-屏幕宽度不超过 720px 时，未编辑的输入栏保留可滚动的 72px 草稿预览，为会话留出更多空间；编辑区或工具栏获得焦点后恢复展开。文字、引用和附件保留，发送、排队、引导与停止按钮的触摸区域至少为 44px。提交和输入法行为继续由既有 DSH 与 App 机制处理。这项改进尚未包含在 0.5.4 正式包中。
+屏幕宽度不超过 720px 时，未编辑的输入栏保留可滚动的 72px 草稿预览，为会话留出更多空间；编辑区或工具栏获得焦点后恢复展开。文字、引用和附件保留，发送、排队、引导与停止按钮的触摸区域至少为 44px。提交和输入法行为继续由既有 DSH 与 App 机制处理。
 
-开发分支还补齐模型搜索框与配对页的输入字号；Android 返回键可逐级退出模型菜单。App 旋转和调整窗口大小时保留当前页面、引用与未发送图片，已收到的“电脑端已移除”状态不会被后续检测覆盖。这些改进将在后续版本发布，需同步更新插件与 App；不承诺在 App 进程终止后恢复未发送附件。
+模型搜索框与配对页的输入字号已补齐，Android 返回键可逐级退出模型菜单。App 旋转和调整窗口大小时保留当前页面、引用与未发送图片，已收到的“电脑端已移除”状态不会被后续检测覆盖。请同步更新插件与 App；App 进程终止后，未发送附件仍可能丢失。
 
 ## 快速开始
 
@@ -157,7 +157,7 @@ Tailscale Funnel 覆盖范围广，但在中国大陆网络下可能不稳定。
 
 自有反向代理的 HTTP 后端只允许留在可信私网；**不要把它映射到公网，也不要绕过它直连 DSH 或现有 LAN 3443**。来源 CIDR 匹配代理的直接 TCP 来源，不信任转发头；反代须保留外部 Host（含端口）、Origin、Cookie 和 WebSocket。清除代理配置不会删除已配对远程设备。
 
-远程公开地址仍受 DSH 设备配对保护。内置 Funnel 与托管 cpolar、cloudflared 支持 Windows x64 与 Linux x64/arm64；开发分支另提供 cloudflared 的 macOS x64/arm64 按需安装。FRP 0.70.1 支持 Windows、Linux、macOS 的 x64 与 arm64。各通道的系统支持矩阵见[兼容性](#兼容性)。
+远程公开地址仍受 DSH 设备配对保护。内置 Funnel 与托管 cpolar、cloudflared 支持 Windows x64 与 Linux x64/arm64；cloudflared 还支持 macOS x64/arm64 按需安装。FRP 0.70.1 支持 Windows、Linux、macOS 的 x64 与 arm64。各通道的系统支持矩阵见[兼容性](#兼容性)。
 
 ## 扩展与自定义
 
@@ -303,7 +303,7 @@ flowchart LR
 
 ## 故障排查
 
-- **配对成功后仍反复提示重新配对或续期 `401`**：同一域名上的其他服务或旧 Cookie 可能干扰认证。更新至 0.5.4 插件及 App，再从当前移动访问入口重试；浏览器重新扫描当前二维码可更新本插件的认证 Cookie，无需清除所有网站数据。若仍失败，查看失败请求与脱敏日志，其他认证或代理错误也可能返回 `401`。
+- **配对成功后仍反复提示重新配对或续期 `401`**：同一域名上的其他服务或旧 Cookie 可能干扰认证。更新至最新插件及 App，再从当前移动访问入口重试；浏览器重新扫描当前二维码可更新本插件的认证 Cookie，无需清除所有网站数据。若仍失败，查看失败请求与脱敏日志，其他认证或代理错误也可能返回 `401`。
 - **内测声明无法确认或设置无法保存**：先在电脑端直接打开 DSH 的本机地址，查看终端日志或浏览器 Network 中失败的设置请求。连接诊断不检查设置写入；保留现有配置及 `settings.yaml.imported`，按具体错误排查。相同界面提示可能有不同原因，见 [DSH #860](https://github.com/deepseek-ai/deepseek-harness/discussions/860)。
 - **设置请求返回 HTTP `403`**：先检查 DSH 的 Host/Origin 信任校验及代理响应。检查 iframe、代理和浏览器扩展是否改变请求来源，使用本机直接访问验证；保持信任检查启用。
 - **错误包含 `profile reload requires the root Include entry`**：该错误发生在 DSH 重载 profile 时。[Issue #132](https://github.com/saya-ch/dsh-mobile/issues/132) 报告过加载两份 `dsh-app-boot` 导致此错误，但单凭提示不能确认原因。核对实际运行的 DSH 命令与当前 profile 的版本和安装路径，保留配置并按 [DSH 官方文档](https://deepseek-harness.github.io/deepseek-harness/)修复依赖；仍失败时将版本、模块路径及脱敏后的完整错误提交上游。
@@ -325,14 +325,15 @@ flowchart LR
 | 局域网 | 支持（自动配防火墙） | 支持（防火墙自理） | 支持 | 支持 |
 | Tailscale Funnel | 支持（随包提供） | 支持（随包提供） | 支持（随包提供） | 不支持 |
 | cpolar | 支持（按需下载） | 支持（按需下载） | 支持（按需下载） | 不支持 |
-| cloudflared 快速/命名隧道 | 支持（按需下载） | 支持（按需下载） | 支持（按需下载） | 开发分支支持 x64/arm64 |
+| cloudflared 快速/命名隧道 | 支持（按需下载） | 支持（按需下载） | 支持（按需下载） | 支持 x64/arm64（按需下载） |
 | 自建 FRP | 支持（按需下载） | 支持（按需下载） | 支持（按需下载） | 支持（按需下载） |
 | 自有反向代理 | 支持（纯配置） | 支持（纯配置） | 支持（纯配置） | 支持（纯配置） |
 
-macOS 上局域网、自建 FRP 与自有反向代理可用；cloudflared 支持已进入开发分支，0.5.4 正式包尚不包含。Funnel 与 cpolar 暂未提供 macOS 组件。诊断页的防火墙检查目前仅覆盖 Windows，其他系统显示“不适用”。
+macOS 上局域网、cloudflared、自建 FRP 与自有反向代理可用；Funnel 与 cpolar 暂未提供 macOS 组件。诊断页的防火墙检查目前仅覆盖 Windows，其他系统显示“不适用”。
 
 | DSH Mobile 插件                         | 验证支持的 DeepSeek Harness 版本                             |
 | ----------------------------------------- | -------------------------------------------------------------- |
+| `0.5.5` | `0.1.7-alpha.2`、`0.1.7-rc.1`、`0.1.7-rc.2`、`0.2.0-rc.1`、`0.2.0-rc.2`（npm 打包安装、隔离配对、移动页面启动及 WebSocket 工作区读取） |
 | `0.5.4` | `0.1.7-alpha.2`、`0.1.7-rc.1`、`0.1.7-rc.2`、`0.2.0-rc.1`、`0.2.0-rc.2`（npm 打包安装、隔离配对、移动页面启动及 WebSocket 工作区读取） |
 | `0.5.3` | `0.1.7-alpha.2`、`0.1.7-rc.1`、`0.1.7-rc.2`、`0.2.0-rc.1`、`0.2.0-rc.2`（源码契约、npm 打包安装、隔离配对、移动页面启动及 WebSocket 工作区读取） |
 | `0.5.2` | `0.1.7-alpha.2`、`0.1.7-rc.1`、`0.1.7-rc.2`、`0.2.0-rc.1`（延续既有验证）；`0.2.0-rc.2`（源码契约、隔离配对、移动页面启动和 WebSocket 工作区读取） |
@@ -355,7 +356,7 @@ macOS 上局域网、自建 FRP 与自有反向代理可用；cloudflared 支持
 
 现有 App（0.3.3 及更新）无需重新配对；cpolar 用户应使用 0.3.15 或更新 App，较早版本可能在免费线路的慢速首次加载完成前超时；更早的 App 还使用不同的状态栏策略。App 0.4.0 才支持多设备列表、启动行为设置和电脑端撤销状态同步；旧版 App 仍可连接已保存的单台设备。App 0.1.3 及更早版本需卸载重装并重新配对。
 
-0.5.4 的原生配对与续期协议保持兼容，旧 App 的正常连接可继续使用；建议同步升级至 0.5.4（build 74），以更新 WebView 中的认证 Cookie，特别是此前同一域名或 Cookie 干扰导致连接失败的设备。
+0.5.5 的原生配对与续期协议保持兼容，旧 App 的正常连接可继续使用；建议同步升级至 0.5.5（build 75），以获得旋转保持页面、模型菜单返回和撤销状态修复，同时保留 0.5.4 的认证 Cookie 修正。
 
 GitHub Release 的正式 APK 使用固定签名，可从同一签名的旧正式版原位升级并保留配对。自行构建的 Debug APK 若使用不同签名，不能直接覆盖安装正式版；切换前请准备重新配对。
 
@@ -391,7 +392,7 @@ npm run verify
 
 修改提问卡片或移动布局时，完成构建后运行 `npx playwright install chromium --only-shell`、`npm run smoke:question-fixes` 和 `npm run smoke:native-layout`，检查实际客户端产物的滚动、键盘与布局行为。
 
-真实启动冒烟另用临时 DSH Home、随机回环端口和 Chromium 配对，不访问现有用户配置，也不发送模型请求。开发分支的 CI 分别测试 DSH `0.1.7-alpha.2`、`0.1.7-rc.1`、`0.1.7-rc.2`、`0.2.0-rc.1` 与 `0.2.0-rc.2`；本机可把 DSH `0.2.0-rc.2` 装在独立目录，避免替换插件的开发依赖：
+真实启动冒烟另用临时 DSH Home、随机回环端口和 Chromium 配对，不访问现有用户配置，也不发送模型请求。CI 分别测试 DSH `0.1.7-alpha.2`、`0.1.7-rc.1`、`0.1.7-rc.2`、`0.2.0-rc.1` 与 `0.2.0-rc.2`；本机可把 DSH `0.2.0-rc.2` 装在独立目录，避免替换插件的开发依赖：
 
 ```powershell
 $dshMobileTestRuntime = Join-Path $env:TEMP 'dsh-mobile-test-runtime'
