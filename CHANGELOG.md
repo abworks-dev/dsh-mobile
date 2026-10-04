@@ -2,7 +2,7 @@
 
 Notable changes to DSH Mobile are recorded here. GitHub Releases remain the source for downloadable packages and complete generated commit notes.
 
-## Unreleased
+## 0.5.5 - 2026-10-04
 
 - Extend the mobile editable font floor to body-level model-search portals and the pairing page, while keeping desktop text and composer-dock spacing unchanged. Thanks @chintoleung for [PR #158](https://github.com/saya-ch/dsh-mobile/pull/158).
 - Let Android Back return from the model list to its root menu, then close that menu through DSH's existing Escape handling, without selecting a model or submitting the draft.
@@ -11,6 +11,7 @@ Notable changes to DSH Mobile are recorded here. GitHub Releases remain the sour
 - Support on-demand cloudflared installation on macOS x64 and arm64. Verify the official compressed artifact and extracted executable separately, retain the pinned Windows/Linux files, and add isolated installation, reinitialization, and cleanup checks. Thanks @cjxh21 for [PR #155](https://github.com/saya-ch/dsh-mobile/pull/155).
 - Keep an unfocused narrow-screen composer as a scrollable 72px draft preview and enlarge existing touch controls without changing DSH's draft or submission handlers. Expand browser coverage for focus, portaled menus, references, attachments, and keyboard states. Thanks @abworks-dev for [PR #152](https://github.com/saya-ch/dsh-mobile/pull/152).
 - Add a real packed-profile screenshot tool for pairing, conversation, drawer, and settings surfaces. Mask pairing credentials and share isolated startup, readiness, and cleanup with browser checks. Thanks @cjxh21 for [PR #154](https://github.com/saya-ch/dsh-mobile/pull/154).
+- Release Android 0.5.5 (build 75) with the same established signing certificate and compatible pairing protocol. Update the plugin and app together to receive all fixes; official same-signer upgrades retain paired devices.
 
 ## 0.5.4 - 2026-10-02
 

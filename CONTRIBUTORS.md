@@ -1,8 +1,8 @@
 # 贡献者 / Contributors
 
-GitHub 的 [Contributors 图表](https://github.com/saya-ch/dsh-mobile/graphs/contributors) 按进入默认分支的提交自动统计，无法手动加入仅提交 issue 或 PR 提案的成员。本页按截至 2026-10-03 的实际参与方式感谢社区成员；仓库维护者与自动依赖更新仍可在 GitHub 历史记录中查看。
+GitHub 的 [Contributors 图表](https://github.com/saya-ch/dsh-mobile/graphs/contributors) 按进入默认分支的提交自动统计，无法手动加入仅提交 issue 或 PR 提案的成员。本页按截至 2026-10-04 的实际参与方式感谢社区成员；仓库维护者与自动依赖更新仍可在 GitHub 历史记录中查看。
 
-GitHub's Contributors graph counts commits on the default branch; issue reports and PR proposals cannot be manually added to it. This page credits community members by how they contributed, through 2026-10-03. The repository maintainer and automated dependency updates remain visible in GitHub's history.
+GitHub's Contributors graph counts commits on the default branch; issue reports and PR proposals cannot be manually added to it. This page credits community members by how they contributed, through 2026-10-04. The repository maintainer and automated dependency updates remain visible in GitHub's history.
 
 ## 已合并 PR / Merged PRs
 

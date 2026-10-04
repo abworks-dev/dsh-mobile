@@ -20,7 +20,7 @@
 2. Cloudflare Zero Trust（团队域名）已启用——隧道控制台位于其中。
 3. 面板中 cloudflared 组件已安装（命名隧道和快速隧道使用同一个官方客户端）。
 
-组件支持 Windows x64 与 Linux x64/arm64；开发分支新增 macOS x64/arm64 的官方压缩包安装，0.5.4 正式包尚不包含这项支持。所有平台都在安装前校验下载内容；macOS 另校验解压后的可执行文件，组件仅保存在 DSH Mobile 私有目录。
+组件支持 Windows x64、Linux x64/arm64 与 macOS x64/arm64。所有平台都在安装前校验官方发布文件；macOS 另校验解压后的可执行文件，组件仅保存在 DSH Mobile 私有目录。
 
 ## 在 Cloudflare 控制台创建隧道
 
@@ -81,7 +81,7 @@
 | 无法预留本机端口 | `cloudflared_port_reservation_failed` | 本机端口预留本身失败（不是端口被占）。重试；若持续出现请检查系统资源。 |
 | 组件下载校验失败 | `cloudflared_download_hash_mismatch` / `cloudflared_download_size_mismatch` | 下载到的二进制与固定版本的大小或 SHA-256 不符。重新安装；若反复失败说明中间链路在改包。 |
 | 已安装组件校验失败 | `cloudflared_executable_hash_mismatch` | 本机那份 cloudflared 与校验过的版本不一致。彻底移除后重新安装。 |
-| 当前构建不支持该组件 | `cloudflared_component_unsupported` | 当前平台不在支持范围内（目前支持 Windows x64 与 Linux x64/arm64）。 |
+| 当前构建不支持该组件 | `cloudflared_component_unsupported` | 当前平台不在支持范围内（支持 Windows x64、Linux x64/arm64 与 macOS x64/arm64）。 |
 | 等待隧道可用超时 | `cloudflared_start_timeout` | connector 在超时预算内没有打印 `Registered tunnel connection`。命名隧道下进程活着会继续等（最多约 5 分钟）；常见原因是网络到 Cloudflare 边缘不通。 |
 | 组件未安装 | `cloudflared_component_missing` | 还没安装官方组件。按上面的准备步骤安装。 |
 | 组件校验失败 | `cloudflared_component_invalid` | 本机组件与校验过的版本不符。彻底移除后重新安装。 |

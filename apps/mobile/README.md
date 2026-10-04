@@ -6,7 +6,7 @@ DeepSeek Harness is the display name of this lightweight, community-maintained A
 
 Android is the only supported native target. The iOS client remains an unpublished local experiment and is outside the build, release, and support scope.
 
-The current stable app is 0.5.4. It updates WebView authentication Cookie writes while keeping existing pairing and renewal compatible. The paired-device list and startup choice remain available; microphone capture requires user approval, and speech recognition depends on the device WebView and speech service. The self-signed HTTPS entry for an existing frps requires Android app 0.4.6 or later to pin the remote gateway CA; older apps cannot use that entry but can continue using their existing LAN and publicly trusted remote connections.
+The current stable app is 0.5.5. It fixes model-menu Back, retains the page through rotation and preserves known computer-side revocation, while keeping existing pairing and renewal compatible. The paired-device list and startup choice remain available; microphone capture requires user approval, and speech recognition depends on the device WebView and speech service. The self-signed HTTPS entry for an existing frps requires Android app 0.4.6 or later to pin the remote gateway CA; older apps cannot use that entry but can continue using their existing LAN and publicly trusted remote connections.
 
 ## Use the app
 
@@ -27,7 +27,7 @@ Before pairing, the app reads separate version metadata to distinguish an outdat
 
 When automatic recovery renews a Session, the app keeps the existing DSH page if its interface is still mounted. A page that did not finish starting or whose renderer stopped must be reopened; unsaved in-page state cannot be recovered in that case.
 
-The development app also keeps the live WebView when rotating, resizing the window or changing keyboard availability, preserving the page's scroll position, references and unsent images. It requests new layout and Insets without reloading. Android still recreates the Activity for language, font-scale or system-theme changes; process termination and renderer failure can also discard unpersisted page state. This follows the [Android WebView state-management guidance](https://developer.android.com/develop/adaptive-apps/cookbook/webview-state).
+The app keeps the live WebView when rotating, resizing the window or changing keyboard availability, preserving the page's scroll position, references and unsent images. It requests new layout and Insets without reloading. Android still recreates the Activity for language, font-scale or system-theme changes; process termination and renderer failure can also discard unpersisted page state. This follows the [Android WebView state-management guidance](https://developer.android.com/develop/adaptive-apps/cookbook/webview-state).
 
 Once the app receives a computer-side revocation notification, later probes cannot replace **Removed on computer** with an expiry or network status. Re-pairing obtains a new credential before the row becomes usable again. A device revoked while offline may still show **Pairing expired**, because the computer deletes its token record and returns the same generic failure as for an unknown token.
 
@@ -38,7 +38,7 @@ The private CA is not discovery data. After explicit LAN or self-signed FRP pair
 ## Why use the app
 
 - No browser address or tab bars.
-- System Back dismisses supported page layers before same-origin WebView history and exits the app at the root. Development builds also return from model submenus to their parent before closing.
+- System Back dismisses supported page layers before same-origin WebView history and exits the app at the root. Model submenus return to their parent before closing.
 - File selection, same-origin downloads, sharing, and site-data clearing use narrow native implementations.
 - The app remains a shell around the same Web UI and protocol used by browsers.
 
@@ -88,6 +88,6 @@ The debug APK is written to `app/build/outputs/apk/debug/app-debug.apk`. GitHub 
 
 ## Acceptance
 
-Shared URL-policy tests cover origin normalization, pairing entry, same-origin navigation, and download paths. Local tests cover the 0.4.6 remote-CA trust decision, but a real VPS plus phone end-to-end test of the self-signed FRP entry has not been recorded. Device acceptance must still cover that path, small screens, landscape, cutouts and gestures, the keyboard, font scaling, valid and invalid TLS, file input, downloads, Back, rotation, and reauthentication after clearing data.
+Shared URL-policy tests cover origin normalization, pairing entry, same-origin navigation and download paths. PJW110 with Android 16 and WebView 151 was used to verify model-menu Back, rotation with draft/reference/image retention, known revocation through checks and restart, and re-pairing the same device. That evidence uses an isolated HTTPS instance over USB, not a public tunnel. A real VPS plus phone end-to-end test of the self-signed FRP entry has not been recorded; other devices, cutouts, font scaling, TLS failures, file input and downloads still require device-specific acceptance.
 
 Apache-2.0 licensed. See [LICENSE](../../LICENSE).

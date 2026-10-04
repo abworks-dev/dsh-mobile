@@ -6,7 +6,7 @@
  *
  *   npm run capture:screenshots
  *   npm run capture:screenshots -- --out /tmp/shots
- *   npm run capture:screenshots -- --tarball ./dsh-mobile-0.5.4.tgz --out /tmp/shots --overwrite
+ *   npm run capture:screenshots -- --tarball ./dsh-mobile-0.5.5.tgz --out /tmp/shots --overwrite
  *
  * Use DSH_BOOT_SMOKE_BIN for a separate DSH runtime without another Mobile bundle.
  */
