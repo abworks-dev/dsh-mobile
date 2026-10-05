@@ -447,9 +447,10 @@ try {
       }
     }, safeguard)
     await page.keyboard.press(key)
-    assert.deepEqual(await page.evaluate(() => window.enterCounts), { sends: 0, newlines: 0, menus: 0, compositions: 0, ...expected })
+    const { nativeNewline, ...counts } = { nativeNewline: 0, ...expected }
+    assert.deepEqual(await page.evaluate(() => window.enterCounts), { sends: 0, newlines: 0, menus: 0, compositions: 0, ...counts })
     const text = await page.locator('#editor').innerText()
-    if (expected.newlines) assert(text.includes('\n'), `No DOM newline for ${key}: ${JSON.stringify(text)}`)
+    if (expected.newlines || nativeNewline) assert(text.includes('\n'), `No DOM newline for ${key}: ${JSON.stringify(text)}`)
     else assert.equal(text, 'Draft')
   }
   for (const nativeState of [undefined, null, { imeVisible: true, noHardwareKeyboard: false }, { imeVisible: false, noHardwareKeyboard: true }, softState]) {
@@ -458,8 +459,45 @@ try {
       await expectEnter(page, 'Enter', nativeState === softState ? { newlines: 1 } : { sends: 1 })
     })
   }
-  await withPage({ enter: true }, async page => { await expectEnter(page, 'Enter', { sends: 1 }) })
+  // Without the App adapter a phone browser keeps Enter as the native newline:
+  // stock submit (the fixture handler) never sees the keydown, and Chromium's
+  // own beforeinput flow inserts the break — the same native path iOS Safari
+  // takes, so the physical-device gate stays the WebKIt authority.
+  await withPage({ enter: true }, async page => {
+    assert.equal(await page.evaluate(() => window.matchMedia('(hover: none), (pointer: coarse)').matches), true,
+      'mobile emulation must report a touch-primary pointer')
+    await expectEnter(page, 'Enter', { nativeNewline: 1 })
+  })
+  // An empty draft keeps stock's no-op: Enter neither submits nor plants an
+  // invisible line break that would lead the next typed message.
+  await withPage({ enter: true }, async page => {
+    await page.evaluate(() => {
+      const editor = document.querySelector('#editor')
+      editor.textContent = ''
+      window.emptyEnters = 0
+      editor.addEventListener('keydown', event => {
+        if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); window.emptyEnters++ }
+      })
+    })
+    await page.locator('#editor').focus()
+    await page.keyboard.press('Enter')
+    assert.equal(await page.evaluate(() => window.emptyEnters), 1, 'stock must still see an empty-draft Enter')
+    assert.equal(await page.locator('#editor').innerText(), '', 'empty-draft Enter must not insert a line break')
+  })
   await withPage({ enter: true, touch: false, width: 980 }, async page => { await expectEnter(page, 'Enter', { sends: 1 }) })
+  // Modified Enter keeps its stock path in browsers: Shift+Enter stays the
+  // stock newline command, and Cmd/Ctrl+Enter keeps sending for keyboards
+  // attached to touch-primary devices.
+  for (const key of ['Shift+Enter', 'Control+Enter']) {
+    await withPage({ enter: true }, async page => { await expectEnter(page, key, key === 'Shift+Enter' ? { newlines: 1 } : { sends: 1 }) })
+  }
+  // IME ownership and open menus consume Enter in browsers exactly as they do
+  // through the App adapter.
+  for (const safeguard of ['composition', 'recent-composition', 'menu', 'menu-marker']) {
+    await withPage({ enter: true }, async page => {
+      await expectEnter(page, 'Enter', safeguard.startsWith('menu') ? { menus: 1 } : { compositions: 1 }, safeguard)
+    })
+  }
   for (const key of ['Shift+Enter', 'Control+Enter', 'Alt+Enter', 'Meta+Enter']) {
     await withPage({ enter: true }, async page => {
       await page.evaluate(state => { window.__DSH_MOBILE_NATIVE__ = {}; window.__DSH_MOBILE_KEYBOARD_STATE__ = state }, softState)
