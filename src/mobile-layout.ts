@@ -444,15 +444,23 @@ class MobileLayoutController {
   /**
    * Select the main panel rendered in the center column; null means the
    * conversation. Mirrors the official LayoutController so the `panelInfo`
-   * root hook stays truthful.
+   * root hook stays truthful. Selecting a panel while the narrow overlay
+   * drawer covers the center column dismisses that drawer — the user asked to
+   * see the panel, not the navigation over it — while a docked wide sidebar
+   * stays open.
    */
   selectPanel(panelId: string | null): void {
     if (panelId !== null && this.hasMainPanel?.(panelId) !== true) {
       throw new Error(`layout.selectPanel: main panel "${panelId}" is not registered`)
     }
     this.navigation.abort()
-    if (this.snapshot.panelInfo.activePanelId === panelId) return
-    this.update({ panelInfo: Object.freeze({ activePanelId: panelId }) })
+    const dismissDrawer = this.snapshot.sidebarOpen && !viewportIsWide()
+    const samePanel = this.snapshot.panelInfo.activePanelId === panelId
+    if (!dismissDrawer && samePanel) return
+    this.update({
+      ...(dismissDrawer ? { sidebarOpen: false } : {}),
+      ...(samePanel ? {} : { panelInfo: Object.freeze({ activePanelId: panelId }) }),
+    })
   }
 
   /** Drop a selected panel once no main-slot entry declares it. */
@@ -532,6 +540,12 @@ html,body,#root{width:100%;height:100%;overflow:hidden}
 .dshm-scrim{position:fixed;z-index:65;inset:0;border:0;background:rgb(15 23 42 / 40%);opacity:0;pointer-events:none;transition:opacity 180ms ease-out}
 .dshm-scrim[data-open=true]{opacity:1;pointer-events:auto}
 .dshm-overlay{position:fixed;z-index:90;inset:0;pointer-events:none}.dshm-overlay>*{pointer-events:auto}
+/* One-tap return from a main panel (no stock close control); floats above
+   panel content but below the drawer (70) and details overlay (80). */
+.dshm-panelBack{position:absolute;z-index:60;right:12px;bottom:max(16px,env(safe-area-inset-bottom));display:inline-flex;align-items:center;justify-content:center;width:44px;height:44px;padding:0;border:0;border-radius:50%;background:var(--dsw-alias-bg-layer-1,#fff);color:var(--dsw-alias-label-primary,#171a21);box-shadow:0 4px 14px rgb(15 23 42 / 20%);cursor:pointer}
+.dshm-panelBack:hover{background:var(--dsw-alias-interactive-bg-hover,#f1f3f6)}
+.dshm-panelBack:focus-visible{outline:2px solid var(--dsw-alias-label-primary,#171a21);outline-offset:2px}
+.dshm-panelBack svg{width:22px;height:22px}
 .dshm-shell header{min-width:0;padding-left:52px}
 /* Keep focused editables above Safari's 16px zoom threshold while retaining
    the DSH content-font preference and larger inherited text. Stock menus
@@ -764,7 +778,37 @@ function MobileAppFrame(props: MobileRootProps & {
       props.renderSlot('main', {}, {
         entryKey: state.panelInfo.activePanelId ?? 'conversation',
         fallback: props.renderSlot('conversation', {}),
-      })),
+      }),
+      // Stock main panels (Plugins, Schedules) ship no close control of their
+      // own, so the phone offers the Settings-modal-parity exit through the
+      // stock return API: selectPanel(null) yields the center column back to
+      // the conversation. Docked wide sidebars keep stock desktop behaviour.
+      // Passed variadically: the stock slot element carries no key, and an
+      // array child would raise React's unique-key warning.
+      ...(state.panelInfo.activePanelId !== null && !wideViewport ? [createElement('button', {
+        type: 'button',
+        className: 'dshm-panelBack',
+        'aria-label': messages.backToConversation,
+        onClick: () => {
+          // Returning remounts the conversation, whose composer autofocuses;
+          // arm the same touch-only window session navigation uses so the
+          // soft keyboard stays down over the chat the user just reopened.
+          if (window.matchMedia(TOUCH_PRIMARY_QUERY).matches) {
+            const deadline = performance.now() + 500
+            suppressComposerUntil.current = deadline
+            window.setTimeout(() => {
+              if (suppressComposerUntil.current !== deadline) return
+              suppressComposerUntil.current = 0
+            }, 500)
+          }
+          props.controller.selectPanel(null)
+        },
+      }, createElement('svg', {
+        'aria-hidden': true, viewBox: '0 0 24 24', fill: 'none',
+      }, createElement('path', {
+        d: 'M15 5l-7 7 7 7',
+        stroke: 'currentColor', 'stroke-width': 2.5, 'stroke-linecap': 'round', 'stroke-linejoin': 'round',
+      })))] : [])),
     createElement('button', {
       'aria-label': messages.closePanels,
       className: 'dshm-scrim',

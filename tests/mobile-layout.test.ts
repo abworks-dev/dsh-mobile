@@ -570,9 +570,12 @@ describe('dedicated mobile layout boot', () => {
     expect(MOBILE_LAYOUT_MESSAGES.it).toEqual({
       closePanels: 'Chiudi pannelli',
       workspaceNavigation: 'Navigazione area di lavoro e sessioni',
+      backToConversation: 'Torna alla conversazione',
     })
     expect(MOBILE_LAYOUT_MESSAGES.en.closePanels).toBe('Close panels')
+    expect(MOBILE_LAYOUT_MESSAGES.en.backToConversation).toBe('Back to conversation')
     expect(MOBILE_LAYOUT_MESSAGES.zh.workspaceNavigation).toBe('工作区与会话导航')
+    expect(MOBILE_LAYOUT_MESSAGES.zh.backToConversation).toBe('返回会话')
   })
 
   it('adapts stable DSH question surfaces for touch screens', () => {
@@ -989,6 +992,98 @@ describe('dedicated mobile layout boot', () => {
     }
   })
 
+  it('closes the narrow overlay drawer when a sidebar panel row is selected', () => {
+    // Selecting Plugins (or any sidebar.panellist row) renders the panel in the
+    // center column, which the open overlay drawer covers; the selection must
+    // dismiss the drawer the way a session-row navigation does.
+    const viewport = { wide: false }
+    const restore = stubClientGlobals(viewport)
+    const cleanups: Array<() => void> = []
+    let layout: {
+      getSnapshot: () => { sidebarOpen: boolean; panelInfo: { activePanelId: string | null } }
+      selectPanel: (id: string | null) => void
+      toggleSidebar: () => void
+    } | undefined
+    const dispose = (): void => {
+      for (const cleanup of cleanups.reverse()) cleanup()
+      cleanups.length = 0
+    }
+    try {
+      applyMobileLayout({
+        effect: (effect: () => void | (() => void)) => {
+          const cleanup = effect()
+          if (typeof cleanup === 'function') cleanups.push(cleanup)
+        },
+        get: () => undefined,
+        on: () => () => {},
+        reflect: { provide: (name: string, value: unknown) => {
+          if (name === 'layout') layout = value as typeof layout
+          return () => {}
+        } },
+        slots: {
+          register: () => () => {},
+          entries: (name: string) => name === 'main'
+            ? [{ options: { key: 'alpha' } }, { options: { key: 'beta' } }]
+            : [],
+          subscribe: () => () => {},
+        },
+        theme: { getTheme: () => ({ active: { colorScheme: 'light' as const, tokens: {} } }) },
+      } as never)
+      const controller = layout
+      expect(controller).toBeDefined()
+      controller?.selectPanel(null)
+      if (controller?.getSnapshot().sidebarOpen) controller.toggleSidebar()
+
+      controller?.toggleSidebar()
+      expect(controller?.getSnapshot().sidebarOpen).toBe(true)
+      controller?.selectPanel('alpha')
+      expect(controller?.getSnapshot()).toMatchObject({ sidebarOpen: false, panelInfo: { activePanelId: 'alpha' } })
+
+      // Re-tapping the active row while the drawer covers the panel still means
+      // "take me there", so the drawer dismisses without changing the panel.
+      controller?.toggleSidebar()
+      controller?.selectPanel('alpha')
+      expect(controller?.getSnapshot()).toMatchObject({ sidebarOpen: false, panelInfo: { activePanelId: 'alpha' } })
+
+      // An unregistered id stays a validation throw and never dismisses the drawer.
+      controller?.toggleSidebar()
+      expect(() => controller?.selectPanel('missing')).toThrow('main panel "missing" is not registered')
+      expect(controller?.getSnapshot().sidebarOpen).toBe(true)
+      controller?.toggleSidebar()
+
+      // A docked desktop sidebar (>=900px) survives panel selection.
+      viewport.wide = true
+      controller?.toggleSidebar()
+      controller?.selectPanel('beta')
+      expect(controller?.getSnapshot()).toMatchObject({ sidebarOpen: true, panelInfo: { activePanelId: 'beta' } })
+    } finally {
+      viewport.wide = false
+      layout?.selectPanel(null)
+      if (layout?.getSnapshot().sidebarOpen) layout.toggleSidebar()
+      dispose()
+      restore()
+    }
+  })
+
+  it('exposes a one-tap return from a main panel on narrow screens', () => {
+    // A selected main panel (Plugins, Schedules) replaces the conversation and
+    // stock ships no close control for it; the frame must offer the same
+    // one-tap exit the Settings modal has, without touching stock surfaces.
+    const source = readFileSync(new URL('../src/mobile-layout.ts', import.meta.url), 'utf8')
+    expect(source).toContain('messages.backToConversation')
+    expect(source).toContain('props.controller.selectPanel(null)')
+    expect(source).toMatch(/panelInfo\.activePanelId !== null && !wideViewport/)
+    expect(MOBILE_LAYOUT_STYLES).toContain('.dshm-panelBack{')
+    // A 44px touch target floating above panel content, below the drawer.
+    expect(MOBILE_LAYOUT_STYLES).toMatch(/\.dshm-panelBack\{[^}]*width:44px/)
+    expect(MOBILE_LAYOUT_STYLES).toMatch(/\.dshm-panelBack\{[^}]*z-index:60/)
+    // Keyboard users on a narrow desktop need a visible focus ring too.
+    expect(MOBILE_LAYOUT_STYLES).toMatch(/\.dshm-panelBack:focus-visible\{[^}]*outline/)
+    for (const language of ['en', 'zh', 'it'] as const) {
+      expect(MOBILE_LAYOUT_MESSAGES[language].backToConversation).not.toBe('')
+    }
+  })
+
   it('keeps the legacy layout usable when the renderer cannot publish root hooks', () => {
     const restore = stubClientGlobals()
     const cleanups: Array<() => void> = []
@@ -1287,6 +1382,23 @@ describe('composer soft-keyboard policy', () => {
     expect(source).toContain('restoreNavigationIme()')
     expect(source).toContain('if (viewportIsWide()) return')
     expect(source.indexOf('isSessionRowNavigation(event.target)')).toBeLessThan(source.indexOf('if (viewportIsWide()) return', source.indexOf('const closeDrawerAfterSessionAction')))
+  })
+
+  it('keeps the soft keyboard down when the panel back button returns to the conversation', () => {
+    // Returning from a panel remounts the conversation, whose composer
+    // autofocus summons the iOS keyboard over the chat the user just reopened;
+    // the button must arm the same suppression window session rows use.
+    const source = readFileSync(new URL('../src/mobile-layout.ts', import.meta.url), 'utf8')
+    const button = source.indexOf("className: 'dshm-panelBack'")
+    expect(button).toBeGreaterThan(-1)
+    const deselect = source.indexOf('props.controller.selectPanel(null)', button)
+    // The slice ends at the deselect call, so anything it contains precedes it.
+    const handler = source.slice(button, deselect)
+    expect(deselect).toBeGreaterThan(button)
+    expect(handler).toContain('TOUCH_PRIMARY_QUERY')
+    expect(handler).toContain('suppressComposerUntil.current')
+    // The window is armed before the deselect call, not merely present.
+    expect(source.indexOf('suppressComposerUntil.current', button)).toBeLessThan(deselect)
   })
 
   it('recognizes another Session row without treating the current row or its menu as navigation', () => {
