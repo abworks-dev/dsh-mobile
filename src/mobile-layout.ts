@@ -1,4 +1,4 @@
-import { createElement, useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { createElement, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { ReactNode } from 'react'
 import { MOBILE_LAYOUT_MESSAGES, type MobileLayoutLanguage } from './mobile-layout-messages.js'
 
@@ -444,15 +444,23 @@ class MobileLayoutController {
   /**
    * Select the main panel rendered in the center column; null means the
    * conversation. Mirrors the official LayoutController so the `panelInfo`
-   * root hook stays truthful.
+   * root hook stays truthful. Selecting a panel while the narrow overlay
+   * drawer covers the center column dismisses that drawer — the user asked to
+   * see the panel, not the navigation over it — while a docked wide sidebar
+   * stays open.
    */
   selectPanel(panelId: string | null): void {
     if (panelId !== null && this.hasMainPanel?.(panelId) !== true) {
       throw new Error(`layout.selectPanel: main panel "${panelId}" is not registered`)
     }
     this.navigation.abort()
-    if (this.snapshot.panelInfo.activePanelId === panelId) return
-    this.update({ panelInfo: Object.freeze({ activePanelId: panelId }) })
+    const dismissDrawer = this.snapshot.sidebarOpen && !viewportIsWide()
+    const samePanel = this.snapshot.panelInfo.activePanelId === panelId
+    if (!dismissDrawer && samePanel) return
+    this.update({
+      ...(dismissDrawer ? { sidebarOpen: false } : {}),
+      ...(samePanel ? {} : { panelInfo: Object.freeze({ activePanelId: panelId }) }),
+    })
   }
 
   /** Drop a selected panel once no main-slot entry declares it. */
@@ -510,7 +518,8 @@ class ThemePresenter {
 export const MOBILE_LAYOUT_STYLES = `
 html,body,#root{width:100%;height:100%;overflow:hidden}
 .dshm-shell{position:relative;display:grid;width:100%;height:100dvh;min-width:0;overflow:hidden;background:var(--dsw-alias-bg-base,#fff)}
-.dshm-main{grid-area:1/1;position:relative;min-width:0;min-height:0;margin-right:0;overflow:hidden;transition:margin-right var(--ds-transition-duration-slow,190ms) var(--ds-ease-in-out,ease)}
+.dshm-main{grid-area:1/1;position:relative;display:flex;flex-direction:column;min-width:0;min-height:0;margin-right:0;overflow:hidden;transition:margin-right var(--ds-transition-duration-slow,190ms) var(--ds-ease-in-out,ease)}
+.dshm-mainContent{position:relative;flex:1;min-width:0;min-height:0;overflow:hidden}
 .dshm-shell[data-rightbar-docked=true] .dshm-main{margin-right:var(--dshm-rightbar-width)}
 .dshm-shell[data-rightbar-docked=true] .dshm-details{position:absolute;width:var(--dshm-rightbar-width);box-shadow:none;padding-top:0}
 /* Draw above the native absolute panel without consuming its width or
@@ -532,6 +541,14 @@ html,body,#root{width:100%;height:100%;overflow:hidden}
 .dshm-scrim{position:fixed;z-index:65;inset:0;border:0;background:rgb(15 23 42 / 40%);opacity:0;pointer-events:none;transition:opacity 180ms ease-out}
 .dshm-scrim[data-open=true]{opacity:1;pointer-events:auto}
 .dshm-overlay{position:fixed;z-index:90;inset:0;pointer-events:none}.dshm-overlay>*{pointer-events:auto}
+/* Reserve navigation space instead of covering a panel's own save controls. */
+.dshm-panelNav{display:flex;align-items:center;flex-shrink:0;min-height:56px;box-sizing:border-box;padding:max(4px,env(safe-area-inset-top)) max(12px,env(safe-area-inset-right)) 4px max(68px,env(safe-area-inset-left));border-bottom:.5px solid var(--dsw-alias-border-l4);background:var(--dsw-alias-bg-base,#fff)}
+.dshm-panelBack{display:inline-flex;align-items:center;gap:8px;min-width:48px;min-height:48px;padding:8px 12px;border:0;border-radius:8px;background:transparent;color:var(--dsw-alias-label-primary,#171a21);font:inherit;font-size:14px;line-height:1.4;text-align:left;cursor:pointer}
+.dshm-panelBack:hover{background:var(--dsw-alias-interactive-bg-hover,#f1f3f6)}
+.dshm-panelBack:active{background:var(--dsw-alias-interactive-bg-active,#e9ecef)}
+.dshm-panelBack:disabled{opacity:.5;cursor:default}
+.dshm-panelBack:focus-visible{outline:2px solid var(--dsw-alias-label-primary,#171a21);outline-offset:2px}
+.dshm-panelBack svg{width:20px;height:20px;flex-shrink:0}
 .dshm-shell header{min-width:0;padding-left:52px}
 /* Keep focused editables above Safari's 16px zoom threshold while retaining
    the DSH content-font preference and larger inherited text. Stock menus
@@ -578,6 +595,7 @@ function MobileAppFrame(props: MobileRootProps & {
   const state = useSyncExternalStore(props.controller.subscribe, props.controller.getSnapshot)
   const suppressKeyboardUntil = useRef(0)
   const suppressComposerUntil = useRef(0)
+  const previousPanelId = useRef(state.panelInfo.activePanelId)
   const navigationIme = useRef(new Map<HTMLElement, string | null>())
   const restoreNavigationIme = (): void => {
     for (const [editor, previous] of navigationIme.current) {
@@ -587,6 +605,17 @@ function MobileAppFrame(props: MobileRootProps & {
     }
     navigationIme.current.clear()
   }
+  useLayoutEffect(() => {
+    const previous = previousPanelId.current
+    previousPanelId.current = state.panelInfo.activePanelId
+    if (previous === null || state.panelInfo.activePanelId !== null
+      || !window.matchMedia(TOUCH_PRIMARY_QUERY).matches) return
+    // All panel exits precede the remounted composer's passive autofocus.
+    restoreNavigationIme()
+    suppressComposerUntil.current = performance.now() + 500
+    const active = document.activeElement
+    if (active instanceof HTMLElement && active.matches(COMPOSER_EDITOR_SELECTOR)) active.blur()
+  }, [state.panelInfo.activePanelId])
   const [viewportWidth, setViewportWidth] = useState(window.innerWidth)
   useEffect(() => {
     let frame: number | undefined
@@ -761,10 +790,24 @@ function MobileAppFrame(props: MobileRootProps & {
       // compatibility path when the stock CSS-module column names are absent.
       'data-pane': 'conversation',
     },
-      props.renderSlot('main', {}, {
+      state.panelInfo.activePanelId !== null && !wideViewport ? createElement('div', {
+        className: 'dshm-panelNav',
+      }, createElement('button', {
+        type: 'button',
+        className: 'dshm-panelBack',
+        'aria-label': messages.backToConversation,
+        disabled: state.sidebarOpen,
+        onClick: () => { props.controller.selectPanel(null) },
+      }, createElement('svg', {
+        'aria-hidden': true, viewBox: '0 0 24 24', fill: 'none',
+      }, createElement('path', {
+        d: 'M15 5l-7 7 7 7',
+        stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round',
+      })), createElement('span', null, messages.backToConversation))) : null,
+      createElement('div', { className: 'dshm-mainContent' }, props.renderSlot('main', {}, {
         entryKey: state.panelInfo.activePanelId ?? 'conversation',
         fallback: props.renderSlot('conversation', {}),
-      })),
+      }))),
     createElement('button', {
       'aria-label': messages.closePanels,
       className: 'dshm-scrim',

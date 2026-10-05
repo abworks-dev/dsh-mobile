@@ -544,7 +544,7 @@ interface SoftEnterContext {
 export function isSoftKeyboardEnterLineBreak(event: KeyboardEvent, context: SoftEnterContext): boolean {
   if (context.nativeState?.imeVisible !== true || context.nativeState.noHardwareKeyboard !== true
     || !context.editable || !context.activeSession || context.commandMenuOpen || context.recentlyComposing) return false
-  if (!event.isTrusted || event.key !== 'Enter' || event.isComposing || event.keyCode === 229 || event.repeat) return false
+  if (!event.isTrusted || event.key !== 'Enter' || event.defaultPrevented || event.isComposing || event.keyCode === 229 || event.repeat) return false
   return !event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey && !event.getModifierState('AltGraph')
 }
 
@@ -577,6 +577,157 @@ export function bindComposerSoftEnter(editor: HTMLElement, context: () => Omit<S
     editor.removeEventListener('compositionstart', onCompositionStart)
     editor.removeEventListener('compositionend', onCompositionEnd)
     editor.removeEventListener('keydown', onKeyDown, { capture: true })
+  }
+}
+
+/**
+ * Touch-primary device hint for the browser Enter translation. Duplicates the literal of
+ * `TOUCH_PRIMARY_QUERY` in mobile-layout.ts, which builds a separate bundle entry that
+ * this module must not import; a source test keeps the two from drifting apart.
+ */
+const BROWSER_TOUCH_PRIMARY_QUERY = '(hover: none), (pointer: coarse)'
+
+/** The stock composer editor a phone-browser Enter may keep as a native line break. */
+export const BROWSER_COMPOSER_EDITOR_QUERY = '[data-composer-input][contenteditable="true"]'
+
+interface ComposerNativeBridgeIndicators {
+  readonly __DSH_MOBILE_NATIVE__?: unknown
+  readonly dshMobileNative?: unknown
+}
+
+/**
+ * Whether the App adapter or its earlier origin-scoped WebMessage channel owns Enter.
+ * @param view - the page's current native bridge indicators.
+ * @returns true without assuming that native keyboard state is already available.
+ */
+export function nativeAppOwnsComposerEnter(view: ComposerNativeBridgeIndicators): boolean {
+  const channel = view.dshMobileNative
+  return view.__DSH_MOBILE_NATIVE__ !== undefined
+    || (typeof channel === 'object' && channel !== null && 'postMessage' in channel
+      && typeof channel.postMessage === 'function')
+}
+
+interface BrowserSoftEnterContext {
+  /** Whether the Android App reserves Enter translation for native keyboard proof. */
+  readonly appBridge: boolean
+  /** Whether the touch-primary device hint currently matches. */
+  readonly browserTouch: boolean
+  readonly editable: boolean
+  readonly activeSession: boolean
+  readonly commandMenuOpen: boolean
+  readonly recentlyComposing: boolean
+  /**
+   * Whether the composer holds a draft. Stock no-ops a plain Enter on an empty draft
+   * (its submit refuses), and translating it would insert an invisible line break into
+   * the empty editor — perceived as a swallowed key — and leak a leading newline into
+   * the next typed draft, so only real drafts keep the native line break.
+   */
+  readonly hasDraft: boolean
+}
+
+/**
+ * Whether a phone-browser plain Enter keeps its native editing action instead of reaching
+ * DSH's submit shortcut. Unlike the App gate there is no soft-keyboard proof, so this
+ * mirrors the shipped question-card policy: the touch-primary hint plus the same event,
+ * editor, and IME guards. A held key (`repeat`) keeps the native behavior every editor
+ * has, and already-prevented or modified Enters stay under stock control — Cmd/Ctrl+Enter
+ * keeps its stock submit path, which is how an attached hardware keyboard still sends.
+ */
+export function isBrowserTouchEnterLineBreak(event: KeyboardEvent, context: BrowserSoftEnterContext): boolean {
+  if (context.appBridge || !context.browserTouch || !context.editable || !context.activeSession
+    || context.commandMenuOpen || context.recentlyComposing || !context.hasDraft) return false
+  if (!event.isTrusted || event.key !== 'Enter' || event.defaultPrevented || event.isComposing || event.keyCode === 229) return false
+  return !event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey && !event.getModifierState('AltGraph')
+}
+
+/**
+ * Whether the stock composer still holds a draft. Mirrors `composerHasDraft` in
+ * mobile-layout.ts, which builds a separate bundle entry this module must not import;
+ * keep the two shapes aligned (checked against text, embedded decorators, attachments).
+ */
+function browserComposerHasDraft(editor: HTMLElement, card: HTMLElement): boolean {
+  return (editor.textContent ?? '').replaceAll('\u200b', '').trim() !== ''
+    || editor.querySelector('[contenteditable="false"],[data-lexical-decorator],img') !== null
+    || card.querySelector('[data-slot="conversation.input.attachments"] [role="group"] > *') !== null
+}
+
+/** Document-level composition window shared by every editor the browser binding covers. */
+export interface DocumentCompositionGuard {
+  recentlyComposing(): boolean
+  dispose(): void
+}
+
+/**
+ * Composition tracking for the document-capture Enter translation. iOS Safari fires the
+ * composition-confirming Enter with `isComposing === false` in the same task as
+ * `compositionend`, so ownership extends ten milliseconds past the event — the same window
+ * the stock composer and the App binder use.
+ */
+export function createDocumentCompositionGuard(target: EventTarget): DocumentCompositionGuard {
+  let composing = false
+  let composingUntil = 0
+  const onCompositionStart = (): void => { composing = true }
+  const onCompositionEnd = (): void => { composing = false; composingUntil = performance.now() + 10 }
+  target.addEventListener('compositionstart', onCompositionStart, { capture: true })
+  target.addEventListener('compositionend', onCompositionEnd, { capture: true })
+  return {
+    recentlyComposing: () => composing || performance.now() < composingUntil,
+    dispose: () => {
+      target.removeEventListener('compositionstart', onCompositionStart, { capture: true })
+      target.removeEventListener('compositionend', onCompositionEnd, { capture: true })
+    },
+  }
+}
+
+/** The stock editor and its composer card located from a keydown target. */
+export interface BrowserComposerTarget {
+  readonly editor: HTMLElement
+  readonly card: HTMLElement
+}
+
+/** Locate the stock composer editor under a keydown target: the editor itself or a node inside it. */
+export function resolveBrowserComposerEditor(target: EventTarget | null): BrowserComposerTarget | null {
+  const candidate = target as { closest?: (selector: string) => HTMLElement | null } | null
+  if (candidate === null || typeof candidate.closest !== 'function') return null
+  const editor = candidate.closest.call(target as object, BROWSER_COMPOSER_EDITOR_QUERY)
+  if (editor === null) return null
+  const card = editor.closest<HTMLElement>('[data-composer-card]')
+  return card === null ? null : { editor, card }
+}
+
+/**
+ * Phone-browser Enter translation for the stock composer. Lexical refuses keydown Enter
+ * on Apple browsers and performs the line break from the native `beforeinput` flow, so
+ * unlike the App binding this hides the keydown with `stopPropagation` only — no
+ * `preventDefault`, no synthetic event — letting the browser's own insertParagraph produce
+ * the same draft line break desktop Shift+Enter yields, while stock submit never runs.
+ * `stopPropagation` (never the immediate variant) keeps same-node document listeners such
+ * as the send-keyboard typing tracker and the question-card handler running. Document
+ * capture runs before React root handlers and needs no per-editor binding lifecycle.
+ */
+export function bindBrowserComposerSoftEnter(
+  view: Document,
+  context: (editor: HTMLElement, card: HTMLElement) => Omit<BrowserSoftEnterContext, 'browserTouch' | 'recentlyComposing' | 'hasDraft'>,
+): () => void {
+  const guard = createDocumentCompositionGuard(view)
+  const touchPrimary = typeof window === 'object' && typeof window.matchMedia === 'function'
+    ? window.matchMedia(BROWSER_TOUCH_PRIMARY_QUERY)
+    : undefined
+  const onKeyDown = (event: KeyboardEvent): void => {
+    const target = resolveBrowserComposerEditor(event.target)
+    if (target === null) return
+    if (!isBrowserTouchEnterLineBreak(event, {
+      ...context(target.editor, target.card),
+      browserTouch: touchPrimary?.matches === true,
+      hasDraft: browserComposerHasDraft(target.editor, target.card),
+      recentlyComposing: guard.recentlyComposing() || target.editor.hasAttribute('data-composer-composing'),
+    })) return
+    event.stopPropagation()
+  }
+  view.addEventListener('keydown', onKeyDown, { capture: true })
+  return () => {
+    view.removeEventListener('keydown', onKeyDown, { capture: true })
+    guard.dispose()
   }
 }
 
@@ -714,6 +865,16 @@ export function installNativeMobileSurface(backServices: NativeMobileBackService
       return token
     })
   }
+  // The origin-scoped App channel exists before its onLoaded adapter. Neither
+  // presence proves a soft keyboard; native keyboard state remains authoritative.
+  const disposeBrowserComposerSoftEnter = bindBrowserComposerSoftEnter(document, (editor, composerCard) => ({
+    appBridge: nativeAppOwnsComposerEnter(window),
+    editable: editor.isConnected && editor.getAttribute('contenteditable') === 'true'
+      && editor.getAttribute('aria-disabled') !== 'true' && editor.getAttribute('aria-haspopup') !== 'menu'
+      && composerCard.getAttribute('aria-busy') !== 'true' && editor.getAttribute('inputmode') !== 'none',
+    activeSession: activeSessionForSoftEnter(composerCard, currentSessionOrigin().sessionId),
+    commandMenuOpen: composerCard.querySelector('[data-trigger-menu],button[aria-haspopup="listbox"][aria-expanded="true"]') !== null,
+  }))
   const mediaRequestContext = (): MediaRequestContext => {
     const session = currentSessionOrigin()
     return {
@@ -1266,6 +1427,7 @@ export function installNativeMobileSurface(backServices: NativeMobileBackService
     restoreLanguageMarker()
     for (const cleanup of [...browserPickerCleanups]) cleanup()
     disposeEnterBinding?.()
+    disposeBrowserComposerSoftEnter()
     observer.disconnect()
     overlayQuery.removeEventListener('change', schedule)
     document.removeEventListener('click', onBranchClick, true)

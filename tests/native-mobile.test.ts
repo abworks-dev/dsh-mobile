@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { activeSessionForSoftEnter, applyNativeMobileLanguageMarker, bindComposerSoftEnter, composerIsLandingHero, createHeaderStripPanController, dispatchComposerImageDrop, drawerScrimVisible, installNativeMobileSurface, installStockMobileBack, isComposerMediaOriginCurrent, isSoftKeyboardEnterLineBreak, markNativeMobileSettings, measureHeaderStripOverflow, NATIVE_MOBILE_OVERLAY_QUERY, NATIVE_MOBILE_STYLES, preflightComposerImageDrop, resolveComposerSessionOrigin, resolveNativeMobileFrame, resolveNativeMobileLanguage, shouldAutoLoadEarlier, stockMainPanelOpen } from '../src/native-mobile.js'
+import { activeSessionForSoftEnter, applyNativeMobileLanguageMarker, BROWSER_COMPOSER_EDITOR_QUERY, bindBrowserComposerSoftEnter, bindComposerSoftEnter, composerIsLandingHero, createDocumentCompositionGuard, createHeaderStripPanController, dispatchComposerImageDrop, drawerScrimVisible, installNativeMobileSurface, installStockMobileBack, isBrowserTouchEnterLineBreak, isComposerMediaOriginCurrent, isSoftKeyboardEnterLineBreak, markNativeMobileSettings, measureHeaderStripOverflow, nativeAppOwnsComposerEnter, NATIVE_MOBILE_OVERLAY_QUERY, NATIVE_MOBILE_STYLES, preflightComposerImageDrop, resolveBrowserComposerEditor, resolveComposerSessionOrigin, resolveNativeMobileFrame, resolveNativeMobileLanguage, shouldAutoLoadEarlier, stockMainPanelOpen } from '../src/native-mobile.js'
 
 interface FakeElementOptions {
   readonly children?: readonly HTMLElement[]
@@ -602,6 +602,163 @@ function headerPanHarness(initialRange = 220) {
     setTime: (value: number) => { now = value },
   }
 }
+
+describe('browser composer touch Enter', () => {
+  afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks() })
+
+  const browserContext = () => ({
+    appBridge: false,
+    browserTouch: true,
+    editable: true,
+    activeSession: true,
+    commandMenuOpen: false,
+    recentlyComposing: false,
+    hasDraft: true,
+  })
+
+  it('reserves Enter for the App before its adapter or keyboard state is available', () => {
+    const earlyApp = { dshMobileNative: { postMessage: vi.fn() } }
+    const event = new TestKeyboardEvent('keydown', { key: 'Enter', trusted: true }) as never
+    expect(nativeAppOwnsComposerEnter(earlyApp)).toBe(true)
+    expect(isBrowserTouchEnterLineBreak(event, {
+      ...browserContext(), appBridge: nativeAppOwnsComposerEnter(earlyApp),
+    })).toBe(false)
+    expect(isSoftKeyboardEnterLineBreak(event, { ...eligibleContext(), nativeState: undefined })).toBe(false)
+    expect(isSoftKeyboardEnterLineBreak(event, { ...eligibleContext(), nativeState: null })).toBe(false)
+    expect(isSoftKeyboardEnterLineBreak(event, eligibleContext())).toBe(true)
+    expect(earlyApp.dshMobileNative.postMessage).not.toHaveBeenCalled()
+  })
+
+  it('retains adapter-only App ownership and ignores absent or unusable WebMessage channels', () => {
+    expect(nativeAppOwnsComposerEnter({ __DSH_MOBILE_NATIVE__: {} })).toBe(true)
+    for (const channel of [undefined, null, false, 'App', {}, { postMessage: undefined }, { postMessage: 'send' }]) {
+      expect(nativeAppOwnsComposerEnter({ dshMobileNative: channel })).toBe(false)
+    }
+  })
+
+  it('reads native ownership on each keydown and removes its listener on disposal', () => {
+    const nativeView: { dshMobileNative?: { postMessage: (message: string) => void } } = {}
+    vi.stubGlobal('window', { matchMedia: () => ({ matches: true }) })
+    const documentTarget = new EventTarget()
+    const card = { querySelector: () => null } as never
+    const editor = {
+      textContent: 'Draft',
+      querySelector: () => null,
+      hasAttribute: () => false,
+      closest: (selector: string) => selector === BROWSER_COMPOSER_EDITOR_QUERY ? editor : card,
+    } as never
+    const dispose = bindBrowserComposerSoftEnter(documentTarget as Document, () => ({
+      ...browserContext(), appBridge: nativeAppOwnsComposerEnter(nativeView),
+    }))
+    const pressEnter = (): number => {
+      const event = new TestKeyboardEvent('keydown', { key: 'Enter', trusted: true })
+      Object.defineProperty(event, 'target', { value: editor })
+      const stopped = vi.spyOn(event, 'stopPropagation')
+      documentTarget.dispatchEvent(event)
+      return stopped.mock.calls.length
+    }
+    try {
+      expect(pressEnter()).toBe(1)
+      nativeView.dshMobileNative = { postMessage: vi.fn() }
+      expect(pressEnter()).toBe(0)
+      delete nativeView.dshMobileNative
+      expect(pressEnter()).toBe(1)
+      dispose()
+      expect(pressEnter()).toBe(0)
+    } finally {
+      dispose()
+    }
+  })
+
+  it('translates a plain trusted Enter only on a touch-primary browser without the App bridge', () => {
+    const event = new TestKeyboardEvent('keydown', { key: 'Enter', trusted: true }) as never
+    expect(isBrowserTouchEnterLineBreak(event, browserContext())).toBe(true)
+    const context = browserContext()
+    expect(isBrowserTouchEnterLineBreak(event, { ...context, browserTouch: false })).toBe(false)
+    expect(isBrowserTouchEnterLineBreak(event, { ...context, appBridge: true })).toBe(false)
+    expect(isBrowserTouchEnterLineBreak(event, { ...context, editable: false })).toBe(false)
+    expect(isBrowserTouchEnterLineBreak(event, { ...context, activeSession: false })).toBe(false)
+    expect(isBrowserTouchEnterLineBreak(event, { ...context, commandMenuOpen: true })).toBe(false)
+    expect(isBrowserTouchEnterLineBreak(event, { ...context, recentlyComposing: true })).toBe(false)
+    expect(isBrowserTouchEnterLineBreak(event, { ...context, hasDraft: false })).toBe(false)
+  })
+
+  it('keeps synthetic, modified, and composing Enters but follows native held-key repeat', () => {
+    const context = browserContext()
+    for (const options of [
+      {}, { key: 'Escape', trusted: true }, { key: 'Enter', trusted: true, shiftKey: true },
+      { key: 'Enter', trusted: true, altKey: true }, { key: 'Enter', trusted: true, ctrlKey: true },
+      { key: 'Enter', trusted: true, metaKey: true }, { key: 'Enter', trusted: true, altGraph: true },
+      { key: 'Enter', trusted: true, isComposing: true }, { key: 'Enter', trusted: true, keyCode: 229 },
+    ]) {
+      expect(isBrowserTouchEnterLineBreak(new TestKeyboardEvent('keydown', options) as never, context)).toBe(false)
+    }
+    const held = new TestKeyboardEvent('keydown', { key: 'Enter', trusted: true, repeat: true }) as never
+    expect(isBrowserTouchEnterLineBreak(held, context)).toBe(true)
+  })
+
+  it('keeps an already-prevented Enter under stock control in both paths', () => {
+    const preventedApp = new TestKeyboardEvent('keydown', { key: 'Enter', trusted: true, cancelable: true })
+    preventedApp.preventDefault()
+    expect(isSoftKeyboardEnterLineBreak(preventedApp as never, eligibleContext())).toBe(false)
+    const preventedBrowser = new TestKeyboardEvent('keydown', { key: 'Enter', trusted: true, cancelable: true })
+    preventedBrowser.preventDefault()
+    expect(isBrowserTouchEnterLineBreak(preventedBrowser as never, browserContext())).toBe(false)
+  })
+
+  it('tracks document-level composition ownership for ten milliseconds', () => {
+    const now = vi.spyOn(performance, 'now').mockReturnValue(100)
+    const view = new EventTarget()
+    const guard = createDocumentCompositionGuard(view)
+    expect(guard.recentlyComposing()).toBe(false)
+    view.dispatchEvent(new Event('compositionstart'))
+    expect(guard.recentlyComposing()).toBe(true)
+    view.dispatchEvent(new Event('compositionend'))
+    expect(guard.recentlyComposing()).toBe(true)
+    now.mockReturnValue(111)
+    expect(guard.recentlyComposing()).toBe(false)
+    guard.dispose()
+    view.dispatchEvent(new Event('compositionstart'))
+    expect(guard.recentlyComposing()).toBe(false)
+  })
+
+  it('locates the stock editor from the event target or an inner node, never other editables', () => {
+    const card = {} as HTMLElement
+    const editor = Object.assign(new EventTarget(), {
+      closest: (selector: string) => selector === BROWSER_COMPOSER_EDITOR_QUERY ? editor : card,
+    }) as never
+    const inner = Object.assign(new EventTarget(), {
+      closest: () => editor,
+    })
+    const textarea = Object.assign(new EventTarget(), {
+      closest: () => null,
+    })
+    expect(resolveBrowserComposerEditor(editor)).toEqual({ editor, card })
+    expect(resolveBrowserComposerEditor(inner)).toEqual({ editor, card })
+    expect(resolveBrowserComposerEditor(textarea)).toBeNull()
+    expect(resolveBrowserComposerEditor(null)).toBeNull()
+  })
+
+  it('installs stopPropagation-only glue wired at event time', () => {
+    const source = readFileSync(new URL('../src/native-mobile.ts', import.meta.url), 'utf8')
+    expect(source).toContain("const BROWSER_TOUCH_PRIMARY_QUERY = '(hover: none), (pointer: coarse)'")
+    expect(source).toContain('appBridge: nativeAppOwnsComposerEnter(window)')
+    expect(source).toContain('typeof window.matchMedia === \'function\'')
+    expect(source).toContain("editor.getAttribute('inputmode') !== 'none'")
+    expect(source).toContain('browserComposerHasDraft(target.editor, target.card)')
+    expect(source).toContain('event.stopPropagation()')
+    expect(source).toContain('bindBrowserComposerSoftEnter(document')
+    expect(source).toContain('disposeBrowserComposerSoftEnter')
+  })
+
+  it('keeps the browser touch query identical to the layout module query', () => {
+    const layout = readFileSync(new URL('../src/mobile-layout.ts', import.meta.url), 'utf8')
+    const native = readFileSync(new URL('../src/native-mobile.ts', import.meta.url), 'utf8')
+    const match = layout.match(/TOUCH_PRIMARY_QUERY = '([^']+)'/)
+    expect(match).not.toBeNull()
+    expect(native).toContain(`BROWSER_TOUCH_PRIMARY_QUERY = '${match?.[1] ?? ''}'`)
+  })
+})
 
 describe('header strip pan', () => {
   it('does not reserve a button column that squeezes the header actions', () => {

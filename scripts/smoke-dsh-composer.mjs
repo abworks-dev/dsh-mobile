@@ -57,6 +57,18 @@ async function retained(page, expected) {
   return current
 }
 
+async function lexicalDraft(editor) {
+  return editor.evaluate(node => {
+    const lexical = node.__lexicalEditor
+    if (typeof lexical?.getEditorState !== 'function') throw new Error('The stock composer did not expose its Lexical editor')
+    return lexical.getEditorState().toJSON()
+  })
+}
+
+function lineBreaks(node) {
+  return (node.type === 'linebreak' ? 1 : 0) + (node.children ?? []).reduce((count, child) => count + lineBreaks(child), 0)
+}
+
 try {
   const workspacePath = join(root, 'workspace')
   await mkdir(workspacePath)
@@ -104,6 +116,31 @@ try {
   const editor = card.locator('[data-composer-input][contenteditable="true"]')
   await editor.waitFor({ state: 'visible', timeout: CLIENT_TIMEOUT_MS })
 
+  await editor.fill('Browser Enter acceptance')
+  const initialBreaks = lineBreaks((await lexicalDraft(editor)).root)
+  await phone.keyboard.press('Enter')
+  await phone.waitForFunction(() => {
+    const editor = document.querySelector('[data-composer-input]')?.__lexicalEditor
+    const hasBreak = node => node.type === 'linebreak' || (node.children ?? []).some(hasBreak)
+    return editor !== undefined && hasBreak(editor.getEditorState().toJSON().root)
+  })
+  assert.equal(lineBreaks((await lexicalDraft(editor)).root), initialBreaks + 1, 'Phone-browser Enter did not update the real Lexical draft')
+  await phone.keyboard.type('Second browser line')
+  assert.equal(prompts.length, 0, 'Phone-browser Enter attempted a model submission')
+  await phone.keyboard.press('ControlOrMeta+A')
+  await phone.keyboard.press('Backspace')
+  await phone.waitForFunction(() => {
+    const node = document.querySelector('[data-composer-input]')
+    const editor = node?.__lexicalEditor
+    const nonempty = value => value.type === 'linebreak' || (typeof value.text === 'string' && value.text.length > 0)
+      || (value.children ?? []).some(nonempty)
+    return editor !== undefined && node.textContent === '' && !nonempty(editor.getEditorState().toJSON().root)
+  }, undefined, { timeout: CLIENT_TIMEOUT_MS })
+  const emptyDraft = await lexicalDraft(editor)
+  await phone.keyboard.press('Enter')
+  await frames(phone)
+  assert.deepEqual(await lexicalDraft(editor), emptyDraft, 'Empty browser Enter inserted a hidden line break')
+
   // Use the real input trigger to insert a real Lexical reference chip.
   await editor.fill('@composer-reference')
   const reference = phone.getByRole('option').filter({ hasText: referenceName })
@@ -130,10 +167,82 @@ try {
   }
   await card.locator('input[type="file"]').setInputFiles({ name: 'composer-image.png', mimeType: 'image/png', buffer: png })
   await card.getByRole('img', { name: 'composer-image.png' }).waitFor({ state: 'visible', timeout: CLIENT_TIMEOUT_MS })
-  const expected = await retained(phone)
+  let expected = await retained(phone)
   assert.equal(expected.chips.length, 1)
   assert.equal(expected.images.length, 1)
   assert(expected.text.includes('Kept draft line 21'))
+
+  const panelGeometry = []
+  for (const [index, viewport] of [{ width: 375, height: 812 }, { width: 844, height: 393 }].entries()) {
+    await phone.setViewportSize(viewport)
+    await drawer.locator('button[data-dsh-mobile-toggle]').click()
+    await phone.waitForFunction(() => document.querySelector('.dshm-drawer')?.getAttribute('data-open') === 'true')
+    await drawer.getByRole('button', { name: 'Plugins', exact: true }).click()
+    await phone.waitForFunction(() => document.querySelector('.dshm-drawer')?.getAttribute('data-open') === 'false')
+    const back = phone.getByRole('button', { name: 'Back to conversation', exact: true })
+    await back.waitFor({ state: 'visible', timeout: CLIENT_TIMEOUT_MS })
+    const geometry = await phone.evaluate(() => {
+      const rect = selector => {
+        const node = document.querySelector(selector)
+        if (node === null) throw new Error(`Missing panel region ${selector}`)
+        const { x, y, width, height, bottom } = node.getBoundingClientRect()
+        return { x, y, width, height, bottom }
+      }
+      return { navigation: rect('.dshm-panelNav'), content: rect('.dshm-mainContent'), main: rect('.dshm-main'), back: rect('.dshm-panelBack') }
+    })
+    assert(geometry.navigation.height >= 48 && geometry.back.height >= 48)
+    assert(geometry.content.y >= geometry.navigation.bottom - 0.5, 'Panel navigation overlaps the real plugin content')
+    assert(geometry.content.height > 0 && geometry.content.bottom <= geometry.main.bottom + 0.5, 'Panel content escaped its reserved space')
+    panelGeometry.push({ ...viewport, ...geometry })
+    if (index === 0) await back.click()
+    else assert.equal(await nativeBack(phone), true, 'Native Back did not return from the actual main panel')
+    await editor.waitFor({ state: 'visible', timeout: CLIENT_TIMEOUT_MS })
+    await phone.waitForFunction(id => document.querySelector('[data-conversation-session]')?.getAttribute('data-conversation-session') === id, sessionId)
+    await frames(phone)
+    assert.equal(await editor.evaluate(node => document.activeElement === node), false, 'A panel exit summoned the composer keyboard')
+    const current = await retained(phone)
+    assert.equal(current.text, expected.text)
+    assert.deepEqual(current.chips, expected.chips)
+    // Remounting an image may legitimately allocate a fresh URL for the same File.
+    assert.deepEqual(current.images.map(image => image.alt), expected.images.map(image => image.alt))
+    await card.getByRole('img', { name: 'composer-image.png' }).waitFor({ state: 'visible' })
+    assert(await card.getByRole('img', { name: 'composer-image.png' }).evaluate(image => image.complete && image.naturalWidth > 0))
+    expected = current
+    const bounds = await editor.boundingBox()
+    assert(bounds !== null)
+    await editor.click({ position: { x: bounds.width - 4, y: bounds.height / 2 } })
+    assert(await editor.evaluate(node => document.activeElement === node), 'Explicit composer tap remained blocked after panel return')
+  }
+
+  await phone.setViewportSize({ width: 1000, height: 812 })
+  await phone.waitForFunction(() => window.matchMedia('(min-width: 900px)').matches, undefined, { timeout: CLIENT_TIMEOUT_MS })
+  await frames(phone)
+  if (await drawer.getAttribute('data-open') !== 'true') await drawer.locator('button[data-dsh-mobile-toggle]').click()
+  await phone.waitForFunction(() => document.querySelector('.dshm-drawer')?.getAttribute('data-open') === 'true', undefined, { timeout: CLIENT_TIMEOUT_MS })
+  await drawer.getByRole('button', { name: 'Plugins', exact: true }).click()
+  const widePanelState = await phone.evaluate(() => ({
+    width: window.innerWidth,
+    wide: window.matchMedia('(min-width: 900px)').matches,
+    drawer: document.querySelector('.dshm-drawer')?.getAttribute('data-open'),
+    phoneNavigation: document.querySelectorAll('.dshm-panelNav').length,
+  }))
+  assert.equal(widePanelState.drawer, 'true', `Wide panel selection collapsed the docked sidebar: ${JSON.stringify(widePanelState)}`)
+  assert.equal(await phone.locator('.dshm-panelNav').count(), 0, 'Wide panel unexpectedly gained phone navigation')
+  assert.equal(await nativeBack(phone), true)
+  await editor.waitFor({ state: 'visible', timeout: CLIENT_TIMEOUT_MS })
+  await phone.waitForFunction(text => document.querySelector('[data-composer-input]')?.textContent === text, expected.text)
+  const wideReturn = await retained(phone)
+  assert.equal(wideReturn.text, expected.text)
+  assert.deepEqual(wideReturn.chips, expected.chips)
+  assert.deepEqual(wideReturn.images.map(image => image.alt), expected.images.map(image => image.alt))
+  expected = wideReturn
+  const wideEditorBounds = await editor.boundingBox()
+  assert(wideEditorBounds !== null)
+  // A user tap ends the return-only autofocus suppression before geometry checks.
+  await editor.click({ position: { x: wideEditorBounds.width - 4, y: wideEditorBounds.height / 2 } })
+  assert(await editor.evaluate(node => document.activeElement === node))
+  await drawer.locator('button[data-dsh-mobile-toggle]').click()
+  await phone.waitForFunction(() => document.querySelector('.dshm-drawer')?.getAttribute('data-open') === 'false')
   const scroll = card.locator('[data-input-scroll]')
   const expandedHeight = async () => scroll.evaluate(node => node.getBoundingClientRect().height)
 
@@ -191,7 +300,8 @@ try {
     }
   }
   assert.equal(prompts.length, 0, 'Composer acceptance attempted a model submission')
-  console.log(`Packed DSH composer acceptance passed: real Lexical draft, reference chip, image intake, model body-portal/search/native Back, 375px/landscape and 16px/20px fonts (${geometry.length} layouts).`)
+  console.log(`Packed DSH composer acceptance passed: real browser Enter/empty draft, Lexical reference/image retention, panel button/native Back without autofocus, model body-portal/search/native Back, 375px/landscape and 16px/20px fonts (${geometry.length} layouts).`)
+  console.log(JSON.stringify(panelGeometry))
   console.log(JSON.stringify(geometry))
 } catch (error) {
   failure = new Error(`${sanitized(error instanceof Error ? error.stack ?? error.message : String(error))}\n${dsh?.logs() ?? ''}`)

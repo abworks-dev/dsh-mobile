@@ -570,9 +570,12 @@ describe('dedicated mobile layout boot', () => {
     expect(MOBILE_LAYOUT_MESSAGES.it).toEqual({
       closePanels: 'Chiudi pannelli',
       workspaceNavigation: 'Navigazione area di lavoro e sessioni',
+      backToConversation: 'Torna alla conversazione',
     })
     expect(MOBILE_LAYOUT_MESSAGES.en.closePanels).toBe('Close panels')
+    expect(MOBILE_LAYOUT_MESSAGES.en.backToConversation).toBe('Back to conversation')
     expect(MOBILE_LAYOUT_MESSAGES.zh.workspaceNavigation).toBe('工作区与会话导航')
+    expect(MOBILE_LAYOUT_MESSAGES.zh.backToConversation).toBe('返回会话')
   })
 
   it('adapts stable DSH question surfaces for touch screens', () => {
@@ -989,6 +992,99 @@ describe('dedicated mobile layout boot', () => {
     }
   })
 
+  it('closes the narrow overlay drawer when a sidebar panel row is selected', () => {
+    // Selecting Plugins (or any sidebar.panellist row) renders the panel in the
+    // center column, which the open overlay drawer covers; the selection must
+    // dismiss the drawer the way a session-row navigation does.
+    const viewport = { wide: false }
+    const restore = stubClientGlobals(viewport)
+    const cleanups: Array<() => void> = []
+    let layout: {
+      getSnapshot: () => { sidebarOpen: boolean; panelInfo: { activePanelId: string | null } }
+      selectPanel: (id: string | null) => void
+      toggleSidebar: () => void
+    } | undefined
+    const dispose = (): void => {
+      for (const cleanup of cleanups.reverse()) cleanup()
+      cleanups.length = 0
+    }
+    try {
+      applyMobileLayout({
+        effect: (effect: () => void | (() => void)) => {
+          const cleanup = effect()
+          if (typeof cleanup === 'function') cleanups.push(cleanup)
+        },
+        get: () => undefined,
+        on: () => () => {},
+        reflect: { provide: (name: string, value: unknown) => {
+          if (name === 'layout') layout = value as typeof layout
+          return () => {}
+        } },
+        slots: {
+          register: () => () => {},
+          entries: (name: string) => name === 'main'
+            ? [{ options: { key: 'alpha' } }, { options: { key: 'beta' } }]
+            : [],
+          subscribe: () => () => {},
+        },
+        theme: { getTheme: () => ({ active: { colorScheme: 'light' as const, tokens: {} } }) },
+      } as never)
+      const controller = layout
+      expect(controller).toBeDefined()
+      controller?.selectPanel(null)
+      if (controller?.getSnapshot().sidebarOpen) controller.toggleSidebar()
+
+      controller?.toggleSidebar()
+      expect(controller?.getSnapshot().sidebarOpen).toBe(true)
+      controller?.selectPanel('alpha')
+      expect(controller?.getSnapshot()).toMatchObject({ sidebarOpen: false, panelInfo: { activePanelId: 'alpha' } })
+
+      // Re-tapping the active row while the drawer covers the panel still means
+      // "take me there", so the drawer dismisses without changing the panel.
+      controller?.toggleSidebar()
+      controller?.selectPanel('alpha')
+      expect(controller?.getSnapshot()).toMatchObject({ sidebarOpen: false, panelInfo: { activePanelId: 'alpha' } })
+
+      // An unregistered id stays a validation throw and never dismisses the drawer.
+      controller?.toggleSidebar()
+      expect(() => controller?.selectPanel('missing')).toThrow('main panel "missing" is not registered')
+      expect(controller?.getSnapshot().sidebarOpen).toBe(true)
+      controller?.toggleSidebar()
+
+      // A docked desktop sidebar (>=900px) survives panel selection.
+      viewport.wide = true
+      controller?.toggleSidebar()
+      controller?.selectPanel('beta')
+      expect(controller?.getSnapshot()).toMatchObject({ sidebarOpen: true, panelInfo: { activePanelId: 'beta' } })
+    } finally {
+      viewport.wide = false
+      layout?.selectPanel(null)
+      if (layout?.getSnapshot().sidebarOpen) layout.toggleSidebar()
+      dispose()
+      restore()
+    }
+  })
+
+  it('exposes a one-tap return from a main panel on narrow screens', () => {
+    // A selected main panel (Plugins, Schedules) replaces the conversation and
+    // stock ships no close control for it; the frame must offer the same
+    // one-tap exit the Settings modal has, without touching stock surfaces.
+    const source = readFileSync(new URL('../src/mobile-layout.ts', import.meta.url), 'utf8')
+    expect(source).toContain('messages.backToConversation')
+    expect(source).toContain('props.controller.selectPanel(null)')
+    expect(source).toMatch(/panelInfo\.activePanelId !== null && !wideViewport/)
+    expect(MOBILE_LAYOUT_STYLES).toContain('.dshm-panelBack{')
+    expect(MOBILE_LAYOUT_STYLES).toMatch(/\.dshm-panelBack\{[^}]*min-height:48px/)
+    expect(MOBILE_LAYOUT_STYLES).toMatch(/\.dshm-panelNav\{[^}]*flex-shrink:0/)
+    expect(MOBILE_LAYOUT_STYLES).toMatch(/\.dshm-mainContent\{[^}]*flex:1/)
+    expect(MOBILE_LAYOUT_STYLES).not.toMatch(/\.dshm-panelBack\{[^}]*position:(?:absolute|fixed)/)
+    // Keyboard users on a narrow desktop need a visible focus ring too.
+    expect(MOBILE_LAYOUT_STYLES).toMatch(/\.dshm-panelBack:focus-visible\{[^}]*outline/)
+    for (const language of ['en', 'zh', 'it'] as const) {
+      expect(MOBILE_LAYOUT_MESSAGES[language].backToConversation).not.toBe('')
+    }
+  })
+
   it('keeps the legacy layout usable when the renderer cannot publish root hooks', () => {
     const restore = stubClientGlobals()
     const cleanups: Array<() => void> = []
@@ -1287,6 +1383,19 @@ describe('composer soft-keyboard policy', () => {
     expect(source).toContain('restoreNavigationIme()')
     expect(source).toContain('if (viewportIsWide()) return')
     expect(source.indexOf('isSessionRowNavigation(event.target)')).toBeLessThan(source.indexOf('if (viewportIsWide()) return', source.indexOf('const closeDrawerAfterSessionAction')))
+  })
+
+  it('shares the composer autofocus policy across every panel return', () => {
+    const source = readFileSync(new URL('../src/mobile-layout.ts', import.meta.url), 'utf8')
+    const start = source.indexOf('useLayoutEffect(() => {')
+    const end = source.indexOf('}, [state.panelInfo.activePanelId])', start)
+    expect(start).toBeGreaterThan(-1)
+    expect(end).toBeGreaterThan(start)
+    const effect = source.slice(start, end)
+    expect(effect).toContain('previousPanelId.current')
+    expect(effect).toContain('TOUCH_PRIMARY_QUERY')
+    expect(effect).toContain('suppressComposerUntil.current = performance.now() + 500')
+    expect(effect.indexOf('restoreNavigationIme()')).toBeLessThan(effect.indexOf('suppressComposerUntil.current ='))
   })
 
   it('recognizes another Session row without treating the current row or its menu as navigation', () => {
