@@ -596,7 +596,7 @@ export class MobileAccessService extends Service {
   /** Account for one operation until its underlying work actually settles. */
   private trackOperation<T>(id: string, operation: BoundedOperation<T>): void {
     this.outstanding.set(id, (this.outstanding.get(id) ?? 0) + 1)
-    void operation.settled.then(() => {
+    operation.settled.then(() => {
       const outstanding = (this.outstanding.get(id) ?? 1) - 1
       if (outstanding <= 0) this.outstanding.delete(id)
       else this.outstanding.set(id, outstanding)
@@ -605,7 +605,7 @@ export class MobileAccessService extends Service {
         if (remaining <= 0) this.abandoned.delete(id)
         else this.abandoned.set(id, remaining)
       }
-    })
+    }).catch(() => undefined)
   }
 
   /** Invoke one action after parsing its input and binding the request lifetime. */
@@ -625,9 +625,13 @@ export class MobileAccessService extends Service {
         signal => {
           let parsed: unknown
           try { parsed = parseActionInput(action.input, input) } catch { throw new MobileExtensionError('invalid_action_input', 'action input is invalid', 400) }
-          // Schema callables and parse adapters may validate asynchronously; both stay inside the budget.
+          // Schema callables and parse adapters may validate asynchronously; both stay inside the budget,
+          // and a caller that detached mid-parse must not start a further execution stage.
           return Promise.resolve(parsed).then(
-            value => action.run({ ...context, signal }, value),
+            value => {
+              signal.throwIfAborted()
+              return action.run({ ...context, signal }, value)
+            },
             () => { throw new MobileExtensionError('invalid_action_input', 'action input is invalid', 400) },
           )
         },
@@ -681,10 +685,9 @@ export class MobileAccessService extends Service {
       )
       this.trackOperation(id, operation)
       // A handler that resolves after its deadline may still open a stream nobody owns.
-      void operation.settled.then(() => {
-        const late = operation?.lateValue()
-        if (late !== undefined && isReadable(late.body)) late.body.destroy()
-      })
+      operation.settled.then(() => {
+        disposeLateExtensionResponse(operation?.lateValue())
+      }).catch(() => undefined)
       const result = await operation.caller
       if (result === null || typeof result !== 'object' || typeof result.body !== 'string' && !(result.body instanceof Uint8Array) && !isReadable(result.body)) {
         throw new MobileExtensionError('invalid_route_response', 'extension returned an invalid response', 500)
@@ -878,6 +881,15 @@ function isReadable(value: unknown): value is Readable {
   return value !== null && typeof value === 'object' && typeof (value as { pipe?: unknown }).pipe === 'function'
 }
 
+/** Destroy a route response that arrived after its caller detached; must never throw or emit unhandled stream errors. */
+export function disposeLateExtensionResponse(value: unknown): void {
+  if (value === null || typeof value !== 'object') return
+  const body = (value as { readonly body?: unknown }).body
+  if (!isReadable(body)) return
+  body.once('error', () => undefined)
+  try { body.destroy() } catch { /* disposal failures must not escape */ }
+}
+
 function releaseSignalLifetimeWhenStreamSettles(stream: Readable, cleanup: () => void): void {
   let stopObserving: (() => void) | undefined
   stopObserving = finished(stream, () => {
@@ -951,25 +963,31 @@ function startBoundedOperation<T>(
   let lateFulfilled: T | undefined
   let lateRejected: unknown
   let notifySettled: (() => void) | undefined
+  let callerTimer: NodeJS.Timeout | undefined
+  let onExternal: (() => void) | undefined
   const settled = new Promise<void>(resolve => { notifySettled = resolve })
   const detach = (reject: (reason?: unknown) => void, reason: unknown): void => {
     // A queued timer must not detach work that already settled.
     if (detached || workState !== undefined) return
     detached = true
-    deadline.abort(reason)
+    // The caller is gone: stop its timer and observer, and record abandonment
+    // before firing cancellation listeners so re-entrant dispatch is gated.
+    if (callerTimer !== undefined) clearTimeout(callerTimer)
+    if (onExternal !== undefined) options.external?.removeEventListener('abort', onExternal)
     options.onDetach?.()
+    deadline.abort(reason)
     reject(new OperationCancelled(reason))
   }
   const caller = new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => detach(reject, options.timeoutError()), options.timeoutMs)
-    const onExternal = (): void => { detach(reject, combined.signal.reason) }
+    callerTimer = setTimeout(() => detach(reject, options.timeoutError()), options.timeoutMs)
+    onExternal = (): void => { detach(reject, combined.signal.reason) }
     options.external?.addEventListener('abort', onExternal, { once: true })
     void (async (): Promise<void> => {
       try {
         const value = await start(combined.signal)
         workState = 'fulfilled'
-        clearTimeout(timer)
-        options.external?.removeEventListener('abort', onExternal)
+        if (callerTimer !== undefined) clearTimeout(callerTimer)
+        if (onExternal !== undefined) options.external?.removeEventListener('abort', onExternal)
         // A detached caller owns nothing anymore; a live caller decides via release().
         if (detached) combined.cleanup()
         if (detached) lateFulfilled = value
@@ -977,8 +995,8 @@ function startBoundedOperation<T>(
         notifySettled?.()
       } catch (error) {
         workState = 'rejected'
-        clearTimeout(timer)
-        options.external?.removeEventListener('abort', onExternal)
+        if (callerTimer !== undefined) clearTimeout(callerTimer)
+        if (onExternal !== undefined) options.external?.removeEventListener('abort', onExternal)
         if (detached) combined.cleanup()
         if (detached) lateRejected = error
         else reject(error)

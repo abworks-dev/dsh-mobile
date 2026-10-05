@@ -99,6 +99,100 @@ describe('mobile extension registry', () => {
     vi.useRealTimers()
   })
 
+  it('never dispatches run after cancellation during input parsing', async () => {
+    vi.useFakeTimers()
+    const context = new Context(); contexts.push(context)
+    const service = new MobileAccessService(context)
+    let resolveParse: ((value: unknown) => void) | undefined
+    let ran = false
+    service.registerExtension({
+      schemaVersion: 1, id: 'parse-cancel', name: 'ParseCancel', version: '1.0.0',
+      actions: {
+        deferred: {
+          timeoutMs: 50,
+          input: () => new Promise(resolve => { resolveParse = resolve }),
+          run: () => { ran = true; return 'x' },
+        },
+        ok: { run: async () => 'fine' },
+      },
+    })
+    const base = { deviceId: 'device', signal: new AbortController().signal }
+    const timed = service.invoke('parse-cancel', 'deferred', {}, base)
+    const timedRejected = expect(timed).rejects.toMatchObject({ code: 'extension_action_timeout' })
+    await vi.advanceTimersByTimeAsync(50)
+    await timedRejected
+    resolveParse?.({})
+    await vi.advanceTimersByTimeAsync(1)
+    expect(ran).toBe(false)
+    await expect(service.invoke('parse-cancel', 'ok', {}, base)).resolves.toBe('fine')
+    const caller = new AbortController()
+    const cancelledParse = service.invoke('parse-cancel', 'deferred', {}, { deviceId: 'device', signal: caller.signal })
+    const cancelledRejected = expect(cancelledParse).rejects.toThrow('gone')
+    caller.abort(new Error('gone'))
+    await cancelledRejected
+    resolveParse?.({})
+    await vi.advanceTimersByTimeAsync(1)
+    expect(ran).toBe(false)
+    vi.useRealTimers()
+  })
+
+  it('disposes late route results defensively after detachment', async () => {
+    const unhandled: unknown[] = []
+    const onUnhandled = (reason: unknown): void => { unhandled.push(reason) }
+    process.on('unhandledRejection', onUnhandled)
+    try {
+      vi.useFakeTimers()
+      const context = new Context(); contexts.push(context)
+      const service = new MobileAccessService(context)
+      let failing: PassThrough | undefined
+      service.registerExtension({
+        schemaVersion: 1, id: 'late-null', name: 'LateNull', version: '1.0.0',
+        routes: [
+          { method: 'GET', path: 'null-late', timeoutMs: 50, handle: () => new Promise(resolve => { setTimeout(() => resolve(null as never), 100) }) },
+        ],
+      })
+      service.registerExtension({
+        schemaVersion: 1, id: 'late-failing', name: 'LateFailing', version: '1.0.0',
+        routes: [
+          { method: 'GET', path: 'failing-stream', timeoutMs: 50, handle: () => new Promise(resolve => { setTimeout(() => { failing = new PassThrough({ destroy(_error, callback) { callback(new Error('destroy failed')) } }); resolve({ body: failing }) }, 100) }) },
+        ],
+      })
+      const baseRequest = { method: 'GET', pathname: '', query: new URLSearchParams(), headers: {}, body: new Uint8Array(), deviceId: 'device', signal: new AbortController().signal }
+      const nullLate = service.route('late-null', 'GET', '/null-late', { ...baseRequest, pathname: '/null-late' })
+      const nullRejected = expect(nullLate).rejects.toMatchObject({ code: 'extension_route_timeout' })
+      await vi.advanceTimersByTimeAsync(50)
+      await nullRejected
+      const failingCall = service.route('late-failing', 'GET', '/failing-stream', { ...baseRequest, pathname: '/failing-stream' })
+      const failingRejected = expect(failingCall).rejects.toMatchObject({ code: 'extension_route_timeout' })
+      await vi.advanceTimersByTimeAsync(50)
+      await failingRejected
+      await vi.advanceTimersByTimeAsync(60)
+      expect(unhandled).toEqual([])
+      expect(failing?.destroyed).toBe(true)
+      vi.useRealTimers()
+    } finally {
+      process.off('unhandledRejection', onUnhandled)
+    }
+  })
+
+  it('clears caller-wait resources when an operation is externally cancelled', async () => {
+    vi.useFakeTimers()
+    const context = new Context(); contexts.push(context)
+    const service = new MobileAccessService(context)
+    service.registerExtension({
+      schemaVersion: 1, id: 'long-hang', name: 'LongHang', version: '1.0.0',
+      actions: { hang: { timeoutMs: 300_000, run: () => new Promise(() => {}) } },
+    })
+    const caller = new AbortController()
+    const call = service.invoke('long-hang', 'hang', {}, { deviceId: 'device', signal: caller.signal })
+    const rejected = expect(call).rejects.toThrow('gone')
+    caller.abort(new Error('gone'))
+    await rejected
+    await vi.advanceTimersByTimeAsync(0)
+    expect(vi.getTimerCount()).toBe(0)
+    vi.useRealTimers()
+  })
+
   it('bounds hanging route handlers while keeping resolved stream lifetimes untouched', async () => {
     vi.useFakeTimers()
     const context = new Context(); contexts.push(context)
@@ -184,6 +278,7 @@ describe('mobile extension registry', () => {
     const caller = new AbortController()
     const cancelled = service.invoke('abandoned-cancel', 'hang-cancel', {}, { deviceId: 'device', signal: caller.signal })
     const cancelledRejected = expect(cancelled).rejects.toThrow('caller went away')
+    await vi.advanceTimersByTimeAsync(0)  // let the action start before cancelling it
     caller.abort(new Error('caller went away'))
     await cancelledRejected
     expect(observedCancel?.aborted).toBe(true)
