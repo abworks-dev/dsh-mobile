@@ -590,8 +590,25 @@ const BROWSER_TOUCH_PRIMARY_QUERY = '(hover: none), (pointer: coarse)'
 /** The stock composer editor a phone-browser Enter may keep as a native line break. */
 export const BROWSER_COMPOSER_EDITOR_QUERY = '[data-composer-input][contenteditable="true"]'
 
+interface ComposerNativeBridgeIndicators {
+  readonly __DSH_MOBILE_NATIVE__?: unknown
+  readonly dshMobileNative?: unknown
+}
+
+/**
+ * Whether the App adapter or its earlier origin-scoped WebMessage channel owns Enter.
+ * @param view - the page's current native bridge indicators.
+ * @returns true without assuming that native keyboard state is already available.
+ */
+export function nativeAppOwnsComposerEnter(view: ComposerNativeBridgeIndicators): boolean {
+  const channel = view.dshMobileNative
+  return view.__DSH_MOBILE_NATIVE__ !== undefined
+    || (typeof channel === 'object' && channel !== null && 'postMessage' in channel
+      && typeof channel.postMessage === 'function')
+}
+
 interface BrowserSoftEnterContext {
-  /** Whether the Android App adapter owns Enter translation through native keyboard proof. */
+  /** Whether the Android App reserves Enter translation for native keyboard proof. */
   readonly appBridge: boolean
   /** Whether the touch-primary device hint currently matches. */
   readonly browserTouch: boolean
@@ -848,12 +865,10 @@ export function installNativeMobileSurface(backServices: NativeMobileBackService
       return token
     })
   }
-  // The App adapter gate is evaluated per keydown: the adapter lands at onLoaded, after
-  // this surface mounted, so an install-time read would keep the App on the looser
-  // browser hint forever. `inputmode` is likewise read live — the withheld editors of the
-  // navigation/Add-menu flows must never translate an Enter.
+  // The origin-scoped App channel exists before its onLoaded adapter. Neither
+  // presence proves a soft keyboard; native keyboard state remains authoritative.
   const disposeBrowserComposerSoftEnter = bindBrowserComposerSoftEnter(document, (editor, composerCard) => ({
-    appBridge: window.__DSH_MOBILE_NATIVE__ !== undefined,
+    appBridge: nativeAppOwnsComposerEnter(window),
     editable: editor.isConnected && editor.getAttribute('contenteditable') === 'true'
       && editor.getAttribute('aria-disabled') !== 'true' && editor.getAttribute('aria-haspopup') !== 'menu'
       && composerCard.getAttribute('aria-busy') !== 'true' && editor.getAttribute('inputmode') !== 'none',

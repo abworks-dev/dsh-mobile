@@ -222,9 +222,11 @@ Revoking a device permanently deletes its durable record and token digest instea
 
 Version 0.5.3 includes the independently switchable `dsh-mobile-question-fixes` component, enabled by default. Disable it in DSH's plugin component list to restore the stock card immediately. Long questions, options, and footer actions share one bounded scroll area, and collapsed titles show up to two lines. Touch Enter retains its newline in phone browsers; the Android app applies this behavior only when its software keyboard is open and no hardware keyboard is connected. DSH continues to own answer drafts, with no additional copy in browser localStorage.
 
-The main conversation composer keeps the same touch-Enter contract in phone browsers: Enter inserts a newline once a draft exists (an empty draft keeps DSH's own no-op), IME composition, open menus and modified Enters stay under DSH's control, and desktop keyboards are unchanged — Cmd/Ctrl+Enter still sends.
+In development for the next release: in touch-primary browsers, plain Enter inserts a newline in the main conversation composer when a draft exists; an empty draft remains a no-op. DSH continues to handle IME composition, open menus and modified shortcuts such as Cmd/Ctrl+Enter. Non-touch desktop behavior is unchanged, but an external keyboard on a touch-primary device also uses plain Enter for newlines.
 
 The mobile adaptation keeps DSH's existing Workspace, task-management, terminal, and file-panel entry points instead of isolating third-party plugin content in a separate page. The wide-layout screenshot below shows the Android app in a wide viewport. The app adapts to the available width: phones use drawers and overlays, while wide screens use side-by-side panels; both layouts expose the same features and connection methods. DSH still loads third-party plugins itself—the mobile layer only adapts layout and access, without modifying DeepSeek Harness source.
+
+In development for the next release: selecting a panel such as Plugins or Schedules closes the narrow-screen sidebar drawer. A reserved navigation row above the panel provides “Back to conversation” without covering Save or other actions or opening the software keyboard.
 
 Compatibility and WebSocket rules:
 

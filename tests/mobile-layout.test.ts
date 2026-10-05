@@ -1074,9 +1074,10 @@ describe('dedicated mobile layout boot', () => {
     expect(source).toContain('props.controller.selectPanel(null)')
     expect(source).toMatch(/panelInfo\.activePanelId !== null && !wideViewport/)
     expect(MOBILE_LAYOUT_STYLES).toContain('.dshm-panelBack{')
-    // A 44px touch target floating above panel content, below the drawer.
-    expect(MOBILE_LAYOUT_STYLES).toMatch(/\.dshm-panelBack\{[^}]*width:44px/)
-    expect(MOBILE_LAYOUT_STYLES).toMatch(/\.dshm-panelBack\{[^}]*z-index:60/)
+    expect(MOBILE_LAYOUT_STYLES).toMatch(/\.dshm-panelBack\{[^}]*min-height:48px/)
+    expect(MOBILE_LAYOUT_STYLES).toMatch(/\.dshm-panelNav\{[^}]*flex-shrink:0/)
+    expect(MOBILE_LAYOUT_STYLES).toMatch(/\.dshm-mainContent\{[^}]*flex:1/)
+    expect(MOBILE_LAYOUT_STYLES).not.toMatch(/\.dshm-panelBack\{[^}]*position:(?:absolute|fixed)/)
     // Keyboard users on a narrow desktop need a visible focus ring too.
     expect(MOBILE_LAYOUT_STYLES).toMatch(/\.dshm-panelBack:focus-visible\{[^}]*outline/)
     for (const language of ['en', 'zh', 'it'] as const) {
@@ -1384,21 +1385,17 @@ describe('composer soft-keyboard policy', () => {
     expect(source.indexOf('isSessionRowNavigation(event.target)')).toBeLessThan(source.indexOf('if (viewportIsWide()) return', source.indexOf('const closeDrawerAfterSessionAction')))
   })
 
-  it('keeps the soft keyboard down when the panel back button returns to the conversation', () => {
-    // Returning from a panel remounts the conversation, whose composer
-    // autofocus summons the iOS keyboard over the chat the user just reopened;
-    // the button must arm the same suppression window session rows use.
+  it('shares the composer autofocus policy across every panel return', () => {
     const source = readFileSync(new URL('../src/mobile-layout.ts', import.meta.url), 'utf8')
-    const button = source.indexOf("className: 'dshm-panelBack'")
-    expect(button).toBeGreaterThan(-1)
-    const deselect = source.indexOf('props.controller.selectPanel(null)', button)
-    // The slice ends at the deselect call, so anything it contains precedes it.
-    const handler = source.slice(button, deselect)
-    expect(deselect).toBeGreaterThan(button)
-    expect(handler).toContain('TOUCH_PRIMARY_QUERY')
-    expect(handler).toContain('suppressComposerUntil.current')
-    // The window is armed before the deselect call, not merely present.
-    expect(source.indexOf('suppressComposerUntil.current', button)).toBeLessThan(deselect)
+    const start = source.indexOf('useLayoutEffect(() => {')
+    const end = source.indexOf('}, [state.panelInfo.activePanelId])', start)
+    expect(start).toBeGreaterThan(-1)
+    expect(end).toBeGreaterThan(start)
+    const effect = source.slice(start, end)
+    expect(effect).toContain('previousPanelId.current')
+    expect(effect).toContain('TOUCH_PRIMARY_QUERY')
+    expect(effect).toContain('suppressComposerUntil.current = performance.now() + 500')
+    expect(effect.indexOf('restoreNavigationIme()')).toBeLessThan(effect.indexOf('suppressComposerUntil.current ='))
   })
 
   it('recognizes another Session row without treating the current row or its menu as navigation', () => {

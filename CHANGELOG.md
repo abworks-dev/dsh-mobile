@@ -2,9 +2,13 @@
 
 Notable changes to DSH Mobile are recorded here. GitHub Releases remain the source for downloadable packages and complete generated commit notes.
 
+## Unreleased
+
+- In the main conversation composer of touch-primary browsers, plain Enter inserts a newline when a draft exists; an empty draft remains a no-op. Preserve IME composition, open menus and modified Enter shortcuts under DSH's control. Non-touch desktop behavior is unchanged, but an external keyboard on a touch-primary browser also uses plain Enter for newlines. Thanks @chintoleung for [PR #161](https://github.com/saya-ch/dsh-mobile/pull/161).
+- Dismiss the narrow-screen drawer after selecting a sidebar panel such as Plugins or Schedules. Add a reserved navigation row above the panel to return to the conversation without covering panel actions or opening the software keyboard. Wide docked sidebars retain their existing layout. Thanks @chintoleung for [PR #162](https://github.com/saya-ch/dsh-mobile/pull/162).
+
 ## 0.5.5 - 2026-10-04
 
-- Dismiss the narrow-screen drawer when a sidebar panel row (Plugins, Schedules) is selected, and float a one-tap back button on phone-width panel surfaces that returns to the conversation through the stock `selectPanel(null)` path without raising the soft keyboard. Docked desktop-width sidebars and Android's Back ordering are unchanged.
 - Extend the mobile editable font floor to body-level model-search portals and the pairing page, while keeping desktop text and composer-dock spacing unchanged. Thanks @chintoleung for [PR #158](https://github.com/saya-ch/dsh-mobile/pull/158).
 - Let Android Back return from the model list to its root menu, then close that menu through DSH's existing Escape handling, without selecting a model or submitting the draft.
 - Keep the live Android WebView through rotation, window resizing and keyboard-availability changes, preserving the page, reference chips and unsent images. Locale, font-scale and system-theme changes retain Android's normal Activity recreation.
