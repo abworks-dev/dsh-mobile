@@ -129,6 +129,73 @@ describe('gateway extension namespace', () => {
     expect(invalidContentControl.status).toBe(500); expect(JSON.parse(invalidContentControl.body)).toEqual({ error: 'invalid_route_response' })
   })
 
+  it('releases extension request slots when callers disconnect while hosts hang', async () => {
+    const upstream = createServer((_, response) => { response.writeHead(200); response.end('ok') })
+    const upstreamPort = await listen(upstream)
+    cleanups.push(async () => { upstream.closeAllConnections(); await new Promise<void>(resolve => upstream.close(() => resolve())) })
+    const directory = await mkdtemp(join(tmpdir(), 'dsh-mobile-extension-slot-release-'))
+    cleanups.push(() => rm(directory, { recursive: true, force: true }))
+    const context = new Context(); cleanups.push(() => context.fiber.dispose())
+    const service = new MobileAccessService(context)
+    service.registerExtension({
+      schemaVersion: 1, id: 'stuck', name: 'Stuck', version: '1.0.0',
+      actions: { never: { timeoutMs: 300_000, run: () => new Promise(() => {}) } },
+      routes: [{ method: 'GET', path: 'hang', timeoutMs: 300_000, handle: () => new Promise<never>(() => {}) }],
+    })
+    service.registerExtension({
+      schemaVersion: 1, id: 'healthy', name: 'Healthy', version: '1.0.0',
+      actions: { ok: { run: async () => ({ fine: true }) } },
+      routes: [{ method: 'GET', path: 'fine', handle: async () => ({ contentType: 'application/json', body: JSON.stringify({ fine: true }) }) }],
+    })
+    const config = parseGatewayConfig({
+      listenHost: '127.0.0.1', listenPort: 0,
+      upstreamOrigin: `http://127.0.0.1:${String(upstreamPort)}`,
+      publicAuthorities: ['127.0.0.1'], allowedCidrs: ['127.0.0.0/8'],
+      stateFile: join(directory, 'devices.json'), tls: { mode: 'disabled' },
+      maxActiveRequests: 1, maxBodyBytes: 1024,
+    })
+    const gateway = new MobileAccessGateway(config, new MemoryDeviceStore(), service)
+    await gateway.start(); cleanups.push(() => gateway.close())
+    const opened = await gateway.access.openPairing()
+    const origin = gateway.address().origin
+    const paired = await request(gateway.address().port, '/mobile-access/auth/pair', {
+      method: 'POST',
+      headers: { host: new URL(origin).host, origin, 'sec-fetch-site': 'same-origin', 'content-type': 'application/json' },
+      body: JSON.stringify({ token: opened.token }),
+    })
+    expect(paired.status).toBe(201)
+    const session = cookie(paired.headers, SESSION_COOKIE); const csrf = JSON.parse(paired.body) as { csrfToken: string }
+    const headers = {
+      host: new URL(origin).host, origin, 'sec-fetch-site': 'same-origin', cookie: session,
+      [CSRF_HEADER]: csrf.csrfToken, 'content-type': 'application/json',
+    }
+    const body = '{}'
+    const hungAction = pendingRequest(gateway.address().port, '/mobile-access/extensions/stuck/actions/never', 'POST', {
+      ...headers, 'content-length': String(Buffer.byteLength(body)),
+    })
+    cleanups.push(async () => { hungAction.outgoing.destroy() })
+    void hungAction.result.catch(() => undefined)
+    hungAction.outgoing.end(body)
+    await new Promise(resolve => setTimeout(resolve, 50))
+    const busy = await request(gateway.address().port, '/mobile-access/extensions/healthy/actions/ok', { method: 'POST', headers, body })
+    expect(busy.status).toBe(429)
+    expect(JSON.parse(busy.body)).toEqual({ error: 'busy' })
+    hungAction.outgoing.destroy()
+    await new Promise(resolve => setTimeout(resolve, 50))
+    const healthyAction = await request(gateway.address().port, '/mobile-access/extensions/healthy/actions/ok', { method: 'POST', headers, body })
+    expect(healthyAction.status).toBe(200)
+    expect(JSON.parse(healthyAction.body)).toEqual({ fine: true })
+    const hungRoute = pendingRequest(gateway.address().port, '/mobile-access/extensions/stuck/routes/hang', 'GET', headers)
+    cleanups.push(async () => { hungRoute.outgoing.destroy() })
+    void hungRoute.result.catch(() => undefined)
+    await new Promise(resolve => setTimeout(resolve, 50))
+    hungRoute.outgoing.destroy()
+    await new Promise(resolve => setTimeout(resolve, 50))
+    const healthyRoute = await request(gateway.address().port, '/mobile-access/extensions/healthy/routes/fine', { headers })
+    expect(healthyRoute.status).toBe(200)
+    expect(JSON.parse(healthyRoute.body)).toEqual({ fine: true })
+  })
+
   it('routes old mobile UI requests to their retained Host and asset generation', async () => {
     const upstream = createServer((_, response) => { response.writeHead(200); response.end('ok') })
     const upstreamPort = await listen(upstream)

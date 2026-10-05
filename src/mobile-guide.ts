@@ -74,6 +74,7 @@ const MOBILE_CUSTOMIZATION_GUIDE_BODY = `你在为用户定制 DSH Mobile 的手
    - 目录：$DSH_HOME/mobile-access/extensions/<id>/，id 用小写字母数字和连字符（如 media-remote）
    - extension.json：{"schemaVersion":1,"id":"<id>","name":"显示名","version":"0.1.0","description":"说明"}
    - host.mjs：电脑端 Node.js 代码（可信本地代码，可读写文件、执行命令）。导出默认函数 (api) => { ... }，用 api.action('名称', { input, run }) 注册动作、api.route({ method, path, handle }) 注册路由、api.effect(fn) 注册清理。input 可以直接使用 api.schema.object(...) 等 Schemastery schema，也可以传入带 parse(value) 的适配器；两种形式都会在动作执行前校验并规范化输入。
+   - 动作与路由的执行有时间预算：默认 30 秒（输入校验也计入），可用 api.action('名称', { input, run, timeoutMs }) 或 api.route({ ..., timeoutMs }) 按操作覆盖（1–300000 的整数毫秒）。超时后调用方收到 500 extension_action_timeout / extension_route_timeout；超时只表示调用方不再等待，底层代码可能仍在运行并已产生副作用，请在 run / handle 中响应 signal 实现协作式取消。若某扩展存在已超时但仍未结束的操作，后续对该扩展的新调用会收到 503 extension_busy，直到该操作真正结束。
    - mobile.js：手机端脚本，用 window.dshMobile.define({ apiVersion:1, id:'<id>', activate(api) { ... } })，activate 返回清理函数
    - mobile.css：手机端样式（可选）
    - assets/：手机端静态资源（可选）
@@ -82,6 +83,7 @@ const MOBILE_CUSTOMIZATION_GUIDE_BODY = `你在为用户定制 DSH Mobile 的手
 
 安全约束：
 - host.mjs 拥有电脑用户的完整权限，绝不能放入不可信代码，也不要让手机端无条件执行任意命令
+- host.mjs 的同步阻塞（如 while (true) {} 或长时间同步循环）会卡死整个电脑端网关进程，超时与取消机制都无法打断；绝不编写同步阻塞代码
 - 所有改动只限 $DSH_HOME/mobile-access/，不要动 DeepSeek Harness 源码
 
 完成前请自检：
