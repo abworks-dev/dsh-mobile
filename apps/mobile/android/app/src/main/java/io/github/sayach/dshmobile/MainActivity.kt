@@ -6,6 +6,7 @@ import android.app.Activity
 import android.app.AlertDialog
 import android.content.ActivityNotFoundException
 import android.content.ClipData
+import android.content.ComponentName
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.ColorStateList
@@ -481,6 +482,9 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER_VERTICAL
         }
         heading.addView(textView(R.string.paired_devices_title, 30f, Typeface.BOLD), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        heading.addView(toolbarIconButton(R.drawable.ic_launcher_whale, R.string.icon_settings).apply {
+            setOnClickListener { showIconSettings() }
+        }, LinearLayout.LayoutParams(dp(48), dp(48)))
         heading.addView(toolbarIconButton(R.drawable.ic_settings, R.string.launch_settings).apply {
             setOnClickListener { showLaunchSettings() }
         }, LinearLayout.LayoutParams(dp(48), dp(48)))
@@ -826,6 +830,39 @@ class MainActivity : Activity() {
             .show()
     }
 
+    /** Flip the launcher icon between the DSH whale mascot and the official whale mark. */
+    private fun currentAppIcon(): String = preferences.getString(PREFERENCE_APP_ICON, APP_ICON_WHALE_GIRL) ?: APP_ICON_WHALE_GIRL
+
+    private fun applyAppIcon(icon: String) {
+        preferences.edit().putString(PREFERENCE_APP_ICON, icon).apply()
+        val pm = packageManager
+        val enable = { component: ComponentName -> pm.setComponentEnabledSetting(component, PackageManager.COMPONENT_ENABLED_STATE_ENABLED, PackageManager.DONT_KILL_APP) }
+        val disable = { component: ComponentName -> pm.setComponentEnabledSetting(component, PackageManager.COMPONENT_ENABLED_STATE_DISABLED, PackageManager.DONT_KILL_APP) }
+        val whaleGirl = ComponentName(this, "$packageName.LauncherWhaleGirl")
+        val official = ComponentName(this, "$packageName.LauncherOfficialWhale")
+        if (icon == APP_ICON_OFFICIAL_WHALE) {
+            enable(official)
+            disable(whaleGirl)
+        } else {
+            enable(whaleGirl)
+            disable(official)
+        }
+        deviceListStatus?.setText(R.string.icon_settings_saved)
+    }
+
+    private fun showIconSettings() {
+        val values = arrayOf(getString(R.string.icon_choice_whale_girl), getString(R.string.icon_choice_official_whale))
+        val selected = if (currentAppIcon() == APP_ICON_OFFICIAL_WHALE) 1 else 0
+        AlertDialog.Builder(this)
+            .setTitle(R.string.icon_settings)
+            .setSingleChoiceItems(values, selected) { dialog, which ->
+                dialog.dismiss()
+                val icon = if (which == 1) APP_ICON_OFFICIAL_WHALE else APP_ICON_WHALE_GIRL
+                if (icon != currentAppIcon()) applyAppIcon(icon)
+            }
+            .setNegativeButton(R.string.cancel, null)
+            .show()
+    }
     private fun connectPairedDevice(snapshot: PairedDeviceRecord) {
         val device = pairedDeviceStore.load().firstOrNull { it.key == snapshot.key } ?: return
         if (device.status == PairedDeviceStatus.REVOKED
@@ -2694,6 +2731,9 @@ class MainActivity : Activity() {
         const val PREFERENCE_NEARBY_PERMISSION_LIMITED = "nearby_permission_limited"
         const val PREFERENCE_NOTIFICATION_PERMISSION_REQUESTED = "notification_permission_requested"
         const val PREFERENCE_WEB_CHROME_COLOR = "web_chrome_color"
+        const val PREFERENCE_APP_ICON = "app_icon"
+        const val APP_ICON_WHALE_GIRL = "whale_girl"
+        const val APP_ICON_OFFICIAL_WHALE = "official_whale"
         const val STATE_SHOWING_SETUP = "showing_setup"
         const val STATE_ACCESS_MODE = "access_mode"
         const val STATE_NATIVE_BRIDGE = "native_bridge"

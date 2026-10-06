@@ -171,4 +171,8 @@
     <string name="save_and_connect">Salva e connetti</string>
     <string name="device_revoked_message">Questo computer ha rimosso l’app dai dispositivi abbinati.</string>
     <string name="back_page_unresponsive">La pagina non risponde. Riprova a tornare indietro.</string>
+    <string name="icon_settings">Icona dell\'app</string>
+    <string name="icon_settings_saved">Icona aggiornata. Alcuni launcher potrebbero aggiornarsi dopo un attimo.</string>
+    <string name="icon_choice_whale_girl">Mascotte balena DSH</string>
+    <string name="icon_choice_official_whale">Balena ufficiale</string>
 </resources>

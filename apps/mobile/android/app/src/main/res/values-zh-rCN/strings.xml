@@ -169,4 +169,8 @@
     <string name="save_and_connect">保存并连接</string>
     <string name="device_revoked_message">这台电脑已从电脑端的配对设备中移除本 App。</string>
     <string name="back_page_unresponsive">页面暂未响应，请再试一次返回。</string>
+    <string name="icon_settings">应用图标</string>
+    <string name="icon_settings_saved">应用图标已更新。部分桌面启动器可能需要片刻刷新。</string>
+    <string name="icon_choice_whale_girl">DSH 鲸鱼娘</string>
+    <string name="icon_choice_official_whale">官方鲸鱼</string>
 </resources>

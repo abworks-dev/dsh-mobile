@@ -170,4 +170,8 @@
     <string name="save_and_connect">Save and connect</string>
     <string name="device_revoked_message">This computer removed the app from its paired devices.</string>
     <string name="back_page_unresponsive">Page is not responding. Try Back again.</string>
+    <string name="icon_settings">App icon</string>
+    <string name="icon_settings_saved">App icon updated. Some launchers may take a moment to refresh.</string>
+    <string name="icon_choice_whale_girl">DSH whale mascot</string>
+    <string name="icon_choice_official_whale">Official whale</string>
 </resources>
