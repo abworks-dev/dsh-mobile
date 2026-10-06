@@ -15,6 +15,18 @@ const stateFile = join(tmpdir(), 'dsh-mobile-access-config-test.json')
 const controlFile = join(tmpdir(), 'dsh-mobile-access-control-test.json')
 
 describe('gateway configuration', () => {
+  it('separates transport timeouts from optional authenticated API response timeouts', () => {
+    const base = { stateFile, controlFile, initiallyEnabled: false, tls: { mode: 'disabled' as const } }
+    expect(parseGatewayConfig(base)).toMatchObject({ upstreamTimeoutMs: 30_000, upstreamApiTimeoutMs: 0 })
+    for (const upstreamApiTimeoutMs of [0, 1, 600_000, 2_147_483_647]) {
+      expect(parseGatewayConfig(Config({ ...base, upstreamApiTimeoutMs })).upstreamApiTimeoutMs).toBe(upstreamApiTimeoutMs)
+    }
+    for (const upstreamApiTimeoutMs of [-1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, '1000', 2_147_483_648]) {
+      expect(() => parseGatewayConfig({ ...base, upstreamApiTimeoutMs })).toThrow(/upstreamApiTimeoutMs must be an integer/u)
+    }
+    expect(() => parseGatewayConfig({ ...base, upstreamTimeoutMs: 0 })).toThrow(/upstreamTimeoutMs/u)
+  })
+
   it('keeps WebSocket compression opt-in and freezes validated paths and budgets', () => {
     const base = { stateFile, controlFile, initiallyEnabled: false, tls: { mode: 'disabled' as const } }
     expect(parseGatewayConfig(base).websocketCompression.paths).toEqual([])

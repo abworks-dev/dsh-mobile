@@ -10,6 +10,7 @@ import { generate } from 'selfsigned'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Config, parseGatewayConfig, type PluginConfig } from '../src/config.js'
 import { parseCidr, RequestTrustPolicy } from '../src/network.js'
+import * as network from '../src/network.js'
 import { apply, inject, originGatewayConfig, remoteGatewayConfig, settleCleanupSteps, upstreamAuthenticatedUrl } from '../src/plugin.js'
 import { parseOriginSettings } from '../src/origin-proxy-config.js'
 import { parseFrpSettings } from '../src/frp-config.js'
@@ -21,6 +22,7 @@ const contexts: Context[] = []
 const temporaryDirectories: string[] = []
 
 afterEach(async () => {
+  vi.restoreAllMocks()
   vi.unstubAllGlobals()
   await Promise.all(contexts.splice(0).map(context => context.fiber.dispose()))
   await Promise.all(temporaryDirectories.splice(0).map(directory => rm(directory, { recursive: true, force: true })))
@@ -804,6 +806,7 @@ describe('attach-mode control routes', () => {
   })
 
   it('exposes the self-signed certificate state and reachability on demand', async () => {
+    const probe = vi.spyOn(network, 'probeTcpReachable').mockResolvedValue(false)
     const mounted = await mount()
     const configured = await invoke(mounted.route, 'POST', '/api/mobile-access/remote/frp/configure', JSON.stringify({
       serverAddress: '127.0.0.1',
@@ -830,9 +833,26 @@ describe('attach-mode control routes', () => {
       inbound: { listenHost: '127.0.0.1', allowedCidrs: ['127.0.0.0/8'] },
     })
     expect((parsed.frpSelfCheck.certificate as Record<string, unknown>).state).toBe('unknown')
+    expect(probe).toHaveBeenCalledWith('127.0.0.1', 1)
+    expect(probe).toHaveBeenCalledWith('8.8.8.8', 33_080)
     // Never leak the token, key material, or private paths through the self-check.
     expect(check.body).not.toContain('0123456789abcdef0123456789abcdef')
     expect(check.body).not.toContain('ca-key.pem')
+  })
+
+  it('checks the public-certificate HTTPS entry instead of the self-signed port', async () => {
+    const probe = vi.spyOn(network, 'probeTcpReachable').mockImplementation(async (host, port) => host === '8.8.8.8' && port === 443)
+    const mounted = await mount()
+    const configured = await invoke(mounted.route, 'POST', '/api/mobile-access/remote/frp/configure', JSON.stringify({
+      serverAddress: '127.0.0.1', serverPort: 1, token: '0123456789abcdef0123456789abcdef',
+      publicOrigin: 'https://8.8.8.8', mode: 'attach', entryTls: 'public-ip-cert', vhostHttpPort: 7080,
+    }))
+    expect(configured.status).toBe(200)
+    const check = await invoke(mounted.route, 'GET', '/api/mobile-access/remote/frp/self-check')
+    expect(check.status).toBe(200)
+    expect(JSON.parse(check.body).frpSelfCheck).toMatchObject({ frpsReachable: false, entryReachable: true })
+    expect(probe).toHaveBeenCalledWith('8.8.8.8', 443)
+    expect(probe).not.toHaveBeenCalledWith('127.0.0.1', 33_080)
   })
 
   it('purges the FRP-owned CA key, leaf key, and identity marker through the control route', async () => {

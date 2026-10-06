@@ -409,7 +409,12 @@ function validateDefinition(definition: MobileExtensionDefinition): MobileExtens
     }
     actionNames.add(name)
     const actionTimeout = operationTimeout(action.timeoutMs, 'invalid_action')
-    actions[name] = { ...action, ...(actionTimeout === undefined ? {} : { timeoutMs: actionTimeout }) }
+    const actionInput = action.input
+    actions[name] = Object.freeze({
+      ...(actionInput === undefined ? {} : { input: actionInput }),
+      run: action.run.bind(action),
+      ...(actionTimeout === undefined ? {} : { timeoutMs: actionTimeout }),
+    })
   }
   const routeNames = new Set<string>()
   const routes = (definition.routes ?? []).map(route => {
@@ -417,7 +422,11 @@ function validateDefinition(definition: MobileExtensionDefinition): MobileExtens
     const method = route.method.toUpperCase()
     if (!['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) throw new MobileExtensionError('invalid_route', 'unsupported extension route method')
     const routeTimeout = operationTimeout(route.timeoutMs, 'invalid_route')
-    const normalized: MobileHostRoute = { ...route, method, path: normalizeRoutePath(route.path), ...(routeTimeout === undefined ? {} : { timeoutMs: routeTimeout }) }
+    const normalized: MobileHostRoute = Object.freeze({
+      method, path: normalizeRoutePath(route.path), ...(route.kind === undefined ? {} : { kind: route.kind }),
+      handle: route.handle.bind(route),
+      ...(routeTimeout === undefined ? {} : { timeoutMs: routeTimeout }),
+    })
     const key = routeKey(normalized)
     if (routeNames.has(key)) throw new MobileExtensionError('duplicate_route', `duplicate route ${key}`)
     routeNames.add(key)
@@ -467,8 +476,6 @@ export class MobileAccessService extends Service {
   private readonly local = new Map<string, ActiveLocalExtension>()
   private readonly retired = new Map<string, RetiredLocalExtension>()
   private readonly failures = new Map<string, string>()
-  /** In-flight operations per extension id; survives generation replacement. */
-  private readonly outstanding = new Map<string, number>()
   /** Extensions with caller-detached, still-unresolved operations. */
   private readonly abandoned = new Map<string, number>()
   private readonly contentListeners = new Set<() => void>()
@@ -595,11 +602,7 @@ export class MobileAccessService extends Service {
 
   /** Account for one operation until its underlying work actually settles. */
   private trackOperation<T>(id: string, operation: BoundedOperation<T>): void {
-    this.outstanding.set(id, (this.outstanding.get(id) ?? 0) + 1)
     operation.settled.then(() => {
-      const outstanding = (this.outstanding.get(id) ?? 1) - 1
-      if (outstanding <= 0) this.outstanding.delete(id)
-      else this.outstanding.set(id, outstanding)
       if (operation.detached()) {
         const remaining = (this.abandoned.get(id) ?? 1) - 1
         if (remaining <= 0) this.abandoned.delete(id)
@@ -615,10 +618,11 @@ export class MobileAccessService extends Service {
     const definition = 'host' in extension ? extension.host : extension
     const action = definition.actions?.[actionName]
     if (action === undefined) throw new MobileExtensionError('action_not_found', 'action not found', 404)
-    const external = 'host' in extension ? combineSignalLifetime(extension.controller.signal, context.signal) : undefined
     // A cancelled invocation must not execute host code or occupy admission accounting.
-    ;(external?.signal ?? context.signal).throwIfAborted()
+    if ('host' in extension) extension.controller.signal.throwIfAborted()
+    context.signal.throwIfAborted()
     this.requireAdmission(id)
+    const external = 'host' in extension ? combineSignalLifetime(extension.controller.signal, context.signal) : undefined
     let operation: BoundedOperation<unknown> | undefined
     try {
       operation = startBoundedOperation(
@@ -667,10 +671,11 @@ export class MobileAccessService extends Service {
         : pathname === candidate.path || pathname.startsWith(`${candidate.path}/`)
     })
     if (route === undefined) throw new MobileExtensionError('route_not_found', 'route not found', 404)
-    const external = 'host' in extension ? combineSignalLifetime(extension.controller.signal, request.signal) : undefined
     // A cancelled request must not execute host code or occupy admission accounting.
-    ;(external?.signal ?? request.signal).throwIfAborted()
+    if ('host' in extension) extension.controller.signal.throwIfAborted()
+    request.signal.throwIfAborted()
     this.requireAdmission(id)
+    const external = 'host' in extension ? combineSignalLifetime(extension.controller.signal, request.signal) : undefined
     let operation: BoundedOperation<MobileRouteResponse> | undefined
     let holdForStream = false
     try {
@@ -883,11 +888,13 @@ function isReadable(value: unknown): value is Readable {
 
 /** Destroy a route response that arrived after its caller detached; must never throw or emit unhandled stream errors. */
 export function disposeLateExtensionResponse(value: unknown): void {
-  if (value === null || typeof value !== 'object') return
-  const body = (value as { readonly body?: unknown }).body
-  if (!isReadable(body)) return
-  body.once('error', () => undefined)
-  try { body.destroy() } catch { /* disposal failures must not escape */ }
+  try {
+    if (value === null || typeof value !== 'object') return
+    const body = (value as { readonly body?: unknown }).body
+    if (!isReadable(body) || typeof body.once !== 'function' || typeof body.destroy !== 'function') return
+    body.once('error', () => undefined)
+    body.destroy()
+  } catch { /* Invalid late results and disposal failures must not escape. */ }
 }
 
 function releaseSignalLifetimeWhenStreamSettles(stream: Readable, cleanup: () => void): void {
@@ -938,8 +945,6 @@ interface BoundedOperation<T> {
   detached(): boolean
   /** The value when the work fulfilled after the caller detached. */
   lateValue(): T | undefined
-  /** The error when the work rejected after the caller detached. */
-  lateError(): unknown
   /** End the per-invocation cancellation lifetime exactly once. */
   release(): void
 }
@@ -961,7 +966,6 @@ function startBoundedOperation<T>(
   let detached = false
   let workState: 'fulfilled' | 'rejected' | undefined
   let lateFulfilled: T | undefined
-  let lateRejected: unknown
   let notifySettled: (() => void) | undefined
   let callerTimer: NodeJS.Timeout | undefined
   let onExternal: (() => void) | undefined
@@ -998,8 +1002,7 @@ function startBoundedOperation<T>(
         if (callerTimer !== undefined) clearTimeout(callerTimer)
         if (onExternal !== undefined) options.external?.removeEventListener('abort', onExternal)
         if (detached) combined.cleanup()
-        if (detached) lateRejected = error
-        else reject(error)
+        if (!detached) reject(error)
         notifySettled?.()
       }
     })()
@@ -1010,7 +1013,6 @@ function startBoundedOperation<T>(
     settled,
     detached: () => detached,
     lateValue: () => (detached && workState === 'fulfilled' ? lateFulfilled : undefined),
-    lateError: () => (detached && workState === 'rejected' ? lateRejected : undefined),
     release: () => { if (!released) { released = true; combined.cleanup() } },
   }
 }

@@ -1,12 +1,12 @@
 import { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
-import { once } from 'node:events'
+import { getEventListeners, once } from 'node:events'
 import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { PassThrough } from 'node:stream'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { combineSignals, EXTENSION_LIMITS, MobileAccessService, MobileExtensionError, parseExtensionManifest } from '../src/extensions.js'
+import { combineSignals, disposeLateExtensionResponse, EXTENSION_LIMITS, MobileAccessService, MobileExtensionError, parseExtensionManifest } from '../src/extensions.js'
 
 const contexts: Context[] = []
 const directories: string[] = []
@@ -27,6 +27,75 @@ async function createExtension(root: string, host: string, script = 'window.dshM
 }
 
 describe('mobile extension registry', () => {
+  it('snapshots operation budgets without changing class-based host method receivers', async () => {
+    vi.useFakeTimers()
+    class Action {
+      #prefix = 'action:'
+      timeoutMs = 50
+      get input(): { parse(value: unknown): unknown } { return { parse: value => String(value) } }
+      run(_context: unknown, value: unknown): Promise<string> {
+        return new Promise(resolve => { setTimeout(() => resolve(this.#prefix + String(value)), 10) })
+      }
+    }
+    class Route {
+      #body = 'route'
+      method = 'GET'
+      path = 'status'
+      timeoutMs = 50
+      handle(): Promise<{ body: string }> {
+        return new Promise(resolve => { setTimeout(() => resolve({ body: this.#body }), 10) })
+      }
+    }
+    const context = new Context(); contexts.push(context)
+    const service = new MobileAccessService(context)
+    const action = new Action()
+    const route = new Route()
+    service.registerExtension({ schemaVersion: 1, id: 'class-host', name: 'ClassHost', version: '1', actions: { echo: action }, routes: [route] })
+    action.timeoutMs = 1
+    route.timeoutMs = 1
+    const base = { deviceId: 'device', signal: new AbortController().signal }
+    const invocation = service.invoke('class-host', 'echo', 42, base)
+    await vi.advanceTimersByTimeAsync(10)
+    await expect(invocation).resolves.toBe('action:42')
+    const routed = service.route('class-host', 'GET', '/status', { ...base, method: 'GET', pathname: '/status', query: new URLSearchParams(), headers: {}, body: new Uint8Array() })
+    await vi.advanceTimersByTimeAsync(10)
+    await expect(routed).resolves.toEqual({ body: 'route' })
+  })
+
+  it('does not attach generation or caller listeners for rejected local-extension dispatches', async () => {
+    vi.useFakeTimers()
+    const root = await mkdtemp(join(tmpdir(), 'dsh-mobile-admission-')); directories.push(root)
+    await createExtension(root, `export default api => {
+      api.action('hang', { timeoutMs: 50, run: () => new Promise(() => {}) })
+      api.action('ping', { run: () => 'pong' })
+      api.route({ method: 'GET', path: 'status', handle: () => ({ body: 'ok' }) })
+    }`)
+    const context = new Context(); contexts.push(context)
+    const service = new MobileAccessService(context)
+    await service.startLocal(root, context)
+    const generation = service.signal('demo')!
+    const caller = new AbortController()
+    const base = { deviceId: 'device', signal: caller.signal }
+    const hanging = service.invoke('demo', 'hang', {}, base)
+    const rejected = expect(hanging).rejects.toMatchObject({ code: 'extension_action_timeout' })
+    await vi.advanceTimersByTimeAsync(50)
+    await rejected
+    const generationListeners = getEventListeners(generation, 'abort').length
+    const callerListeners = getEventListeners(caller.signal, 'abort').length
+    for (let index = 0; index < 12; index++) {
+      await expect(service.invoke('demo', 'ping', {}, base)).rejects.toMatchObject({ code: 'extension_busy' })
+      await expect(service.route('demo', 'GET', '/status', { ...base, method: 'GET', pathname: '/status', query: new URLSearchParams(), headers: {}, body: new Uint8Array() })).rejects.toMatchObject({ code: 'extension_busy' })
+    }
+    expect(getEventListeners(generation, 'abort')).toHaveLength(generationListeners)
+    expect(getEventListeners(caller.signal, 'abort')).toHaveLength(callerListeners)
+    await service.stopLocal()
+  })
+
+  it('ignores malformed late response getters and stream-like values during disposal', () => {
+    expect(() => disposeLateExtensionResponse({ get body() { throw new Error('bad getter') } })).not.toThrow()
+    expect(() => disposeLateExtensionResponse({ body: { pipe() {}, destroy() {} } })).not.toThrow()
+  })
+
   it('validates manifests and rejects duplicate ids', () => {
     expect(parseExtensionManifest({ schemaVersion: 1, id: 'hello-world', name: 'Hello', version: '1.0.0' })).toMatchObject({ id: 'hello-world' })
     expect(() => parseExtensionManifest({ schemaVersion: 1, id: '../escape', name: 'bad', version: '1' })).toThrow(MobileExtensionError)

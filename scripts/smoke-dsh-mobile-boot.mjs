@@ -19,6 +19,10 @@ const injectedFailure = process.argv.includes('--negative-control')
 const blockedRemoteMux = process.argv.includes('--negative-control-mux')
 const missingCompanion = process.argv.includes('--negative-control-companion')
 const compressedWebSocket = process.argv.includes('--compressed-websocket')
+const blockedCompatibility = process.argv.includes('--negative-control-compat')
+const legacyWebView = blockedCompatibility || process.argv.includes('--legacy-webview')
+const compatibilityPath = '/mobile-access/compat.js'
+const compatibilityError = /AbortSignal\.any|Promise\.withResolvers|Iterator.*(?:not defined|not a constructor|not a function)/u
 const excludedClientModules = process.env.DSH_BOOT_SMOKE_EXCLUDED_MODULES?.split(',').map(id => id.trim()).filter(Boolean) ?? []
 const startedAt = Date.now()
 
@@ -74,6 +78,18 @@ async function inspectBrowser(baseUrl, logs) {
 
     // Back-layer assertions depend on open state, not on drawer animation timing.
     const phone = await browser.newPage({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, reducedMotion: 'reduce' })
+    if (legacyWebView) {
+      await phone.addInitScript(() => {
+        delete Promise.withResolvers
+        delete AbortSignal.any
+        delete globalThis.Iterator
+        globalThis.__DSH_BOOT_SMOKE_MISSING_APIS__ = {
+          promise: typeof Promise.withResolvers,
+          abort: typeof AbortSignal.any,
+          iterator: typeof globalThis.Iterator,
+        }
+      })
+    }
     const workspaceStream = observeWorkspaceStream(phone)
     if (compressedWebSocket) compression = await observeWebSocketCompression(phone)
     const errors = []
@@ -81,8 +97,15 @@ async function inspectBrowser(baseUrl, logs) {
     const failedRequests = []
     const responses = []
     let injected = false
-    phone.on('pageerror', error => { errors.push(error.message) })
-    phone.on('console', message => { if (message.type() === 'error') errors.push(message.text()) })
+    let compatibilityIntercepted = false
+    let rejectApiFailure
+    const apiFailure = new Promise((_resolve, reject) => { rejectApiFailure = reject })
+    const reportError = message => {
+      errors.push(message)
+      if (compatibilityError.test(message)) rejectApiFailure(new Error(`Mobile compatibility API failed: ${message}`))
+    }
+    phone.on('pageerror', error => { reportError(error.message) })
+    phone.on('console', message => { if (message.type() === 'error') reportError(message.text()) })
     phone.on('requestfailed', request => {
       failedRequests.push({ path: new URL(request.url()).pathname, type: request.resourceType(), failure: request.failure()?.errorText })
     })
@@ -104,15 +127,50 @@ async function inspectBrowser(baseUrl, logs) {
     if (blockedRemoteMux) {
       await phone.routeWebSocket('**/api/remote.mux', socket => { socket.close() })
     }
+    if (blockedCompatibility) {
+      await phone.route(`**${compatibilityPath}`, async route => {
+        compatibilityIntercepted = true
+        await route.abort('blockedbyclient')
+      })
+    }
     let workspace
     try {
-      workspace = await pairMobilePage(phone, pairUrl, logs, {
-        workspaceStream, workspaceTimeoutMs: blockedRemoteMux ? 10_000 : CLIENT_TIMEOUT_MS,
-      })
+      workspace = await Promise.race([
+        pairMobilePage(phone, pairUrl, logs, {
+          workspaceStream, workspaceTimeoutMs: blockedRemoteMux ? 10_000 : CLIENT_TIMEOUT_MS,
+        }),
+        apiFailure,
+      ])
     } catch (error) {
       const boot = await phone.locator('[data-dsh-boot]').allTextContents()
       const root = await phone.locator('#root').evaluate(element => ({ text: element.textContent?.slice(0, 500), html: element.innerHTML.slice(0, 500) })).catch(() => undefined)
-      throw new Error(`Mobile client did not become ready after pairing: ${String(error)}\nurl=${new URL(phone.url()).pathname}\nboot=${sanitized(JSON.stringify(boot))}\nroot=${sanitized(JSON.stringify(root))}\nerrors=${sanitized(JSON.stringify(errors))}\nfailedBundles=${sanitized(JSON.stringify(failedBundles))}\nfailedRequests=${sanitized(JSON.stringify(failedRequests))}\nresponses=${sanitized(JSON.stringify(responses))}\n${logs()}`)
+      const missing = await phone.evaluate(() => globalThis.__DSH_BOOT_SMOKE_MISSING_APIS__).catch(() => undefined)
+      const negativeEvidence = blockedCompatibility && compatibilityIntercepted && errors.some(message => compatibilityError.test(message))
+        ? 'Legacy compatibility negative control detected: missing-API failure after blocking the pre-boot script.\n' : ''
+      throw new Error(`${negativeEvidence}Mobile client did not become ready after pairing: ${String(error)}\nurl=${new URL(phone.url()).pathname}\nmissingAtInit=${JSON.stringify(missing)}\ncompatibilityIntercepted=${String(compatibilityIntercepted)}\nboot=${sanitized(JSON.stringify(boot))}\nroot=${sanitized(JSON.stringify(root))}\nerrors=${sanitized(JSON.stringify(errors))}\nfailedBundles=${sanitized(JSON.stringify(failedBundles))}\nfailedRequests=${sanitized(JSON.stringify(failedRequests))}\nresponses=${sanitized(JSON.stringify(responses))}\n${logs()}`)
+    }
+    if (blockedCompatibility) throw new Error(`Compatibility negative control unexpectedly booted: intercepted=${String(compatibilityIntercepted)}`)
+    if (legacyWebView) {
+      const features = await phone.evaluate(() => ({
+        missingAtInit: globalThis.__DSH_BOOT_SMOKE_MISSING_APIS__,
+        restored: {
+          promise: typeof Promise.withResolvers,
+          abort: typeof AbortSignal.any,
+          iterator: typeof globalThis.Iterator,
+        },
+        scripts: Array.from(document.scripts, script => script.src === '' ? '<inline>' : new URL(script.src).pathname),
+      }))
+      if (Object.values(features.missingAtInit ?? {}).length !== 3
+        || Object.values(features.missingAtInit).some(value => value !== 'undefined')
+        || Object.values(features.restored).some(value => value !== 'function')) {
+        throw new Error(`Legacy WebView compatibility did not restore the missing APIs: ${JSON.stringify(features)}`)
+      }
+      const compatibilityResponse = responses.find(response => response.path === compatibilityPath && response.type === 'script')
+      if (features.scripts[0] !== compatibilityPath || compatibilityResponse?.status !== 200
+        || !compatibilityResponse.contentType?.startsWith('text/javascript')) {
+        throw new Error(`Legacy WebView did not load the authenticated compatibility script before DSH: ${JSON.stringify({ features, compatibilityResponse })}`)
+      }
+      console.log('Legacy WebView APIs were absent at document start and restored before the packed DSH client booted')
     }
     if (compression !== undefined) {
       const upgrade = await within(compression.handshake(workspace.socket.url()), CLIENT_TIMEOUT_MS,
@@ -123,7 +181,8 @@ async function inspectBrowser(baseUrl, logs) {
       console.log(`Workspace WebSocket negotiated ${upgrade.extensions} and delivered its real baseline`)
     }
     const bootFailures = await phone.getByText('Failed to load plugins').count()
-    if (bootFailures > 0 || failedBundles.length > 0 || errors.some(error => /Failed to load plugins|failed to import|node:net|ERR_UNSUPPORTED/u.test(error))) {
+    if (bootFailures > 0 || failedBundles.length > 0 || errors.some(error => compatibilityError.test(error)
+      || /Failed to load plugins|failed to import|node:net|ERR_UNSUPPORTED/u.test(error))) {
       throw new Error(`Mobile client import failed: errors=${sanitized(JSON.stringify(errors))} bundles=${sanitized(JSON.stringify(failedBundles))}\n${logs()}`)
     }
     const plan = await phone.evaluate(() => window.__DSH_BOOT__)
@@ -171,6 +230,36 @@ async function inspectBrowser(baseUrl, logs) {
     const drawer = phone.locator('.dshm-drawer')
     const scrim = phone.locator('.dshm-scrim')
     const drawerToggle = drawer.locator('button[data-dsh-mobile-toggle]')
+    if (legacyWebView) {
+      await drawerToggle.click()
+      await phone.waitForFunction(() => document.querySelector('.dshm-scrim')?.getAttribute('data-open') === 'true')
+      const [listingResponse] = await Promise.all([
+        phone.waitForResponse(response => new URL(response.url()).pathname === '/api/directoryPicker/list', { timeout: CLIENT_TIMEOUT_MS }),
+        drawer.getByRole('button', { name: /^(?:Add workspace|添加工作区)$/u }).click(),
+      ])
+      const listing = await listingResponse.json()
+      if (listingResponse.status() !== 200 || listing.result?.ok !== true
+        || typeof listing.result.value?.path !== 'string' || !Array.isArray(listing.result.value.entries)) {
+        throw new Error(`Legacy WebView Workspace directory listing failed: status=${String(listingResponse.status())} result=${String(listing.result?.ok)}`)
+      }
+      const directoryDialog = phone.getByRole('dialog', { name: /^(?:Select Workspace Directory|选择工作区目录)$/u })
+      await directoryDialog.waitFor({ state: 'visible', timeout: CLIENT_TIMEOUT_MS })
+      const openDirectory = directoryDialog.getByRole('button', { name: /^(?:Open|打开)$/u })
+      await phone.waitForFunction(() => {
+        const dialog = Array.from(document.querySelectorAll('[role="dialog"]'))
+          .find(element => /^(?:Select Workspace Directory|选择工作区目录)$/u.test(element.getAttribute('aria-label') ?? ''))
+        return Array.from(dialog?.querySelectorAll('button') ?? [])
+          .some(button => /^(?:Open|打开)$/u.test(button.textContent?.trim() ?? '') && !button.disabled)
+      }, undefined, { timeout: CLIENT_TIMEOUT_MS })
+      if (!await openDirectory.isEnabled() || await directoryDialog.getByRole('alert').count() !== 0) {
+        throw new Error('Legacy WebView Workspace directory picker did not expose a usable selection')
+      }
+      await directoryDialog.getByRole('button', { name: /^(?:Cancel|取消)$/u }).click()
+      await directoryDialog.waitFor({ state: 'detached', timeout: CLIENT_TIMEOUT_MS })
+      if (!await back()) throw new Error('Mobile Back did not close the drawer after the Workspace directory picker')
+      await phone.waitForFunction(() => document.querySelector('.dshm-scrim')?.getAttribute('data-open') === 'false')
+      console.log(`Legacy WebView Workspace picker read ${String(listing.result.value.entries.length)} directory rows and enabled Open`)
+    }
     await drawerToggle.click()
     await phone.waitForFunction(() => document.querySelector('.dshm-scrim')?.getAttribute('data-open') === 'true')
     if (!await back()) throw new Error('Mobile Back did not consume the open drawer')
@@ -225,6 +314,9 @@ async function inspectBrowser(baseUrl, logs) {
       return result
     })
     if (!extensionBack) throw new Error('Mobile Back did not close a visible extension overlay')
+    if (errors.some(message => compatibilityError.test(message))) {
+      throw new Error(`Mobile compatibility API failed during interaction: ${sanitized(JSON.stringify(errors))}`)
+    }
     console.log(`Mobile client mounted through DSH Loader and read ${String(workspace.workspaces)} Workspaces over /api/remote.mux (${String(plan.entries.length)} plugin entries, ${Date.now() - startedAt} ms)`)
   } finally {
     try { await compression?.close() } finally { await browser.close() }

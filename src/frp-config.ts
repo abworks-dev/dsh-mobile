@@ -159,6 +159,12 @@ export function resolveFrpPublicPort(settings: FrpSettings): number {
   return settings.publicPort ?? FRP_DEFAULT_PUBLIC_PORT
 }
 
+/** Public HTTPS endpoint the user opens, independent of the frps control address. */
+export function resolveFrpEntryProbe(settings: FrpSettings): { host: string; port: number } {
+  const origin = new URL(frpEntryOrigin(settings))
+  return { host: origin.hostname, port: origin.port === '' ? 443 : Number(origin.port) }
+}
+
 /** HTTPS origin users actually open; the self-signed TCP entry is not on 443. */
 export function frpEntryOrigin(settings: FrpSettings): string {
   if (!isFrpSelfSignedIngress(settings)) return settings.publicOrigin

@@ -43,6 +43,22 @@ const nativeBack = page => page.evaluate(() => {
   window.dispatchEvent(event)
   return event.defaultPrevented
 })
+async function setMobileFontSize(page, size) {
+  const drawer = page.locator('.dshm-drawer')
+  if (await drawer.getAttribute('data-open') !== 'true') await drawer.locator('button[data-dsh-mobile-toggle]').click()
+  await drawer.locator('button:has([data-slot="settings.trigger"])').click()
+  const row = page.locator('[data-mobile-font-setting]')
+  await row.waitFor({ state: 'visible', timeout: CLIENT_TIMEOUT_MS })
+  for (let steps = 0; steps < 32; steps++) {
+    const current = Number.parseInt(await row.locator('output').textContent(), 10)
+    if (current === size) break
+    await row.getByRole('button', { name: current < size ? /增大移动端字号|Increase mobile font size/u : /减小移动端字号|Decrease mobile font size/u }).click()
+  }
+  assert.equal(await row.locator('output').textContent(), `${size}px`)
+  assert.equal(await nativeBack(page), true, 'Mobile Back did not close settings')
+  await row.waitFor({ state: 'hidden', timeout: CLIENT_TIMEOUT_MS })
+  if (await drawer.getAttribute('data-open') === 'true') await drawer.locator('button[data-dsh-mobile-toggle]').click()
+}
 async function retained(page, expected) {
   const current = await page.evaluate(() => {
     const editor = document.querySelector('[data-composer-card] [data-composer-input]')
@@ -199,6 +215,8 @@ try {
     await editor.waitFor({ state: 'visible', timeout: CLIENT_TIMEOUT_MS })
     await phone.waitForFunction(id => document.querySelector('[data-conversation-session]')?.getAttribute('data-conversation-session') === id, sessionId)
     await frames(phone)
+    assert.equal(await drawer.getAttribute('data-open'), String(!(await drawer.evaluate(node => node.hasAttribute('data-sidebar-collapsed')))),
+      'Native adapter overwrote the dedicated drawer logical state')
     assert.equal(await editor.evaluate(node => document.activeElement === node), false, 'A panel exit summoned the composer keyboard')
     const current = await retained(phone)
     assert.equal(current.text, expected.text)
@@ -220,11 +238,15 @@ try {
   if (await drawer.getAttribute('data-open') !== 'true') await drawer.locator('button[data-dsh-mobile-toggle]').click()
   await phone.waitForFunction(() => document.querySelector('.dshm-drawer')?.getAttribute('data-open') === 'true', undefined, { timeout: CLIENT_TIMEOUT_MS })
   await drawer.getByRole('button', { name: 'Plugins', exact: true }).click()
+  await frames(phone)
   const widePanelState = await phone.evaluate(() => ({
     width: window.innerWidth,
     wide: window.matchMedia('(min-width: 900px)').matches,
     drawer: document.querySelector('.dshm-drawer')?.getAttribute('data-open'),
     phoneNavigation: document.querySelectorAll('.dshm-panelNav').length,
+    collapsed: document.querySelector('.dshm-drawer')?.hasAttribute('data-sidebar-collapsed'),
+    sidebarClasses: document.querySelector('[data-dsh-mobile-sidebar-root]')?.className,
+    toggle: document.querySelector('[data-dsh-mobile-toggle]')?.getAttribute('aria-label'),
   }))
   assert.equal(widePanelState.drawer, 'true', `Wide panel selection collapsed the docked sidebar: ${JSON.stringify(widePanelState)}`)
   assert.equal(await phone.locator('.dshm-panelNav').count(), 0, 'Wide panel unexpectedly gained phone navigation')
@@ -250,7 +272,7 @@ try {
   for (const viewport of [{ width: 375, height: 812 }, { width: 844, height: 393 }]) {
     for (const font of [16, 20]) {
       await phone.setViewportSize(viewport)
-      await phone.evaluate(font => { document.body.style.setProperty('--dsh-content-font-size', `${font}px`) }, font)
+      await setMobileFontSize(phone, font)
       await editor.focus()
       await frames(phone)
       const expanded = await expandedHeight()
@@ -293,6 +315,9 @@ try {
       assert.equal(await expandedHeight(), expanded)
       await retained(phone, expected)
       const action = card.locator('button[class*="_primary"]').last()
+      const actionBounds = await action.boundingBox()
+      assert(actionBounds !== null && actionBounds.x >= 0 && actionBounds.x + actionBounds.width <= viewport.width + 0.5,
+        'Actual primary action leaves the viewport')
       if (viewport.width <= 720) {
         const bounds = await action.boundingBox()
         assert(bounds !== null && bounds.width >= 44 && bounds.height >= 44, 'Real primary action did not retain its 44px touch target')

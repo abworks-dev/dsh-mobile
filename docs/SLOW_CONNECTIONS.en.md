@@ -75,3 +75,19 @@ These optional fields sit alongside `paths`; their defaults normally suffice:
 | `level` | `3` | Compression level (0–9); higher values may use more CPU |
 
 Restart DSH and reopen the phone page after a change. Developer tools can show whether the WebSocket handshake negotiated `permessage-deflate`; a client that does not negotiate it can still connect without compression. Compare actual channel transfer volume and CPU use for the same Session, rather than judging savings from the decompressed message lengths shown in developer tools. Set `paths` back to `[]` to disable it. Compression does not raise provider quotas or replace connection troubleshooting.
+
+## Manual compaction and long-running API requests (0.5.6, unreleased)
+
+Commands such as `/compact` sent from the phone traverse the Mobile gateway's HTTP API. Automatic compaction inside DSH does not traverse that gateway request. Older gateways used the default 30-second `upstreamTimeoutMs` for every proxied request, so manual compaction could return `502 upstream_unavailable` while the model was still producing the summary. [#171](https://github.com/saya-ch/dsh-mobile/issues/171) records this case.
+
+The gateway now separates transport waits from authenticated API response waits. `upstreamTimeoutMs` still defaults to 30000 milliseconds (1000–300000) for uploads, static assets, boot resources, and WebSocket handshakes; incoming request headers retain their existing 10-second deadline. Only `/api` and `/api/…` HTTP requests that pass device authentication, Host/Origin checks, and any required CSRF check switch to `upstreamApiTimeoutMs` after the request body is sent to DSH. The new field defaults to `0`, disabling the API response idle timeout. To set a limit, use an integer from `1` through `2147483647` milliseconds; the upper limit is Node's timer representation limit. This is not a total execution deadline: arriving response data resets the idle timer.
+
+Add the property below to the existing `mobile-access` entry's `config` and keep all other settings. This is a configuration fragment, not a complete profile patch. `0` is the default; this example sets a 10-minute API response idle timeout:
+
+```yaml
+upstreamApiTimeoutMs: 600000
+```
+
+Save and restart DSH. Device/Session expiry, revocation, caller disconnection, and gateway shutdown still abort the proxy request. Setting `0` does not disable upload sizes, upload deadlines, connection counts, concurrent-request limits, or CSRF checks. A tunnel, reverse proxy, or model provider may still end the request sooner. This field does not change the WebSocket heartbeat or initialization settings described above.
+
+For ordinary HTTP proxy requests, the Mobile gateway's own upstream timeout returns `504 {"error":"upstream_timeout"}` before response headers are sent; ordinary connection failures remain `502 upstream_unavailable`. Once a stream has started, the gateway can only close the connection, not send a second HTTP status. It never automatically retries API requests. A timeout or disconnect means the caller stopped waiting; it does not guarantee that DSH or the model task stopped, and it does not reverse prior side effects. Check the actual Session result before retrying an operation.

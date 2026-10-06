@@ -61,6 +61,7 @@ import {
   mergeSavedFrpSettings,
   mergeSavedFrpTarget,
   resolveFrpPublicPort,
+  resolveFrpEntryProbe,
   resolveFrpVhostHttpPort,
   type FrpConfigurationStatus,
   type FrpSettings,
@@ -1051,12 +1052,12 @@ export async function apply(ctx: Context, config: PluginConfig): Promise<void> {
           const settings = frpConfig.settings()
           if (settings === undefined) throw new HttpError(409, 'frp_config_missing')
           const check = await frpIngressSelfCheck(settings, remoteDeviceFile)
-          // Two independent facts: the control port proves the user's frps is up,
-          // and the entry port proves the tunnel actually forwards to this
-          // computer. Both are advisory and never gate a security decision.
+          // TCP reachability is advisory; only authenticated discovery verifies
+          // that the public tunnel reaches this DSH instance.
+          const entry = resolveFrpEntryProbe(settings)
           const [frpsReachable, entryReachable] = await Promise.all([
             probeTcpReachable(settings.serverAddress, settings.serverPort),
-            probeTcpReachable(settings.serverAddress, resolveFrpPublicPort(settings)),
+            probeTcpReachable(entry.host, entry.port),
           ])
           sendJson(response, 200, {
             ...remotePayload(),

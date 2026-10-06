@@ -5,75 +5,51 @@ import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
 
 /**
- * Install the browser-compatibility shim before any page script runs.
- *
- * DSH's client bundle and the host's inline boot-readiness script use
- * `Promise.withResolvers` (Chrome 119+) and `AbortSignal.any` (Chrome 116+).
- * On an older system WebView — a HarmonyOS Android-compat layer ships
- * Chrome/114.0.5735.196 — the missing APIs make every WebSocket close right
- * after the handshake (code 4000, zero frames). The shell still renders and
- * the home statistics still come from the page snapshot, so the only visible
- * symptom is an empty workspace and session list, with no error on screen.
- *
- * Document-start injection is the only placement that precedes the host's
- * inline readiness script: the plugin's own custom script is fetched after
- * `load` (observed `document.readyState === 'complete'`) and cannot repair it.
- *
- * The shim is additive and idempotent: it fills in an API only when it is
- * absent, so supported WebViews keep their native implementation.
+ * Install an early Promise fallback for the paired origin's inline boot script.
+ * The dedicated frontend's bundled compatibility script supplies Iterator helpers,
+ * Promise.withResolvers and AbortSignal.any even without document-start support.
  *
  * @param webView the browser being prepared for the gateway origin.
+ * @param origin the exact HTTPS origin approved during pairing.
  * @return whether the shim was installed; false when the WebView lacks the feature.
  */
-internal fun installBrowserCompatibilityShim(webView: WebView): Boolean {
+internal fun installBrowserCompatibilityShim(webView: WebView, origin: GatewayOrigin): Boolean {
     if (!WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) return false
     return runCatching {
-        // The shim only adds two standard, side-effect-free constructors, so it
-        // is applied to every origin the paired page may load.
-        WebViewCompat.addDocumentStartJavaScript(webView, BROWSER_COMPATIBILITY_SHIM, setOf("*"))
+        WebViewCompat.addDocumentStartJavaScript(webView, BROWSER_COMPATIBILITY_SHIM, browserCompatibilityOrigins(origin))
         true
     }.getOrDefault(false)
 }
 
+/** Exact matching rules shared with document-start injection tests. */
+internal fun browserCompatibilityOrigins(origin: GatewayOrigin): Set<String> = setOf(origin.serialized)
+
 /**
  * ES5-only source for the document-start shim.
  *
- * Kept free of arrow functions, `let`/`const`, template literals and `$` so it
- * parses on engines far older than the ones missing these APIs, and free of
- * `</script` so it can be inlined safely by a host that injects it as markup.
+ * The gateway bundle owns broader compatibility; this fallback only supplies the
+ * Promise capability required by inline boot readiness before a bundle is loaded.
  */
 internal const val BROWSER_COMPATIBILITY_SHIM = """
 (function () {
+  'use strict';
   try {
     if (typeof Promise.withResolvers !== 'function') {
-      Promise.withResolvers = function () {
-        var resolve, reject;
-        var promise = new Promise(function (res, rej) { resolve = res; reject = rej; });
-        return { promise: promise, resolve: resolve, reject: reject };
-      };
-    }
-  } catch (e) {}
-  try {
-    if (typeof AbortSignal !== 'undefined' && typeof AbortSignal.any !== 'function') {
-      AbortSignal.any = function (signals) {
-        var controller = new AbortController();
-        var sources = Array.prototype.slice.call(signals);
-        var onAbort = function (event) {
-          for (var index = 0; index < sources.length; index += 1) {
-            try { sources[index].removeEventListener('abort', onAbort); } catch (e) {}
-          }
-          try { controller.abort(event.target.reason); } catch (e) { controller.abort(); }
-        };
-        for (var index = 0; index < sources.length; index += 1) {
-          if (sources[index].aborted) {
-            onAbort({ target: sources[index] });
-            return controller.signal;
-          }
-          sources[index].addEventListener('abort', onAbort, { once: true });
+      Object.defineProperty(Promise, 'withResolvers', {
+        configurable: true,
+        writable: true,
+        value: function withResolvers() {
+          var resolve, reject;
+          var promise = new this(function (res, rej) {
+            if (resolve !== undefined || reject !== undefined) throw new TypeError('Promise capability already initialized');
+            resolve = res;
+            reject = rej;
+          });
+          if (typeof resolve !== 'function' || typeof reject !== 'function') throw new TypeError('Invalid Promise capability');
+          return { promise: promise, resolve: resolve, reject: reject };
         }
-        return controller.signal;
-      };
+      });
     }
-  } catch (e) {}
+  } catch (error) { /* A non-extensible Promise constructor cannot receive this optional fallback. */ }
 })();
-""".trimIndent()
+"""

@@ -28,7 +28,7 @@ function fakeRoot(elements: readonly HTMLElement[], dialogs: readonly HTMLElemen
 describe('native mobile presentation', () => {
   it('collapses the unfocused viewport and retains stock touch actions', () => {
     expect(NATIVE_MOBILE_STYLES).toContain('[data-composer-card]:not(:focus-within) > [data-input-scroll] { max-height:72px !important; overflow-y:auto !important; }')
-    expect(NATIVE_MOBILE_STYLES).toContain('[data-dsh-mobile-composer-row] button { min-height:44px !important; touch-action:manipulation; }')
+    expect(NATIVE_MOBILE_STYLES).toContain('[data-dsh-mobile-composer-row] button { min-width:44px !important; min-height:44px !important; touch-action:manipulation; }')
     expect(NATIVE_MOBILE_STYLES).toContain('button[class*="_primary"] { min-width:44px !important; flex-shrink:0 !important; }')
   })
 
@@ -98,7 +98,9 @@ describe('native mobile presentation', () => {
   it('tracks the overlay breakpoint while the surface is mounted', () => {
     const source = installNativeMobileSurface.toString()
     expect(source).toContain('window.matchMedia(NATIVE_MOBILE_OVERLAY_QUERY)')
-    expect(source).toContain('drawerScrimVisible(collapsed, overlayQuery.matches)')
+    expect(source).toContain('drawerScrimVisible(')
+    expect(source).toMatch(/backdrop\.hidden = frame === (?:undefined|void 0) \|\|/)
+    expect(source).toMatch(/if \(frame !== (?:undefined|void 0)\) sidebar\.dataset\.open/)
     expect(source).toContain('overlayQuery.addEventListener("change", schedule)')
     expect(source).toContain('overlayQuery.removeEventListener("change", schedule)')
     expect(source).toContain('disposed = true')
@@ -198,9 +200,10 @@ describe('native mobile presentation', () => {
     expect(NATIVE_MOBILE_STYLES).toContain('.dsh-mobile-settings_selector')
     expect(NATIVE_MOBILE_STYLES).toContain('.dsh-mobile-settings_selector:focus-visible')
     expect(NATIVE_MOBILE_STYLES).toContain('min-height:48px !important')
-    expect(NATIVE_MOBILE_STYLES).toContain('[data-dsh-mobile-composer-row] { display:grid !important; grid-template-columns:max-content minmax(0,1fr) !important')
+    expect(NATIVE_MOBILE_STYLES).toContain('[data-dsh-mobile-composer-row] { display:grid !important; grid-template-columns:minmax(0,1fr) !important')
+    expect(NATIVE_MOBILE_STYLES).toContain('[data-dsh-mobile-composer-tools]:not([hidden]) { display:flex !important; flex-wrap:wrap !important')
     expect(NATIVE_MOBILE_STYLES).toContain('[data-dsh-mobile-composer-trailing] { display:flex !important; flex-wrap:nowrap !important; width:100% !important')
-    expect(NATIVE_MOBILE_STYLES).toContain('[data-dsh-mobile-composer-model] { flex:1 1 0 !important')
+    expect(NATIVE_MOBILE_STYLES).toContain('[data-dsh-mobile-composer-model] { flex:1 1 44px !important')
     expect(NATIVE_MOBILE_STYLES).toContain('[data-dsh-mobile-composer-model-label] { flex:1 1 auto !important; max-width:none !important')
     expect(NATIVE_MOBILE_STYLES).toContain('[data-dsh-mobile-history-loader] button:not(:disabled)')
     expect(NATIVE_MOBILE_STYLES).toContain('[data-dsh-mobile-history-loader] button:disabled')
