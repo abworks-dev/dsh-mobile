@@ -482,7 +482,7 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER_VERTICAL
         }
         heading.addView(textView(R.string.paired_devices_title, 30f, Typeface.BOLD), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        heading.addView(toolbarIconButton(R.drawable.ic_launcher_whale, R.string.icon_settings).apply {
+        heading.addView(toolbarIconButton(R.mipmap.ic_launcher_whale, R.string.icon_settings).apply {
             setOnClickListener { showIconSettings() }
         }, LinearLayout.LayoutParams(dp(48), dp(48)))
         heading.addView(toolbarIconButton(R.drawable.ic_settings, R.string.launch_settings).apply {
