@@ -172,5 +172,10 @@
     <string name="icon_settings">应用图标</string>
     <string name="icon_settings_saved">应用图标已更新。部分桌面启动器可能需要片刻刷新。</string>
     <string name="icon_choice_whale_girl">DSH 鲸鱼娘</string>
-    <string name="icon_choice_official_whale">官方鲸鱼</string>
+    <string name="icon_choice_official_whale">官方鲸鱼（品牌蓝）</string>
+    <string name="icon_choice_official_whale_dark">官方鲸鱼（深蓝）</string>
+    <string name="icon_choice_official_whale_teal">官方鲸鱼（青绿）</string>
+    <string name="icon_choice_official_whale_mono">官方鲸鱼（灰色）</string>
+    <string name="icon_choice_official_whale_black">官方鲸鱼（黑色）</string>
+    <string name="icon_choice_official_whale_white">官方鲸鱼（白色）</string>
 </resources>

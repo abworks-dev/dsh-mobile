@@ -482,7 +482,7 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER_VERTICAL
         }
         heading.addView(textView(R.string.paired_devices_title, 30f, Typeface.BOLD), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        heading.addView(toolbarIconButton(R.mipmap.ic_launcher_whale, R.string.icon_settings).apply {
+        heading.addView(toolbarIconButton(R.drawable.ic_whale_toolbar, R.string.icon_settings).apply {
             setOnClickListener { showIconSettings() }
         }, LinearLayout.LayoutParams(dp(48), dp(48)))
         heading.addView(toolbarIconButton(R.drawable.ic_settings, R.string.launch_settings).apply {
@@ -830,7 +830,7 @@ class MainActivity : Activity() {
             .show()
     }
 
-    /** Flip the launcher icon between the DSH whale mascot and the official whale mark. */
+    /** Flip the launcher icon between the DSH whale mascot and the official whale marks. */
     private fun currentAppIcon(): String = preferences.getString(PREFERENCE_APP_ICON, APP_ICON_WHALE_GIRL) ?: APP_ICON_WHALE_GIRL
 
     private fun applyAppIcon(icon: String) {
@@ -838,27 +838,47 @@ class MainActivity : Activity() {
         val pm = packageManager
         val enable = { component: ComponentName -> pm.setComponentEnabledSetting(component, PackageManager.COMPONENT_ENABLED_STATE_ENABLED, PackageManager.DONT_KILL_APP) }
         val disable = { component: ComponentName -> pm.setComponentEnabledSetting(component, PackageManager.COMPONENT_ENABLED_STATE_DISABLED, PackageManager.DONT_KILL_APP) }
-        val whaleGirl = ComponentName(this, "$packageName.LauncherWhaleGirl")
-        val official = ComponentName(this, "$packageName.LauncherOfficialWhale")
-        if (icon == APP_ICON_OFFICIAL_WHALE) {
-            enable(official)
-            disable(whaleGirl)
-        } else {
-            enable(whaleGirl)
-            disable(official)
+        val aliases = listOf(
+            APP_ICON_WHALE_GIRL to "LauncherWhaleGirl",
+            APP_ICON_OFFICIAL_WHALE to "LauncherOfficialWhale",
+            APP_ICON_OFFICIAL_WHALE_DARK to "LauncherOfficialWhaleDark",
+            APP_ICON_OFFICIAL_WHALE_TEAL to "LauncherOfficialWhaleTeal",
+            APP_ICON_OFFICIAL_WHALE_MONO to "LauncherOfficialWhaleMono",
+            APP_ICON_OFFICIAL_WHALE_BLACK to "LauncherOfficialWhaleBlack",
+            APP_ICON_OFFICIAL_WHALE_WHITE to "LauncherOfficialWhaleWhite",
+        )
+        for ((key, alias) in aliases) {
+            val component = ComponentName(this, "$packageName.$alias")
+            if (key == icon) enable(component) else disable(component)
         }
         deviceListStatus?.setText(R.string.icon_settings_saved)
     }
 
     private fun showIconSettings() {
-        val values = arrayOf(getString(R.string.icon_choice_whale_girl), getString(R.string.icon_choice_official_whale))
-        val selected = if (currentAppIcon() == APP_ICON_OFFICIAL_WHALE) 1 else 0
+        val keys = arrayOf(
+            APP_ICON_WHALE_GIRL,
+            APP_ICON_OFFICIAL_WHALE,
+            APP_ICON_OFFICIAL_WHALE_DARK,
+            APP_ICON_OFFICIAL_WHALE_TEAL,
+            APP_ICON_OFFICIAL_WHALE_MONO,
+            APP_ICON_OFFICIAL_WHALE_BLACK,
+            APP_ICON_OFFICIAL_WHALE_WHITE,
+        )
+        val labels = arrayOf(
+            getString(R.string.icon_choice_whale_girl),
+            getString(R.string.icon_choice_official_whale),
+            getString(R.string.icon_choice_official_whale_dark),
+            getString(R.string.icon_choice_official_whale_teal),
+            getString(R.string.icon_choice_official_whale_mono),
+            getString(R.string.icon_choice_official_whale_black),
+            getString(R.string.icon_choice_official_whale_white),
+        )
+        val selected = keys.indexOf(currentAppIcon()).coerceAtLeast(0)
         AlertDialog.Builder(this)
             .setTitle(R.string.icon_settings)
-            .setSingleChoiceItems(values, selected) { dialog, which ->
+            .setSingleChoiceItems(labels, selected) { dialog, which ->
                 dialog.dismiss()
-                val icon = if (which == 1) APP_ICON_OFFICIAL_WHALE else APP_ICON_WHALE_GIRL
-                if (icon != currentAppIcon()) applyAppIcon(icon)
+                if (keys[which] != currentAppIcon()) applyAppIcon(keys[which])
             }
             .setNegativeButton(R.string.cancel, null)
             .show()
@@ -2734,6 +2754,11 @@ class MainActivity : Activity() {
         const val PREFERENCE_APP_ICON = "app_icon"
         const val APP_ICON_WHALE_GIRL = "whale_girl"
         const val APP_ICON_OFFICIAL_WHALE = "official_whale"
+        const val APP_ICON_OFFICIAL_WHALE_DARK = "official_whale_dark"
+        const val APP_ICON_OFFICIAL_WHALE_TEAL = "official_whale_teal"
+        const val APP_ICON_OFFICIAL_WHALE_MONO = "official_whale_mono"
+        const val APP_ICON_OFFICIAL_WHALE_BLACK = "official_whale_black"
+        const val APP_ICON_OFFICIAL_WHALE_WHITE = "official_whale_white"
         const val STATE_SHOWING_SETUP = "showing_setup"
         const val STATE_ACCESS_MODE = "access_mode"
         const val STATE_NATIVE_BRIDGE = "native_bridge"
