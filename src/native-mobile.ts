@@ -36,6 +36,16 @@ export const NATIVE_MOBILE_STYLES = `
  .dsh-mobile-settings_selector:active:not(:disabled) { background:var(--dsw-alias-interactive-bg-active,var(--dsw-alias-interactive-bg-hover)); }
  .dsh-mobile-settings_selector:focus-visible { outline:2px solid var(--dsw-alias-label-primary-bluish,#2563eb); outline-offset:2px; }
  .dsh-mobile-settings_selector:disabled { cursor:wait; opacity:.55; }
+ .dsh-mobile-settings_fontControls { display:flex; align-items:center; gap:8px; flex-shrink:0; }
+ .dsh-mobile-settings_fontControls button { min-width:48px; padding:0 12px; }
+ .dsh-mobile-settings_fontControls output { min-width:42px; text-align:center; font-variant-numeric:tabular-nums; }
+ /* The mobile row replaces the Host-backed font control, not the theme selector. */
+ html.dsh-native-mobile-active [data-slot="settings.general.item"]:has([data-mobile-font-setting]) > :not([data-mobile-font-setting])[class*="_row"]:has([class*="_control"] > [class*="_stepper"] > [class*="_arrows"]) { display:none !important; }
+ /* Landscape and wide App windows also constrain standard extension controls. */
+ [data-dsh-mobile-composer-row] { min-width:0 !important; max-width:100% !important; }
+ [data-dsh-mobile-composer-tools]:not([hidden]),[data-dsh-mobile-composer-controls]:not([hidden]) { flex-wrap:wrap !important; min-width:0 !important; max-width:100% !important; }
+ [data-dsh-mobile-composer-tools] > *,[data-dsh-mobile-composer-tools] > [data-slot] > *,[data-dsh-mobile-composer-controls] > *,[data-dsh-mobile-composer-controls] > [data-slot] > * { min-width:0 !important; max-width:100% !important; }
+ [data-dsh-mobile-composer-tools] button,[data-dsh-mobile-composer-controls] button { white-space:normal !important; overflow-wrap:anywhere !important; }
 @media ${NATIVE_MOBILE_OVERLAY_QUERY} {
   html.dsh-native-mobile-active,html.dsh-native-mobile-active body { width:100%; height:100%; overflow:hidden; }
   html.dsh-native-mobile-active { --dsh-mobile-motion-duration:200ms; --dsh-mobile-motion-ease:cubic-bezier(.22,1,.36,1); }
@@ -214,15 +224,19 @@ export const NATIVE_MOBILE_STYLES = `
      owned by DSH. Toolbar focus keeps the card expanded during menu taps. */
   [data-dsh-mobile-center] [data-composer-card]:not(:focus-within) > [data-input-scroll] { max-height:72px !important; overflow-y:auto !important; }
   /* Stock Send/Queue/Steer and Stop keep their handlers and disabled state. */
-  [data-dsh-mobile-composer-row] button { min-height:44px !important; touch-action:manipulation; }
+  [data-dsh-mobile-composer-row] button { min-width:44px !important; min-height:44px !important; touch-action:manipulation; }
   [data-dsh-mobile-composer-row] button[class*="_primary"] { min-width:44px !important; flex-shrink:0 !important; }
-   /* The desktop composer intentionally wraps whole toolbar groups. On a phone,
-     dynamic model and status labels made that row alternate between one and
-     two lines. Keep two stable columns and let only the model label shrink. */
-  [data-dsh-mobile-composer-row] { display:grid !important; grid-template-columns:max-content minmax(0,1fr) !important; align-items:center !important; gap:4px 8px !important; }
-  [data-dsh-mobile-composer-tools] { display:flex !important; flex-wrap:nowrap !important; width:max-content !important; min-width:0 !important; max-width:max-content !important; gap:6px !important; }
+  /* A reserved trailing row keeps primary actions reachable when standard
+     extension slots add controls; no contribution is moved or reimplemented. */
+  [data-dsh-mobile-composer-row] { display:grid !important; grid-template-columns:minmax(0,1fr) !important; align-items:center !important; gap:4px 8px !important; min-width:0 !important; max-width:100% !important; }
+  [data-dsh-mobile-composer-tools]:not([hidden]) { display:flex !important; flex-wrap:wrap !important; width:100% !important; min-width:0 !important; max-width:100% !important; gap:6px !important; }
+  [data-dsh-mobile-composer-tools] > *,[data-dsh-mobile-composer-tools] > [data-slot] > * { min-width:0 !important; max-width:100% !important; }
+  [data-dsh-mobile-composer-tools] button { white-space:normal !important; overflow-wrap:anywhere !important; }
   [data-dsh-mobile-composer-trailing] { display:flex !important; flex-wrap:nowrap !important; width:100% !important; min-width:0 !important; max-width:100% !important; gap:6px !important; margin-left:0 !important; justify-content:flex-end !important; }
-  [data-dsh-mobile-composer-model] { flex:1 1 0 !important; width:auto !important; min-width:0 !important; max-width:none !important; }
+  [data-dsh-mobile-composer-controls]:not([hidden]) { display:flex !important; flex:1 1 0 !important; flex-wrap:wrap !important; min-width:0 !important; max-width:100% !important; gap:6px !important; }
+  [data-dsh-mobile-composer-controls] > *,[data-dsh-mobile-composer-controls] > [data-slot] > * { min-width:0 !important; max-width:100% !important; }
+  [data-dsh-mobile-composer-controls] button { white-space:normal !important; overflow-wrap:anywhere !important; }
+  [data-dsh-mobile-composer-model] { flex:1 1 44px !important; width:auto !important; min-width:44px !important; max-width:100% !important; }
   [data-dsh-mobile-composer-model-trigger] { box-sizing:border-box !important; width:100% !important; max-width:100% !important; min-width:0 !important; padding-left:6px !important; padding-right:4px !important; }
   [data-dsh-mobile-composer-model-label] { flex:1 1 auto !important; max-width:none !important; min-width:0 !important; overflow:hidden !important; text-overflow:ellipsis !important; white-space:nowrap !important; }
   [data-dsh-mobile-center] [class*="_root"]:has(> [class*="_card"] textarea) { box-sizing:border-box !important; width:100% !important; padding:0 0 8px !important; }
@@ -1338,6 +1352,8 @@ export function installNativeMobileSurface(backServices: NativeMobileBackService
           composerTrailing.dataset.dshMobileComposerTrailing = 'true'
           const modelTrigger = composerTrailing.querySelector<HTMLButtonElement>('button[aria-label^="选择模型"],button[aria-label^="Select model"],button[aria-label^="Seleziona modello"]')
           if (modelTrigger !== null) {
+            const controls = modelTrigger.closest<HTMLElement>('[class*="_standardControls"]')
+            if (controls !== null) controls.dataset.dshMobileComposerControls = 'true'
             modelTrigger.dataset.dshMobileComposerModelTrigger = 'true'
             modelTrigger.parentElement?.setAttribute('data-dsh-mobile-composer-model', 'true')
             modelTrigger.querySelector<HTMLElement>('[class*="_triggerLabel"]')?.setAttribute('data-dsh-mobile-composer-model-label', 'true')
@@ -1363,9 +1379,10 @@ export function installNativeMobileSurface(backServices: NativeMobileBackService
       if (brand.textContent?.trim() === 'DSH Local Build') brand.textContent = 'DeepSeek Harness'
     }
     if (toggle !== undefined) toggle.dataset.dshMobileToggle = 'true'
-    const collapsed = classToken(sidebarRoot, '_collapsed')
-    sidebar.dataset.open = String(!collapsed)
-    backdrop.hidden = !drawerScrimVisible(collapsed, overlayQuery.matches)
+    // The dedicated layout owns data-open directly. DSH's delayed collapsed
+    // class describes its fade animation, not the drawer's logical state.
+    if (frame !== undefined) sidebar.dataset.open = String(!classToken(sidebarRoot, '_collapsed'))
+    backdrop.hidden = frame === undefined || !drawerScrimVisible(classToken(sidebarRoot, '_collapsed'), overlayQuery.matches)
   }
   const schedule = (): void => { if (scheduled === 0) scheduled = requestAnimationFrame(sync) }
   const observer = new MutationObserver(schedule)

@@ -1970,7 +1970,8 @@ export class MobileAccessGateway {
       const generation = extensionGeneration(headerValue(request.headers, EXTENSION_GENERATION_HEADER))
       const operation = this.allocateRequest(authorization, response, {})
       const abort = new AbortController()
-      response.once('close', () => { abort.abort() })
+      // Release bookkeeping before signalling, so a closed response can never pin a slot.
+      response.once('close', () => { operation.release(); abort.abort() })
       const generationSignal = extensions.signal(targetInfo.id, generation)
       const onGenerationAbort = (): void => { abort.abort(); if (!response.destroyed) response.destroy() }
       generationSignal?.addEventListener('abort', onGenerationAbort, { once: true })
@@ -1995,7 +1996,8 @@ export class MobileAccessGateway {
       const generation = extensionGeneration(headerValue(request.headers, EXTENSION_GENERATION_HEADER))
       const operation = this.allocateRequest(authorization, response, {})
       const abort = new AbortController()
-      response.once('close', () => { abort.abort() })
+      // Release bookkeeping before signalling, so a closed response can never pin a slot.
+      response.once('close', () => { operation.release(); abort.abort() })
       const generationSignal = extensions.signal(targetInfo.id, generation)
       const onGenerationAbort = (): void => { abort.abort(); if (!response.destroyed) response.destroy() }
       generationSignal?.addEventListener('abort', onGenerationAbort, { once: true })
@@ -2091,7 +2093,7 @@ export class MobileAccessGateway {
         })
         this.upstreamAuthRequest = upstreamRequest
         upstreamRequest.setTimeout(this.config.upstreamTimeoutMs, () => {
-          upstreamRequest.destroy(new Error('upstream timeout'))
+          upstreamRequest.destroy(new HttpError(504, 'upstream_timeout'))
         })
         upstreamRequest.once('response', resolve)
         upstreamRequest.once('error', reject)
@@ -2150,7 +2152,7 @@ export class MobileAccessGateway {
         })
         holder.request = upstreamRequest
         upstreamRequest.setTimeout(this.config.upstreamTimeoutMs, () => {
-          upstreamRequest.destroy(new Error('upstream timeout'))
+          upstreamRequest.destroy(new HttpError(504, 'upstream_timeout'))
         })
         upstreamRequest.once('response', resolve)
         upstreamRequest.once('error', reject)
@@ -2570,10 +2572,13 @@ export class MobileAccessGateway {
     }
     const holder: { request?: ClientRequest } = {}
     const operation = this.allocateRequest(authorization, response, holder)
+    const onClose = (): void => { operation.release(); operation.abort() }
+    response.once('close', onClose)
     let bodyDone: Promise<void> | undefined
     try {
       const upstreamHeaders = sanitizeRequestHeaders(request, this.config.upstreamOrigin)
       const upstreamCookie = await this.upstreamCookieHeader()
+      operation.signal.throwIfAborted()
       if (upstreamCookie !== undefined) upstreamHeaders.cookie = upstreamCookie
       const upstreamResponse = new Promise<IncomingMessage>((resolve, reject) => {
         const upstreamRequest = requestHttp({
@@ -2587,8 +2592,14 @@ export class MobileAccessGateway {
         })
         holder.request = upstreamRequest
         upstreamRequest.setTimeout(this.config.upstreamTimeoutMs, () => {
-          upstreamRequest.destroy(new Error('upstream timeout'))
+          upstreamRequest.destroy(new HttpError(504, 'upstream_timeout'))
         })
+        const pathname = parseRequestTarget(request.url).decodedPathname
+        if (pathname === '/api' || pathname.startsWith('/api/')) {
+          // Uploads keep the transport budget; authenticated API response waits
+          // use their separate idle budget only once the body has been sent.
+          upstreamRequest.once('finish', () => { upstreamRequest.setTimeout(this.config.upstreamApiTimeoutMs) })
+        }
         upstreamRequest.once('response', resolve)
         upstreamRequest.once('error', reject)
         bodyDone = pipeline(request, new ByteLimitTransform(this.config.maxBodyBytes), upstreamRequest)
@@ -2625,6 +2636,7 @@ export class MobileAccessGateway {
       // becomes the standard upstream-unavailable answer.
       throw error
     } finally {
+      response.removeListener('close', onClose)
       operation.release()
     }
   }

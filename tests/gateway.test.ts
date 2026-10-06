@@ -74,7 +74,7 @@ async function closeServer(server: Server, sockets: Set<Socket> = new Set()): Pr
 function beginRequest(
   port: number,
   path: string,
-  options: { method?: string; headers?: Record<string, string>; body?: string } = {},
+  options: { method?: string; headers?: Record<string, string>; body?: string; deferEnd?: boolean } = {},
 ): { readonly outgoing: ClientRequest; readonly result: Promise<HttpResult> } {
   let outgoing!: ClientRequest
   const result = new Promise<HttpResult>((resolve, reject) => {
@@ -91,13 +91,15 @@ function beginRequest(
     }, (response) => {
       const chunks: Buffer[] = []
       response.on('data', chunk => { chunks.push(Buffer.from(chunk)) })
+      response.once('error', reject)
       response.once('end', () => {
         const rawBody = Buffer.concat(chunks)
         resolve({ status: response.statusCode ?? 0, headers: response.headers, body: rawBody.toString('utf8'), rawBody })
       })
     })
     outgoing.once('error', reject)
-    outgoing.end(body)
+    if (!options.deferEnd) outgoing.end(body)
+    else if (body !== undefined) outgoing.write(body)
   })
   return { outgoing, result }
 }
@@ -236,6 +238,7 @@ async function upstream(
   observations: UpstreamObservation[]
   upgradeObservations: IncomingHttpHeaders[]
   upgradeResponseBytes: number[]
+  closedHolds: string[]
   releaseHold: () => void
   setBatchEntriesReversed: (reversed: boolean) => void
 }> {
@@ -243,6 +246,7 @@ async function upstream(
   const upgradeObservations: IncomingHttpHeaders[] = []
   const upgradeResponseBytes: number[] = []
   const held: Array<() => void> = []
+  const closedHolds: string[] = []
   let batchEntriesReversed = false
   const upgraded = new Set<Socket>()
   const server = createServer(async (incoming, response) => {
@@ -267,7 +271,15 @@ async function upstream(
       response.end('authentication required')
       return
     }
-    if (incoming.url === '/hold') {
+    if (incoming.url === '/api/stream-hold') {
+      response.writeHead(200, { 'content-type': 'text/plain' })
+      response.write('first')
+      response.once('close', () => { closedHolds.push(incoming.url!) })
+      held.push(() => { response.end('last') })
+      return
+    }
+    if (incoming.url === '/hold' || incoming.url === '/api' || incoming.url === '/api/hold') {
+      response.once('close', () => { closedHolds.push(incoming.url!) })
       held.push(() => { response.writeHead(200); response.end('released') })
       return
     }
@@ -422,6 +434,7 @@ async function upstream(
     observations,
     upgradeObservations,
     upgradeResponseBytes,
+    closedHolds,
     releaseHold: () => { for (const release of held.splice(0)) release() },
     setBatchEntriesReversed: (reversed) => { batchEntriesReversed = reversed },
   }
@@ -2435,6 +2448,106 @@ describe('HTTP gateway', () => {
       new Promise((_, reject) => setTimeout(() => reject(new Error('request remained open')), 2_000)),
     ])).resolves.toBeInstanceOf(Error)
     inner.releaseHold()
+  })
+
+  it.each(['/api', '/api/hold'])('lets authenticated %s responses outlive the transport budget by default', async path => {
+    const inner = await upstream()
+    const instance = await gateway(inner.port, { upstreamTimeoutMs: 1_000 })
+    const paired = await pair(instance)
+    let completed = false
+    const pending = request(instance.address().port, path, {
+      method: 'POST', headers: { ...browserHeaders(instance), cookie: `${SESSION_COOKIE}=${paired.session}`, [CSRF_HEADER]: paired.csrf }, body: '{}',
+    }).then(result => { completed = true; return result })
+    await vi.waitFor(() => { expect(inner.observations.some(entry => entry.url === path)).toBe(true) })
+    await new Promise(resolve => setTimeout(resolve, 1_150))
+    expect(completed).toBe(false)
+    inner.releaseHold()
+    await expect(pending).resolves.toMatchObject({ status: 200, body: 'released' })
+    expect(inner.observations.filter(entry => entry.url === path)).toHaveLength(1)
+  })
+
+  it('keeps static response waits bounded and names an upstream timeout', async () => {
+    const inner = await upstream()
+    const instance = await gateway(inner.port, { upstreamTimeoutMs: 1_000 })
+    const paired = await pair(instance)
+    const result = await request(instance.address().port, '/hold', {
+      headers: { ...browserHeaders(instance), cookie: `${SESSION_COOKIE}=${paired.session}` },
+    })
+    expect(result.status).toBe(504)
+    expect(JSON.parse(result.body)).toEqual({ error: 'upstream_timeout' })
+    expect(result.headers['cache-control']).toBe('no-store')
+    expect(inner.observations.filter(entry => entry.url === '/hold')).toHaveLength(1)
+  })
+
+  it('starts the optional API response budget only after the upload finishes', async () => {
+    const inner = await upstream()
+    const instance = await gateway(inner.port, { upstreamTimeoutMs: 1_000, upstreamApiTimeoutMs: 40 })
+    const paired = await pair(instance)
+    const pending = beginRequest(instance.address().port, '/api/hold', {
+      method: 'POST', deferEnd: true,
+      headers: { ...browserHeaders(instance), cookie: `${SESSION_COOKIE}=${paired.session}`, [CSRF_HEADER]: paired.csrf, 'content-length': '2' },
+      body: '{',
+    })
+    let completed = false
+    void pending.result.then(() => { completed = true }, () => { completed = true })
+    await new Promise(resolve => setTimeout(resolve, 100))
+    expect(completed).toBe(false)
+    pending.outgoing.end('}')
+    const result = await pending.result
+    expect(result.status).toBe(504)
+    expect(JSON.parse(result.body)).toEqual({ error: 'upstream_timeout' })
+    expect(inner.observations.filter(entry => entry.url === '/api/hold')).toHaveLength(1)
+  })
+
+  it('keeps unfinished API uploads under the transport budget when the response deadline is disabled', async () => {
+    let notifyAborted: (() => void) | undefined
+    const aborted = new Promise<void>(resolve => { notifyAborted = resolve })
+    const inner = createServer((incoming, response) => {
+      if (incoming.url !== '/api/upload') { response.end('probe'); return }
+      incoming.once('aborted', () => { notifyAborted?.() })
+      incoming.on('error', () => undefined)
+      incoming.resume()
+    })
+    const upstreamPort = await listen(inner)
+    cleanups.push(() => closeServer(inner))
+    const instance = await gateway(upstreamPort, { upstreamTimeoutMs: 1_000, maxActiveRequests: 1 })
+    const paired = await pair(instance)
+    const headers = { ...browserHeaders(instance), cookie: `${SESSION_COOKIE}=${paired.session}` }
+    const pending = beginRequest(instance.address().port, '/api/upload', {
+      method: 'POST', deferEnd: true, body: '{',
+      headers: { ...headers, [CSRF_HEADER]: paired.csrf, 'content-length': '2' },
+    })
+    const result = await pending.result
+    expect(result.status).toBe(504)
+    expect(JSON.parse(result.body)).toEqual({ error: 'upstream_timeout' })
+    await aborted
+    await expect(request(instance.address().port, '/assets/probe.js', { headers })).resolves.toMatchObject({ status: 200, body: 'probe' })
+  })
+
+  it('destroys an abandoned API upstream and frees its request slot without a response deadline', async () => {
+    const inner = await upstream()
+    const instance = await gateway(inner.port, { maxActiveRequests: 1 })
+    const paired = await pair(instance)
+    const headers = { ...browserHeaders(instance), cookie: `${SESSION_COOKIE}=${paired.session}` }
+    const pending = beginRequest(instance.address().port, '/api/hold', { headers })
+    const cancelled = pending.result.catch(error => error as Error)
+    await vi.waitFor(() => { expect(inner.observations.some(entry => entry.url === '/api/hold')).toBe(true) })
+    await expect(request(instance.address().port, '/assets/probe.js', { headers })).resolves.toMatchObject({ status: 429 })
+    pending.outgoing.destroy()
+    await expect(cancelled).resolves.toBeInstanceOf(Error)
+    await vi.waitFor(() => { expect(inner.closedHolds).toContain('/api/hold') })
+    await expect(request(instance.address().port, '/assets/probe.js', { headers })).resolves.toMatchObject({ status: 200 })
+  })
+
+  it('closes an API stream that reaches its configured idle budget without writing another response', async () => {
+    const inner = await upstream()
+    const instance = await gateway(inner.port, { upstreamApiTimeoutMs: 40, maxActiveRequests: 1 })
+    const paired = await pair(instance)
+    const headers = { ...browserHeaders(instance), cookie: `${SESSION_COOKIE}=${paired.session}` }
+    const pending = beginRequest(instance.address().port, '/api/stream-hold', { headers })
+    await expect(pending.result).rejects.toThrow()
+    await vi.waitFor(() => { expect(inner.closedHolds).toContain('/api/stream-hold') })
+    await expect(request(instance.address().port, '/assets/probe.js', { headers })).resolves.toMatchObject({ status: 200 })
   })
 
   it('rejects a disallowed client CIDR before opening upstream work', async () => {

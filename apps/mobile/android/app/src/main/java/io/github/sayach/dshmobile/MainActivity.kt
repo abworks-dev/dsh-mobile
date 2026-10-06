@@ -2190,6 +2190,7 @@ class MainActivity : Activity() {
             mediaPlaybackRequiresUserGesture = true
             userAgentString = "$userAgentString DSHMobile/${BuildConfig.VERSION_NAME}"
         }
+        installBrowserCompatibilityShim(browser, origin)
         WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG)
         CookieManager.getInstance().apply {
             setAcceptCookie(true)

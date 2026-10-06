@@ -66,6 +66,18 @@ DSH Mobile 是一个 DeepSeek Harness 插件，让手机浏览器或 Android App
 
 模型搜索框与配对页的输入字号已补齐，Android 返回键可逐级退出模型菜单。App 旋转和调整窗口大小时保留当前页面、引用与未发送图片，已收到的“电脑端已移除”状态不会被后续检测覆盖。请同步更新插件与 App；App 进程终止后，未发送附件仍可能丢失。
 
+## 0.5.6 更新（待发布）
+
+以下是开发分支中的待发布改进；npm 正式版与上方 Android 下载仍为 0.5.5，尚无 0.5.6 正式安装包。
+
+触屏为主要输入方式的手机浏览器中，主会话输入栏的普通 Enter 用于换行，空草稿不执行操作；输入法组合、已打开的菜单与组合键仍交给 DSH。窄屏从侧边栏打开插件、日程等主面板后收起抽屉，并在面板上方保留“返回会话”入口。
+
+窄屏输入工具组可换行或分行，发送、停止与标准插槽内的插件按钮保持可达，不替换插件自身的操作。设置页新增“移动端字号”：默认 16px，可在 12–32px 之间调整，仅保存在当前访问地址的浏览器或 App WebView 数据中，不随电脑端字号变化；电脑端设置不受影响，颜色主题仍跟随 DSH。输入框继续保持至少 16px，避免聚焦时自动缩放。
+
+旧 WebView 的专用移动页在 DSH 启动前补齐缺失的 `Promise.withResolvers` 与 `AbortSignal.any`，处理相关启动、工作区与重连错误。兼容范围与 App 的提前加载方式见 [App 与手机浏览器](#app-与手机浏览器)，不代表所有旧内核或第三方插件都已适配。
+
+长时间的已认证 DSH API 请求使用独立的 `upstreamApiTimeoutMs`，默认 `0`（不设响应等待超时），不再被普通传输的 30 秒预算截断；显式超时返回 `504 upstream_timeout`。扩展动作与路由处理器则默认限时 30 秒，可按操作配置 `timeoutMs`；调用方离开即释放网关请求槽位。两类等待与错误码见[慢链路与反复重连指南](docs/SLOW_CONNECTIONS.md)。
+
 ## 快速开始
 
 已经安装 `dsh` 命令：
@@ -272,7 +284,9 @@ excludedClientModules:
 
 Android App 只是 Kotlin WebView 薄壳，不内置另一份网页；手机浏览器访问的是同一页面。需要排查兼容性时，可在浏览器地址后追加 `?frontend=stock`，临时回到旧的桌面页面适配模式。
 
-专用移动页面会在 DSH 的第一个启动脚本之前，同步加载经网关鉴权的同源 `/mobile-access/compat.js`，为缺少 `Iterator` / Iterator helpers 的 WebView 提供随插件打包的 core-js 兼容实现，避免启动时出现 `Iterator is not defined`。兼容层按能力检测保留或修正原生 helper，不依赖 CDN，也不会放宽 CSP；不修改 Android APK、桌面页面或 `?frontend=stock` 页面。此修复并不承诺支持所有旧内核，前端仍以 ES2022 为构建目标；若还有其他兼容错误，请优先更新 Android System WebView / Chrome。
+0.5.5 的专用移动页面会在 DSH 的第一个启动脚本之前，同步加载经网关鉴权的同源 `/mobile-access/compat.js`，为缺少 `Iterator` / Iterator helpers 的 WebView 提供随插件打包的 core-js 兼容实现，避免启动时出现 `Iterator is not defined`。兼容层按能力检测保留或修正原生 helper，不依赖 CDN，也不会放宽 CSP；桌面页面与 `?frontend=stock` 页面不会加载这个网关脚本。
+
+0.5.6（待发布）在同一个启动前脚本中增加 `Promise.withResolvers` 与 `AbortSignal.any` 的能力检测和兼容实现。Android App 还会在支持 document-start 注入的 WebView 中，为配对的精确 Origin 提前补齐 `Promise.withResolvers`。这只覆盖已识别的缺失 API，不是所有旧内核的支持承诺；前端仍以 ES2022 为构建目标，尚未在报告中的华为 WebView 114 真机上验收。出现其他兼容错误时，若设备允许更新，请优先更新 Android System WebView / Chrome；若系统组件不可更新，请保留完整错误、内核版本与进入方式供排查。
 
 > **社区客户端（非官方）**：[微信小程序客户端](https://github.com/StrawberryAO/dsh-mobile-minapp)
 > 原生微信小程序实现，复用「移动访问」的配对与 Remote 流协议（需 dsh-mobile ≥ 0.3.8）。

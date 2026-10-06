@@ -66,6 +66,18 @@ At widths up to 720px, an inactive composer retains a scrollable 72px draft prev
 
 Model-search and pairing-page input sizes are corrected, and Android Back navigates the model menu one level at a time. Rotation and window resizing retain the page, references and unsent images; a known **Removed on computer** status survives later checks. Update both the plugin and app. Unsent attachments may still be lost after app-process termination.
 
+## 0.5.6 update (unreleased)
+
+These changes are in the development branch. The stable npm release and Android download above remain 0.5.5; no official 0.5.6 package is available yet.
+
+In touch-primary mobile browsers, plain Enter inserts a newline in the main conversation composer and does nothing with an empty draft. DSH retains IME composition, open-menu handling, and modified-key shortcuts. Selecting a sidebar main panel such as Plugins or Schedules closes the narrow drawer and leaves a **Back to conversation** row above the panel.
+
+Narrow composer tool groups can wrap onto separate rows, keeping Send, Stop, and controls in standard plugin slots reachable without replacing their actions. The new **Mobile font size** setting defaults to 16px and allows 12–32px. It is saved locally for the current address in the browser or app WebView, independently from the computer's font size. Computer settings are unaffected; the color theme still follows DSH. Editable fields retain a 16px minimum to prevent focus-triggered zoom.
+
+Before DSH boots, the dedicated mobile page supplies missing `Promise.withResolvers` and `AbortSignal.any` APIs used by startup, Workspace navigation, and reconnection. See [App and mobile browser](#app-and-mobile-browser) for the compatibility scope and earlier Android injection; this does not imply support for every old engine or community plugin.
+
+Long-running authenticated DSH API requests use a separate `upstreamApiTimeoutMs`, defaulting to `0` (no response-wait timeout), rather than the ordinary 30-second transport budget. An explicit timeout returns `504 upstream_timeout`. Extension actions and route handlers retain a default 30-second deadline, with a per-operation `timeoutMs` override; the gateway releases the request slot when its caller leaves. See the [slow-link and reconnection guide](docs/SLOW_CONNECTIONS.en.md) for the separate budgets and error codes.
+
 ## Quick start
 
 With an installed `dsh` command:
@@ -272,7 +284,9 @@ There is no default exclusion list. The plugin rejects unknown or boot-critical 
 
 The Android app is a thin Kotlin WebView shell and contains no frontend copy; mobile browsers load the same page. For compatibility diagnosis, append `?frontend=stock` to the browser URL to temporarily use the previous desktop-page adaptation.
 
-The dedicated mobile page synchronously loads the authenticated, same-origin `/mobile-access/compat.js` before the first DSH boot script. This bundled core-js compatibility layer supplies `Iterator` / Iterator helpers to WebViews that lack them, preventing the startup error `Iterator is not defined`. It uses feature detection to preserve or repair native helpers, needs no CDN, and does not weaken CSP. It does not change the Android APK, desktop page, or `?frontend=stock` page. This is not a promise to support every old engine: the frontend still targets ES2022. Update Android System WebView / Chrome first if other compatibility errors remain.
+In 0.5.5, the dedicated mobile page synchronously loads the authenticated, same-origin `/mobile-access/compat.js` before the first DSH boot script. This bundled core-js compatibility layer supplies `Iterator` / Iterator helpers to WebViews that lack them, preventing the startup error `Iterator is not defined`. It uses feature detection to preserve or repair native helpers, needs no CDN, and does not weaken CSP. The desktop and `?frontend=stock` pages do not load this gateway script.
+
+Version 0.5.6 (unreleased) adds feature-detected `Promise.withResolvers` and `AbortSignal.any` implementations to the same pre-boot script. On WebViews that support document-start injection, the Android app also supplies `Promise.withResolvers` early for the paired exact Origin. This covers identified missing APIs, not every old engine; the frontend still targets ES2022, and this version has not been verified on the reported physical Huawei WebView 114 device. If other compatibility errors remain and the device allows updates, update Android System WebView / Chrome first. If the system component cannot be updated, retain the full error, engine version, and entry mode for diagnosis.
 
 > **Community client (unofficial)**: [WeChat Mini-Program client](https://github.com/StrawberryAO/dsh-mobile-minapp)
 > A native WeChat Mini-Program that reuses the Mobile Access pairing and Remote stream protocol (requires dsh-mobile ≥ 0.3.8).

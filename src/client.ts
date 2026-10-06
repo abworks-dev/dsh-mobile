@@ -10,6 +10,7 @@ import { createFrpAttachFrpcToml, createFrpAttachTemplate } from './frp-attach.j
 import { parseFrpSettings, type FrpSettings } from './frp-config.js'
 import { installNativeMobileSurface, NATIVE_MOBILE_STYLES, resolveNativeMobileLanguage } from './native-mobile.js'
 import { installVoiceSession } from './voice-session.js'
+import { installMobileFontPreference, MobileFontSizeRow } from './mobile-font.js'
 import { isDesktopAdminSurface, localAdminRequestHeaders } from './local-admin-host.js'
 import { fireDeviceRevoked, fireTaskNotifyEvent, isDeviceRevokedPayload, parseTaskNotifyPayload, taskCompletionTag } from './task-notify.js'
 
@@ -39,7 +40,7 @@ interface ClientContext {
   get(name: string): unknown
   slots: {
     inject(key: string, callback: () => (() => void)): () => void
-    register<Props>(options: { name: string; id: string; order?: number; label?: string }, component: (props: Props) => unknown): () => void
+    register<Props>(options: { name: string; id: string; order?: number; priority?: number; label?: string }, component: (props: Props) => unknown): () => void
   }
 }
 
@@ -4202,7 +4203,11 @@ export function apply(ctx: ClientContext): void {
     document.head.append(style)
     const removeVoiceSession = installVoiceSession(!desktopAdmin)
     if (!desktopAdmin) {
+      const localFont = installMobileFontPreference()
       const removeSettingsAction = ctx.slots.inject('settings.general.item', () => {
+        const removeFontSize = ctx.slots.register({
+          name: 'settings.general.item', id: 'font-size', order: 11, priority: -1,
+        }, () => createElement(MobileFontSizeRow, { preference: localFont.preference, locale: selectedMobileControlLocale() }))
         const removeSwitchComputer = ctx.slots.register({
           name: 'settings.general.item',
           id: 'dsh-mobile-switch-computer',
@@ -4213,14 +4218,14 @@ export function apply(ctx: ClientContext): void {
           id: 'dsh-mobile-task-notifications',
           order: 110,
         }, MobileTaskNotificationRow)
-        return () => { removeTaskNotifications(); removeSwitchComputer() }
+        return () => { removeTaskNotifications(); removeSwitchComputer(); removeFontSize() }
       })
       const removeCustom = installCustomAssets()
       const removeSurface = installDshLanguageBoundSurface(() => installNativeMobileSurface({
         getLayout: () => ctx.get('layout'),
         getSidebarRight: () => ctx.get('sidebarRight'),
       }))
-      return () => { removeSettingsAction(); removeCustom(); removeSurface(); removeVoiceSession(); style.remove() }
+      return () => { removeSettingsAction(); removeCustom(); removeSurface(); removeVoiceSession(); localFont.dispose(); style.remove() }
     }
     const removeControl = installDshLanguageBoundSurface(() => {
       const control = installControl()

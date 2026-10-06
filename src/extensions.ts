@@ -27,6 +27,12 @@ const RETIRED_GENERATION_TTL_MS = 10 * 60_000
 /** Extension teardown is advisory and must never stop watcher progress. */
 const HOST_TEARDOWN_TIMEOUT_MS = 2_000
 
+/** Default budget for one extension action or route-handler execution. */
+export const HOST_OPERATION_TIMEOUT_MS = 30_000
+
+/** Upper bound for a per-operation `timeoutMs` override. */
+export const HOST_OPERATION_TIMEOUT_MAX_MS = 300_000
+
 async function withActivationTimeout<T>(promise: Promise<T>, id: string, signal: AbortSignal): Promise<T> {
   let timer: NodeJS.Timeout | undefined
   let onAbort: (() => void) | undefined
@@ -62,6 +68,8 @@ type CallableActionInput = (value?: never, options?: never) => unknown
 export interface MobileHostAction {
   /** A callable Schemastery schema or an adapter exposing parse(). */
   readonly input?: CallableActionInput | { parse(value: unknown): unknown }
+  /** Optional per-action budget override; validated and snapshotted at registration. */
+  readonly timeoutMs?: number
   readonly run: (context: MobileActionContext, input: unknown) => unknown | Promise<unknown>
 }
 
@@ -95,6 +103,8 @@ export interface MobileHostRoute {
   readonly method: string
   readonly path: string
   readonly kind?: 'exact' | 'prefix'
+  /** Optional per-route handler budget override; validated and snapshotted at registration. */
+  readonly timeoutMs?: number
   readonly handle: (request: MobileRouteRequest) => MobileRouteResponse | Promise<MobileRouteResponse>
 }
 
@@ -374,6 +384,15 @@ function normalizeRoutePath(value: string): string {
   return normalizedInput === '/' ? '/' : normalizedInput.replace(/\/+$/u, '')
 }
 
+/** Validate and snapshot an optional per-operation timeout override. */
+function operationTimeout(value: unknown, code: 'invalid_action' | 'invalid_route'): number | undefined {
+  if (value === undefined) return undefined
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 1 || value > HOST_OPERATION_TIMEOUT_MAX_MS) {
+    throw new MobileExtensionError(code, 'operation timeoutMs is invalid')
+  }
+  return value
+}
+
 function validateDefinition(definition: MobileExtensionDefinition): MobileExtensionDefinition {
   const manifest = parseExtensionManifest({
     schemaVersion: definition.schemaVersion,
@@ -383,24 +402,37 @@ function validateDefinition(definition: MobileExtensionDefinition): MobileExtens
     ...(definition.description === undefined ? {} : { description: definition.description }),
   })
   const actionNames = new Set<string>()
+  const actions: Record<string, MobileHostAction> = {}
   for (const [name, action] of Object.entries(definition.actions ?? {})) {
     if (!/^[a-z][a-z0-9-]{0,63}$/u.test(name) || action === null || typeof action !== 'object' || typeof action.run !== 'function' || actionNames.has(name)) {
       throw new MobileExtensionError('invalid_action', `invalid action ${name}`)
     }
     actionNames.add(name)
+    const actionTimeout = operationTimeout(action.timeoutMs, 'invalid_action')
+    const actionInput = action.input
+    actions[name] = Object.freeze({
+      ...(actionInput === undefined ? {} : { input: actionInput }),
+      run: action.run.bind(action),
+      ...(actionTimeout === undefined ? {} : { timeoutMs: actionTimeout }),
+    })
   }
   const routeNames = new Set<string>()
   const routes = (definition.routes ?? []).map(route => {
     if (route === null || typeof route !== 'object' || typeof route.handle !== 'function') throw new MobileExtensionError('invalid_route', 'invalid extension route')
     const method = route.method.toUpperCase()
     if (!['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) throw new MobileExtensionError('invalid_route', 'unsupported extension route method')
-    const normalized: MobileHostRoute = { ...route, method, path: normalizeRoutePath(route.path) }
+    const routeTimeout = operationTimeout(route.timeoutMs, 'invalid_route')
+    const normalized: MobileHostRoute = Object.freeze({
+      method, path: normalizeRoutePath(route.path), ...(route.kind === undefined ? {} : { kind: route.kind }),
+      handle: route.handle.bind(route),
+      ...(routeTimeout === undefined ? {} : { timeoutMs: routeTimeout }),
+    })
     const key = routeKey(normalized)
     if (routeNames.has(key)) throw new MobileExtensionError('duplicate_route', `duplicate route ${key}`)
     routeNames.add(key)
     return normalized
   })
-  return Object.freeze({ ...manifest, ...(definition.actions === undefined ? {} : { actions: Object.freeze({ ...definition.actions }) }), ...(routes.length === 0 ? {} : { routes: Object.freeze(routes) }) })
+  return Object.freeze({ ...manifest, ...(definition.actions === undefined ? {} : { actions: Object.freeze(actions) }), ...(routes.length === 0 ? {} : { routes: Object.freeze(routes) }) })
 }
 
 interface CombinedSignalLifetime {
@@ -444,6 +476,8 @@ export class MobileAccessService extends Service {
   private readonly local = new Map<string, ActiveLocalExtension>()
   private readonly retired = new Map<string, RetiredLocalExtension>()
   private readonly failures = new Map<string, string>()
+  /** Extensions with caller-detached, still-unresolved operations. */
+  private readonly abandoned = new Map<string, number>()
   private readonly contentListeners = new Set<() => void>()
   private contentHash = createHash('sha256').update('').digest('hex')
   private localRoot: string | undefined
@@ -559,6 +593,24 @@ export class MobileAccessService extends Service {
     return { body: Buffer.from(asset.body), digest: asset.digest, name: asset.name }
   }
 
+  /** Reject new dispatches to an extension whose abandoned work is unresolved. */
+  private requireAdmission(id: string): void {
+    if ((this.abandoned.get(id) ?? 0) > 0) {
+      throw new MobileExtensionError('extension_busy', `extension ${id} has unresolved abandoned work`, 503)
+    }
+  }
+
+  /** Account for one operation until its underlying work actually settles. */
+  private trackOperation<T>(id: string, operation: BoundedOperation<T>): void {
+    operation.settled.then(() => {
+      if (operation.detached()) {
+        const remaining = (this.abandoned.get(id) ?? 1) - 1
+        if (remaining <= 0) this.abandoned.delete(id)
+        else this.abandoned.set(id, remaining)
+      }
+    }).catch(() => undefined)
+  }
+
   /** Invoke one action after parsing its input and binding the request lifetime. */
   async invoke(id: string, actionName: string, input: unknown, context: MobileActionContext, generation?: string): Promise<unknown> {
     const extension = this.extension(id, generation)
@@ -566,14 +618,45 @@ export class MobileAccessService extends Service {
     const definition = 'host' in extension ? extension.host : extension
     const action = definition.actions?.[actionName]
     if (action === undefined) throw new MobileExtensionError('action_not_found', 'action not found', 404)
-    let parsed: unknown
-    try { parsed = parseActionInput(action.input, input) } catch { throw new MobileExtensionError('invalid_action_input', 'action input is invalid', 400) }
-    const lifetime = 'host' in extension ? combineSignalLifetime(extension.controller.signal, context.signal) : undefined
-    const signal = lifetime?.signal ?? context.signal
-    try { return await action.run({ ...context, signal }, parsed) } catch (error) {
+    // A cancelled invocation must not execute host code or occupy admission accounting.
+    if ('host' in extension) extension.controller.signal.throwIfAborted()
+    context.signal.throwIfAborted()
+    this.requireAdmission(id)
+    const external = 'host' in extension ? combineSignalLifetime(extension.controller.signal, context.signal) : undefined
+    let operation: BoundedOperation<unknown> | undefined
+    try {
+      operation = startBoundedOperation(
+        signal => {
+          let parsed: unknown
+          try { parsed = parseActionInput(action.input, input) } catch { throw new MobileExtensionError('invalid_action_input', 'action input is invalid', 400) }
+          // Schema callables and parse adapters may validate asynchronously; both stay inside the budget,
+          // and a caller that detached mid-parse must not start a further execution stage.
+          return Promise.resolve(parsed).then(
+            value => {
+              signal.throwIfAborted()
+              return action.run({ ...context, signal }, value)
+            },
+            () => { throw new MobileExtensionError('invalid_action_input', 'action input is invalid', 400) },
+          )
+        },
+        {
+          external: external?.signal ?? context.signal,
+          timeoutMs: action.timeoutMs ?? HOST_OPERATION_TIMEOUT_MS,
+          timeoutError: () => new MobileExtensionError('extension_action_timeout', `extension ${id} action ${actionName} timed out`, 500),
+          onDetach: () => { this.abandoned.set(id, (this.abandoned.get(id) ?? 0) + 1) },
+        },
+      )
+      this.trackOperation(id, operation)
+      // Action values are JSON-serialized downstream; late values are simply discarded.
+      return await operation.caller
+    } catch (error) {
+      if (error instanceof OperationCancelled) throw error.reason
       if (error instanceof MobileExtensionError) throw error
       throw new MobileExtensionError('extension_failed', 'extension action failed', 500)
-    } finally { lifetime?.cleanup() }
+    } finally {
+      operation?.release()
+      external?.cleanup()
+    }
   }
 
   /** Match one route and invoke it with a generation-bound abort signal. */
@@ -588,23 +671,49 @@ export class MobileAccessService extends Service {
         : pathname === candidate.path || pathname.startsWith(`${candidate.path}/`)
     })
     if (route === undefined) throw new MobileExtensionError('route_not_found', 'route not found', 404)
-    const lifetime = 'host' in extension ? combineSignalLifetime(extension.controller.signal, request.signal) : undefined
-    let releaseLifetime = true
+    // A cancelled request must not execute host code or occupy admission accounting.
+    if ('host' in extension) extension.controller.signal.throwIfAborted()
+    request.signal.throwIfAborted()
+    this.requireAdmission(id)
+    const external = 'host' in extension ? combineSignalLifetime(extension.controller.signal, request.signal) : undefined
+    let operation: BoundedOperation<MobileRouteResponse> | undefined
+    let holdForStream = false
     try {
-      const routeRequest = lifetime === undefined ? request : { ...request, signal: lifetime.signal }
-      const result = await route.handle(routeRequest)
+      operation = startBoundedOperation(
+        signal => route.handle({ ...request, signal }),
+        {
+          external: external?.signal ?? request.signal,
+          timeoutMs: route.timeoutMs ?? HOST_OPERATION_TIMEOUT_MS,
+          timeoutError: () => new MobileExtensionError('extension_route_timeout', `extension ${id} route ${method} ${pathname} timed out`, 500),
+          onDetach: () => { this.abandoned.set(id, (this.abandoned.get(id) ?? 0) + 1) },
+        },
+      )
+      this.trackOperation(id, operation)
+      // A handler that resolves after its deadline may still open a stream nobody owns.
+      operation.settled.then(() => {
+        disposeLateExtensionResponse(operation?.lateValue())
+      }).catch(() => undefined)
+      const result = await operation.caller
       if (result === null || typeof result !== 'object' || typeof result.body !== 'string' && !(result.body instanceof Uint8Array) && !isReadable(result.body)) {
         throw new MobileExtensionError('invalid_route_response', 'extension returned an invalid response', 500)
       }
-      if (lifetime !== undefined && isReadable(result.body)) {
-        releaseLifetime = false
-        releaseSignalLifetimeWhenStreamSettles(result.body, lifetime.cleanup)
+      if (isReadable(result.body)) {
+        // The deadline ended at resolution; request and generation cancellation
+        // keep flowing until the returned stream itself settles.
+        holdForStream = true
+        releaseSignalLifetimeWhenStreamSettles(result.body, () => { operation?.release(); external?.cleanup() })
       }
       return result
     } catch (error) {
+      if (error instanceof OperationCancelled) throw error.reason
       if (error instanceof MobileExtensionError) throw error
       throw new MobileExtensionError('extension_failed', 'extension route failed', 500)
-    } finally { if (releaseLifetime) lifetime?.cleanup() }
+    } finally {
+      if (!holdForStream) {
+        operation?.release()
+        external?.cleanup()
+      }
+    }
   }
 
   /** Start the local directory watcher; an absent directory is intentionally inert. */
@@ -777,6 +886,17 @@ function isReadable(value: unknown): value is Readable {
   return value !== null && typeof value === 'object' && typeof (value as { pipe?: unknown }).pipe === 'function'
 }
 
+/** Destroy a route response that arrived after its caller detached; must never throw or emit unhandled stream errors. */
+export function disposeLateExtensionResponse(value: unknown): void {
+  try {
+    if (value === null || typeof value !== 'object') return
+    const body = (value as { readonly body?: unknown }).body
+    if (!isReadable(body) || typeof body.once !== 'function' || typeof body.destroy !== 'function') return
+    body.once('error', () => undefined)
+    body.destroy()
+  } catch { /* Invalid late results and disposal failures must not escape. */ }
+}
+
 function releaseSignalLifetimeWhenStreamSettles(stream: Readable, cleanup: () => void): void {
   let stopObserving: (() => void) | undefined
   stopObserving = finished(stream, () => {
@@ -801,6 +921,100 @@ async function settleBounded(pending: readonly Promise<unknown>[], timeoutMs: nu
     new Promise<void>(resolveTimeout => { timer = setTimeout(resolveTimeout, timeoutMs) }),
   ])
   if (timer !== undefined) clearTimeout(timer)
+}
+
+/** Sentinel distinguishing caller detachment (deadline or external cancel) from a host error. */
+class OperationCancelled {
+  constructor(readonly reason: unknown) {}
+}
+
+/**
+ * Run one extension operation under a per-invocation deadline.
+ *
+ * Releasing the caller, stopping the wait, and stopping the work are separate
+ * concerns: the caller settles at the deadline (or on external cancellation)
+ * even when the host ignores its signal, while the underlying work is observed
+ * to settlement so late results can be disposed and accounted for.
+ */
+interface BoundedOperation<T> {
+  /** Settles exactly once with the caller-visible outcome. */
+  readonly caller: Promise<T>
+  /** Settles when the underlying work settles; never rejects. */
+  readonly settled: Promise<void>
+  /** Whether the caller detached before the work settled. */
+  detached(): boolean
+  /** The value when the work fulfilled after the caller detached. */
+  lateValue(): T | undefined
+  /** End the per-invocation cancellation lifetime exactly once. */
+  release(): void
+}
+
+function startBoundedOperation<T>(
+  start: (signal: AbortSignal) => T | Promise<T>,
+  options: {
+    readonly external: AbortSignal | undefined
+    readonly timeoutMs: number
+    readonly timeoutError: () => MobileExtensionError
+    /** Invoked at most once when the caller detaches with work unresolved. */
+    readonly onDetach?: () => void
+  },
+): BoundedOperation<T> {
+  const deadline = new AbortController()
+  const combined = options.external === undefined
+    ? { signal: deadline.signal, cleanup: (): void => undefined }
+    : combineSignalLifetime(options.external, deadline.signal)
+  let detached = false
+  let workState: 'fulfilled' | 'rejected' | undefined
+  let lateFulfilled: T | undefined
+  let notifySettled: (() => void) | undefined
+  let callerTimer: NodeJS.Timeout | undefined
+  let onExternal: (() => void) | undefined
+  const settled = new Promise<void>(resolve => { notifySettled = resolve })
+  const detach = (reject: (reason?: unknown) => void, reason: unknown): void => {
+    // A queued timer must not detach work that already settled.
+    if (detached || workState !== undefined) return
+    detached = true
+    // The caller is gone: stop its timer and observer, and record abandonment
+    // before firing cancellation listeners so re-entrant dispatch is gated.
+    if (callerTimer !== undefined) clearTimeout(callerTimer)
+    if (onExternal !== undefined) options.external?.removeEventListener('abort', onExternal)
+    options.onDetach?.()
+    deadline.abort(reason)
+    reject(new OperationCancelled(reason))
+  }
+  const caller = new Promise<T>((resolve, reject) => {
+    callerTimer = setTimeout(() => detach(reject, options.timeoutError()), options.timeoutMs)
+    onExternal = (): void => { detach(reject, combined.signal.reason) }
+    options.external?.addEventListener('abort', onExternal, { once: true })
+    void (async (): Promise<void> => {
+      try {
+        const value = await start(combined.signal)
+        workState = 'fulfilled'
+        if (callerTimer !== undefined) clearTimeout(callerTimer)
+        if (onExternal !== undefined) options.external?.removeEventListener('abort', onExternal)
+        // A detached caller owns nothing anymore; a live caller decides via release().
+        if (detached) combined.cleanup()
+        if (detached) lateFulfilled = value
+        else resolve(value)
+        notifySettled?.()
+      } catch (error) {
+        workState = 'rejected'
+        if (callerTimer !== undefined) clearTimeout(callerTimer)
+        if (onExternal !== undefined) options.external?.removeEventListener('abort', onExternal)
+        if (detached) combined.cleanup()
+        if (!detached) reject(error)
+        notifySettled?.()
+      }
+    })()
+  })
+  let released = false
+  return {
+    caller,
+    settled,
+    detached: () => detached,
+    lateValue: () => (detached && workState === 'fulfilled' ? lateFulfilled : undefined),
+    release: () => { if (!released) { released = true; combined.cleanup() } },
+  }
 }
 
 async function abortAndDisposeLocal(entries: readonly ActiveLocalExtension[]): Promise<void> {

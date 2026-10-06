@@ -9,11 +9,16 @@ import { ensureMobileCompatibility, MOBILE_COMPAT_PATH } from '../src/mobile-com
 
 let directory: string
 let bundle: string
+let nativeShim: string
 
 beforeAll(async () => {
   directory = await mkdtemp(join(tmpdir(), 'dsh-mobile-compat-'))
   await build({ ...mobileCompatibilityBuild, config: false, outDir: directory, sourcemap: false })
   bundle = await readFile(join(directory, 'mobile-compat.js'), 'utf8')
+  const source = await readFile(join(import.meta.dirname, '../apps/mobile/android/app/src/main/java/io/github/sayach/dshmobile/WebViewCompatibilityShim.kt'), 'utf8')
+  const match = /internal const val BROWSER_COMPATIBILITY_SHIM = """([\s\S]*?)"""/u.exec(source)
+  if (match?.[1] === undefined) throw new Error('Android document-start source was not found')
+  nativeShim = match[1]
 })
 
 afterAll(async () => {
@@ -24,10 +29,17 @@ afterAll(async () => {
 })
 
 function legacyPage(): Context {
-  const page = createContext({})
+  const signal = class PageAbortSignal extends AbortSignal {}
+  Object.defineProperty(signal, 'any', { value: undefined, writable: true, configurable: true })
+  for (const name of ['aborted', 'reason']) {
+    const descriptor = Object.getOwnPropertyDescriptor(AbortSignal.prototype, name)
+    if (descriptor === undefined) throw new Error(`Native AbortSignal.${name} getter was not found`)
+    Object.defineProperty(signal.prototype, name, descriptor)
+  }
+  const page = createContext({ AbortSignal: signal, AbortController, Event, EventTarget })
   runInContext('var intrinsicIterator = Object.getPrototypeOf(Object.getPrototypeOf([][Symbol.iterator]())); ' +
     'for (var key of Reflect.ownKeys(intrinsicIterator)) { if (key !== Symbol.iterator) delete intrinsicIterator[key]; } ' +
-    'delete globalThis.Iterator;', page)
+    'delete globalThis.Iterator; delete Promise.withResolvers;', page)
   return page
 }
 
@@ -133,5 +145,108 @@ describe('early WebView Iterator compatibility', () => {
     expect(ensureMobileCompatibility(decoy)).toContain(`<script src="${MOBILE_COMPAT_PATH}" nonce="real"></script>`)
     const after = `<script nonce="real" data-nonce="decoy"></script>`
     expect(ensureMobileCompatibility(after)).toContain(`nonce="real"`)
+  })
+})
+
+describe('early Promise capabilities', () => {
+  for (const mode of ['bundle', 'Android document-start'] as const) {
+    const install = (page: Context): void => { runInContext(mode === 'bundle' ? bundle : nativeShim, page) }
+
+    it(`${mode} preserves constructor receivers, settlements and non-enumerable properties`, async () => {
+      const page = legacyPage()
+      install(page)
+      expect(runInContext('class P extends Promise {}; P.withResolvers().promise instanceof P', page)).toBe(true)
+      expect(() => runInContext('Promise.withResolvers.call({})', page)).toThrow()
+      expect(() => runInContext('Promise.withResolvers.call(function () {})', page)).toThrow()
+      expect(() => runInContext('Promise.withResolvers.call(function (executor) { executor(1, 2); })', page)).toThrow()
+      expect(runInContext('Object.getOwnPropertyDescriptor(Promise, "withResolvers").enumerable', page)).toBe(false)
+      expect(runInContext('Object.getOwnPropertyDescriptor(Promise, "withResolvers").writable', page)).toBe(true)
+      await expect(runInContext('var fulfilled = Promise.withResolvers(); fulfilled.resolve(17); fulfilled.promise', page)).resolves.toBe(17)
+      await expect(runInContext('var rejected = Promise.withResolvers(); rejected.reject("cancelled"); rejected.promise', page)).rejects.toBe('cancelled')
+      const installed = runInContext('Promise.withResolvers', page)
+      install(page)
+      expect(runInContext('Promise.withResolvers', page)).toBe(installed)
+      expect(runInContext('var bootReady = Promise.withResolvers(); typeof bootReady.resolve', page)).toBe('function')
+    })
+
+    it(`${mode} leaves native capabilities unchanged`, () => {
+      const page = createContext({})
+      const native = runInContext('Promise.withResolvers', page)
+      install(page)
+      expect(runInContext('Promise.withResolvers', page)).toBe(native)
+    })
+  }
+})
+
+describe('early AbortSignal composition', () => {
+  it('accepts iterables, validates the complete sequence and retains first-aborted ordering', () => {
+    const page = legacyPage()
+    load(page)
+    expect(runInContext('var first = new AbortController(); var second = new AbortController(); first.abort("first"); second.abort("second"); AbortSignal.any(new Set([second.signal, first.signal])).reason', page)).toBe('second')
+    expect(runInContext('AbortSignal.any((function* () { yield first.signal; })()).reason', page)).toBe('first')
+    expect(runInContext('AbortSignal.any([]).aborted', page)).toBe(false)
+    for (const input of ['null', '{}', '[first.signal, {}]', '[{ aborted: false, addEventListener() {} }]']) {
+      expect(() => runInContext(`AbortSignal.any(${input})`, page)).toThrow()
+    }
+    expect(runInContext('Object.getOwnPropertyDescriptor(AbortSignal, "any").enumerable', page)).toBe(false)
+    expect(runInContext('var pending = new AbortController(); var iterable = AbortSignal.any(new Set([pending.signal])); pending.abort("iterable"); iterable.reason', page)).toBe('iterable')
+    expect(runInContext('var closed = false; try { AbortSignal.any((function* () { try { yield {}; throw new Error("must not advance"); } finally { closed = true; } })()); } catch (error) {} closed', page)).toBe(true)
+  })
+
+  it('aborts synchronously with exact reason identity and detaches every source listener', () => {
+    const page = legacyPage()
+    load(page)
+    expect(runInContext(`
+      var sources = [new AbortController(), new AbortController()];
+      var added = 0, removed = 0;
+      for (var source of sources) {
+        var signal = source.signal;
+        signal.addEventListener = function (...args) { added++; return EventTarget.prototype.addEventListener.apply(this, args); };
+        signal.removeEventListener = function (...args) { removed++; return EventTarget.prototype.removeEventListener.apply(this, args); };
+      }
+      var result = AbortSignal.any([sources[0].signal, sources[1].signal, sources[0].signal]);
+      var events = 0, reason = {};
+      result.addEventListener('abort', () => events++);
+      sources[1].abort(reason);
+      sources[0].abort('later');
+      [result.aborted, result.reason === reason, events, added, removed];
+    `, page)).toEqual([true, true, 1, 2, 2])
+  })
+
+  it('ignores synthetic abort events without consuming the real cancellation listener', () => {
+    const page = legacyPage()
+    load(page)
+    expect(runInContext('var source = new AbortController(); var result = AbortSignal.any([source.signal]); source.signal.dispatchEvent(new Event("abort")); result.aborted', page)).toBe(false)
+    expect(runInContext('source.abort("actual"); result.reason', page)).toBe('actual')
+  })
+
+  it('accepts native signals from another realm and does not mutate the process constructor', () => {
+    const native = AbortSignal.any
+    const page = legacyPage()
+    const other = new AbortController()
+    page.otherSignal = other.signal
+    load(page)
+    expect(runInContext('var result = AbortSignal.any([otherSignal]); result.aborted', page)).toBe(false)
+    other.abort('other realm')
+    expect(runInContext('result.reason', page)).toBe('other realm')
+    expect(AbortSignal.any).toBe(native)
+  })
+
+  it('does not replace native composition and remains stable after a second load', () => {
+    const nativePage = createContext({ AbortSignal, AbortController })
+    load(nativePage)
+    expect(runInContext('AbortSignal.any', nativePage)).toBe(AbortSignal.any)
+    const legacy = legacyPage()
+    load(legacy)
+    const installed = runInContext('AbortSignal.any', legacy)
+    load(legacy)
+    expect(runInContext('AbortSignal.any', legacy)).toBe(installed)
+  })
+
+  it('still composes and detaches sources when weak-reference APIs are absent', () => {
+    const page = legacyPage()
+    runInContext('delete globalThis.WeakRef; delete globalThis.FinalizationRegistry;', page)
+    load(page)
+    expect(runInContext('var source = new AbortController(); var removed = 0; source.signal.removeEventListener = function (...args) { removed++; return EventTarget.prototype.removeEventListener.apply(this, args); }; var result = AbortSignal.any([source.signal]); source.abort("fallback"); [result.reason, removed]', page)).toEqual(['fallback', 1])
   })
 })

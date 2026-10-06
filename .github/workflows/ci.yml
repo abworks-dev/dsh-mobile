@@ -52,9 +52,25 @@ jobs:
       - run: npm run smoke:native-layout
       - run: npm run smoke:voice-session
       - run: npm run smoke:composer-keyboard
+      - run: npm run smoke:composer-overflow
+      - name: Verify early browser compatibility semantics
+        if: matrix.dsh == '0.2.0-rc.2'
+        run: npm run smoke:mobile-compat
       - run: npm run smoke:browser-auth-cookies
       - run: npm run smoke:question-fixes
       - run: npm run smoke:dsh-boot
+      - name: Verify old-WebView API fallback and directory browsing
+        if: matrix.dsh == '0.2.0-rc.2'
+        run: npm run smoke:dsh-boot -- --legacy-webview
+      - name: Reject old-WebView boot without the compatibility script
+        if: matrix.dsh == '0.2.0-rc.2'
+        shell: bash
+        run: |
+          if npm run smoke:dsh-boot -- --legacy-webview --negative-control-compat > "$RUNNER_TEMP/compat-negative.log" 2>&1; then
+            cat "$RUNNER_TEMP/compat-negative.log"
+            exit 1
+          fi
+          node -e "const fs=require('node:fs'); const text=fs.readFileSync(process.env.RUNNER_TEMP+'/compat-negative.log','utf8'); if(!text.includes('Legacy compatibility negative control detected')) { console.error(text); process.exit(1); }"
       - name: Verify the stock composer through the packed Mobile profile
         if: matrix.dsh == '0.2.0-rc.2'
         run: npm run smoke:dsh-composer

@@ -90,7 +90,10 @@ export interface PluginConfig {
   maxActiveRequests?: number
   maxWebSockets?: number
   maxBodyBytes?: number
+  /** Transport, upload, static-response and WebSocket-handshake idle timeout. */
   upstreamTimeoutMs?: number
+  /** Authenticated /api response idle timeout after upload; zero disables it. */
+  upstreamApiTimeoutMs?: number
   rateLimitWindowMs?: number
   maxPairingAttempts?: number
   maxRateLimitKeys?: number
@@ -129,6 +132,7 @@ export interface ResolvedGatewayConfig {
   readonly maxWebSockets: number
   readonly maxBodyBytes: number
   readonly upstreamTimeoutMs: number
+  readonly upstreamApiTimeoutMs: number
   readonly rateLimitWindowMs: number
   readonly maxPairingAttempts: number
   readonly maxRateLimitKeys: number
@@ -177,6 +181,7 @@ export const Config: z<PluginConfig> = z.object({
   maxWebSockets: z.natural(),
   maxBodyBytes: z.natural(),
   upstreamTimeoutMs: z.natural(),
+  upstreamApiTimeoutMs: z.natural(),
   rateLimitWindowMs: z.natural(),
   maxPairingAttempts: z.natural(),
   maxRateLimitKeys: z.natural(),
@@ -385,6 +390,7 @@ export function parseGatewayConfig(raw: unknown): ResolvedGatewayConfig {
     maxWebSockets: integer(value.maxWebSockets, 'maxWebSockets', 16, 1, 256),
     maxBodyBytes: integer(value.maxBodyBytes, 'maxBodyBytes', 160 * 1024 * 1024, 1024, 256 * 1024 * 1024),
     upstreamTimeoutMs: integer(value.upstreamTimeoutMs, 'upstreamTimeoutMs', 30_000, 1_000, 300_000),
+    upstreamApiTimeoutMs: integer(value.upstreamApiTimeoutMs, 'upstreamApiTimeoutMs', 0, 0, 2_147_483_647),
     rateLimitWindowMs: integer(value.rateLimitWindowMs, 'rateLimitWindowMs', 60_000, 1_000, 3_600_000),
     maxPairingAttempts: integer(value.maxPairingAttempts, 'maxPairingAttempts', 8, 1, 100),
     maxRateLimitKeys: integer(value.maxRateLimitKeys, 'maxRateLimitKeys', 256, 1, 4096),

@@ -29,10 +29,8 @@ function commentRanges(html: string): readonly (readonly [number, number])[] {
 /**
  * Load the compatibility bundle synchronously, before the first DSH script.
  *
- * Returns the HTML unchanged when there is no script to anchor to. The bundle is an
- * enhancement for WebViews without Iterator helpers, so a document this function
- * cannot place it in must still be served: throwing here took the entire dedicated
- * mobile frontend down with a 502.
+ * Returns the HTML unchanged when there is no executable script to anchor to.
+ * The bundle supplies missing browser APIs before the page's scripts execute.
  */
 export function ensureMobileCompatibility(html: string): string {
   const comments = commentRanges(html)
