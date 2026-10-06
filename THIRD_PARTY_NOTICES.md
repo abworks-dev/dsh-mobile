@@ -14,7 +14,7 @@ The Android App runtime contains [Kotlin standard library](https://github.com/Je
 
 ## core-js browser compatibility bundle
 
-The standalone `lib/mobile-compat.js` bundles selected Iterator modules from [core-js](https://github.com/zloirock/core-js) `^3.50.0` (exact version recorded in `package-lock.json`). It is built into the npm package; browsers do not download a polyfill from a CDN. core-js is distributed under the following MIT License:
+The standalone `lib/mobile-compat.js` bundles selected Iterator and `Promise.withResolvers` modules from [core-js](https://github.com/zloirock/core-js) `^3.50.0` (exact version recorded in `package-lock.json`). It is built into the npm package; browsers do not download a polyfill from a CDN. core-js is distributed under the following MIT License:
 
 ```text
 Copyright (c) 2013–2025 Denis Pushkarev (zloirock.ru)
