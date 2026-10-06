@@ -2190,6 +2190,11 @@ class MainActivity : Activity() {
             mediaPlaybackRequiresUserGesture = true
             userAgentString = "$userAgentString DSHMobile/${BuildConfig.VERSION_NAME}"
         }
+        // Old system WebViews lack Promise.withResolvers (Chrome 119+) and
+        // AbortSignal.any (Chrome 116+). The DSH client and the host's inline
+        // boot-readiness script require both; without them every realtime
+        // socket closes right after the handshake and the workspace stays empty.
+        installBrowserCompatibilityShim(browser)
         WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG)
         CookieManager.getInstance().apply {
             setAcceptCookie(true)
