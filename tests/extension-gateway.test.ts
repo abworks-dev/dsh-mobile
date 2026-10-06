@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { parseGatewayConfig } from '../src/config.js'
-import { MobileAccessService } from '../src/extensions.js'
+import { MobileAccessService, type MobileRouteResponse } from '../src/extensions.js'
 import { MobileAccessGateway } from '../src/gateway.js'
 import { CSRF_HEADER, SESSION_COOKIE } from '../src/http-security.js'
 import { MemoryDeviceStore } from '../src/storage.js'
@@ -127,6 +127,93 @@ describe('gateway extension namespace', () => {
     expect(invalidContentType.status).toBe(500); expect(JSON.parse(invalidContentType.body)).toEqual({ error: 'invalid_route_response' })
     const invalidContentControl = await request(gateway.address().port, '/mobile-access/extensions/hello/routes/bad-content-control', { headers })
     expect(invalidContentControl.status).toBe(500); expect(JSON.parse(invalidContentControl.body)).toEqual({ error: 'invalid_route_response' })
+  })
+
+  const stubbedNeverSettlingService = (service: MobileAccessService): MobileAccessService => {
+    const stub = Object.create(service) as MobileAccessService
+    ;(stub as unknown as { invoke: () => Promise<unknown> }).invoke = () => new Promise(() => {})
+    ;(stub as unknown as { route: () => Promise<MobileRouteResponse> }).route = () => new Promise(() => {})
+    return stub
+  }
+
+  const slotReleaseFixture = async (): Promise<{
+    readonly port: number
+    readonly headers: Record<string, string>
+    readonly probe: () => Promise<{ status: number; body: string }>
+  }> => {
+    const upstream = createServer((_, response) => { response.writeHead(200); response.end('ok') })
+    const upstreamPort = await listen(upstream)
+    cleanups.push(async () => { upstream.closeAllConnections(); await new Promise<void>(resolve => upstream.close(() => resolve())) })
+    const directory = await mkdtemp(join(tmpdir(), 'dsh-mobile-extension-slot-release-'))
+    cleanups.push(() => rm(directory, { recursive: true, force: true }))
+    const context = new Context(); cleanups.push(() => context.fiber.dispose())
+    const service = stubbedNeverSettlingService(new MobileAccessService(context))
+    service.registerExtension({
+      schemaVersion: 1, id: 'stuck', name: 'Stuck', version: '1.0.0',
+      actions: { never: { run: async () => ({}) } },
+      routes: [{ method: 'GET', path: 'hang', handle: async () => ({ body: 'unreachable' }) }],
+    })
+    const config = parseGatewayConfig({
+      listenHost: '127.0.0.1', listenPort: 0,
+      upstreamOrigin: `http://127.0.0.1:${String(upstreamPort)}`,
+      publicAuthorities: ['127.0.0.1'], allowedCidrs: ['127.0.0.0/8'],
+      stateFile: join(directory, 'devices.json'), tls: { mode: 'disabled' },
+      maxActiveRequests: 1, maxBodyBytes: 1024,
+    })
+    const gateway = new MobileAccessGateway(config, new MemoryDeviceStore(), service)
+    await gateway.start(); cleanups.push(() => gateway.close())
+    const opened = await gateway.access.openPairing()
+    const origin = gateway.address().origin
+    const paired = await request(gateway.address().port, '/mobile-access/auth/pair', {
+      method: 'POST',
+      headers: { host: new URL(origin).host, origin, 'sec-fetch-site': 'same-origin', 'content-type': 'application/json' },
+      body: JSON.stringify({ token: opened.token }),
+    })
+    expect(paired.status).toBe(201)
+    const session = cookie(paired.headers, SESSION_COOKIE); const csrf = JSON.parse(paired.body) as { csrfToken: string }
+    const headers = {
+      host: new URL(origin).host, origin, 'sec-fetch-site': 'same-origin', cookie: session,
+      [CSRF_HEADER]: csrf.csrfToken, 'content-type': 'application/json',
+    }
+    return {
+      port: gateway.address().port,
+      headers,
+      probe: () => request(gateway.address().port, '/', { headers }),
+    }
+  }
+
+  it('releases an action request slot when the service never settles and the caller disconnects', async () => {
+    const { port, headers, probe } = await slotReleaseFixture()
+    const body = '{}'
+    const hung = pendingRequest(port, '/mobile-access/extensions/stuck/actions/never', 'POST', {
+      ...headers, 'content-length': String(Buffer.byteLength(body)),
+    })
+    cleanups.push(async () => { hung.outgoing.destroy() })
+    void hung.result.catch(() => undefined)
+    hung.outgoing.end(body)
+    await new Promise(resolve => setTimeout(resolve, 50))
+    const occupied = await probe()
+    expect(occupied.status).toBe(429)
+    expect(JSON.parse(occupied.body)).toEqual({ error: 'busy' })
+    hung.outgoing.destroy()
+    await new Promise(resolve => setTimeout(resolve, 50))
+    const freed = await probe()
+    expect(freed.status).toBe(200)
+  })
+
+  it('releases a route request slot when the service never settles and the caller disconnects', async () => {
+    const { port, headers, probe } = await slotReleaseFixture()
+    const hung = pendingRequest(port, '/mobile-access/extensions/stuck/routes/hang', 'GET', headers)
+    cleanups.push(async () => { hung.outgoing.destroy() })
+    void hung.result.catch(() => undefined)
+    hung.outgoing.end()
+    await new Promise(resolve => setTimeout(resolve, 50))
+    const occupied = await probe()
+    expect(occupied.status).toBe(429)
+    hung.outgoing.destroy()
+    await new Promise(resolve => setTimeout(resolve, 50))
+    const freed = await probe()
+    expect(freed.status).toBe(200)
   })
 
   it('routes old mobile UI requests to their retained Host and asset generation', async () => {

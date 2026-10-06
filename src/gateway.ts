@@ -1970,7 +1970,8 @@ export class MobileAccessGateway {
       const generation = extensionGeneration(headerValue(request.headers, EXTENSION_GENERATION_HEADER))
       const operation = this.allocateRequest(authorization, response, {})
       const abort = new AbortController()
-      response.once('close', () => { abort.abort() })
+      // Release bookkeeping before signalling, so a closed response can never pin a slot.
+      response.once('close', () => { operation.release(); abort.abort() })
       const generationSignal = extensions.signal(targetInfo.id, generation)
       const onGenerationAbort = (): void => { abort.abort(); if (!response.destroyed) response.destroy() }
       generationSignal?.addEventListener('abort', onGenerationAbort, { once: true })
@@ -1995,7 +1996,8 @@ export class MobileAccessGateway {
       const generation = extensionGeneration(headerValue(request.headers, EXTENSION_GENERATION_HEADER))
       const operation = this.allocateRequest(authorization, response, {})
       const abort = new AbortController()
-      response.once('close', () => { abort.abort() })
+      // Release bookkeeping before signalling, so a closed response can never pin a slot.
+      response.once('close', () => { operation.release(); abort.abort() })
       const generationSignal = extensions.signal(targetInfo.id, generation)
       const onGenerationAbort = (): void => { abort.abort(); if (!response.destroyed) response.destroy() }
       generationSignal?.addEventListener('abort', onGenerationAbort, { once: true })
