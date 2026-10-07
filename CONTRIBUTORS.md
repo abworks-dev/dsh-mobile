@@ -25,11 +25,11 @@ GitHub's Contributors graph counts commits on the default branch; issue reports 
 | [@xhwxt](https://github.com/xhwxt) | [#105](https://github.com/saya-ch/dsh-mobile/pull/105), [#134](https://github.com/saya-ch/dsh-mobile/pull/134) |
 | [@xingleiwu](https://github.com/xingleiwu) | [#79](https://github.com/saya-ch/dsh-mobile/pull/79), [#84](https://github.com/saya-ch/dsh-mobile/pull/84), [#85](https://github.com/saya-ch/dsh-mobile/pull/85), [#86](https://github.com/saya-ch/dsh-mobile/pull/86) |
 
-## 待发布版本已整合 / Integrated in the unreleased version
+## 0.6.0 代码贡献 / Code contributions in 0.6.0
 
-以下 PR 构成 0.5.6 待发布版本的新代码贡献，保留原作者提交并追加维护者修正。 / These PRs contribute code to the unreleased 0.5.6 version; original author commits are retained alongside maintainer corrections.
+以下 PR 通过整合 [#182](https://github.com/saya-ch/dsh-mobile/pull/182) 纳入 0.6.0，保留原作者提交并追加维护者修正。 / These PRs contribute code to 0.6.0 through integration [#182](https://github.com/saya-ch/dsh-mobile/pull/182); original author commits are retained alongside maintainer corrections.
 
-本轮 #173、#175、#176、#177、#179、#180、#181 已在开发整合分支本地合并，截至 2026-10-07 在 GitHub 上仍为 Open，不计入上方默认分支的已合并记录。0.5.6 尚未发布。 / PRs #173, #175, #176, #177, #179, #180, and #181 are locally merged in the development integration branch and remain Open on GitHub as of 2026-10-07. They are not listed as default-branch merges above; 0.5.6 is not released.
+这批贡献包含资源重试、托管 Caddy 实现、应用图标、扫码改进、电脑切换快捷方式和设备排序；实际发布范围及组件可用性见 [更新记录](CHANGELOG.md#060---2026-10-07)。 / These contributions cover resource retries, the managed Caddy implementation, launcher icons, scanning, the computer-switch shortcut and device ordering. See [release notes](CHANGELOG.md#060---2026-10-07) for the shipped scope and component availability.
 
 | 社区成员 / Community member | 已整合 PR / Integrated PRs |
 | --- | --- |

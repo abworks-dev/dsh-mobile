@@ -76,7 +76,7 @@ These optional fields sit alongside `paths`; their defaults normally suffice:
 
 Restart DSH and reopen the phone page after a change. Developer tools can show whether the WebSocket handshake negotiated `permessage-deflate`; a client that does not negotiate it can still connect without compression. Compare actual channel transfer volume and CPU use for the same Session, rather than judging savings from the decompressed message lengths shown in developer tools. Set `paths` back to `[]` to disable it. Compression does not raise provider quotas or replace connection troubleshooting.
 
-## Manual compaction and long-running API requests (0.5.6, unreleased)
+## Manual compaction and long-running API requests (0.6.0)
 
 Commands such as `/compact` sent from the phone traverse the Mobile gateway's HTTP API. Automatic compaction inside DSH does not traverse that gateway request. Older gateways used the default 30-second `upstreamTimeoutMs` for every proxied request, so manual compaction could return `502 upstream_unavailable` while the model was still producing the summary. [#171](https://github.com/saya-ch/dsh-mobile/issues/171) records this case.
 

@@ -2,9 +2,9 @@
 
 Notable changes are recorded here. GitHub Releases provide the downloadable packages and generated commit notes.
 
-## Unreleased
+## 0.6.0 - 2026-10-07
 
-**0.5.6 is a release candidate, not a published version.** The stable npm package and signed Android download remain 0.5.5. Original community commits are preserved alongside maintainer fixes; see [Contributors](CONTRIBUTORS.md).
+Add mobile page module management, Android launcher choices, fixed device ordering and improved scanning, alongside connection, layout and WebView compatibility fixes. Update the plugin and Android app together. Original community commits are preserved alongside maintainer fixes; see [Contributors](CONTRIBUTORS.md).
 
 ### Connection reliability and compatibility
 
@@ -36,7 +36,7 @@ Notable changes are recorded here. GitHub Releases provide the downloadable pack
 ### Component availability and documentation
 
 - Integrate managed Caddy as an upstream mode of Own reverse proxy, with separate private process/Gateway ownership. External mode remains the default and retains its settings and paired devices. **Managed installation is still disabled**: trusted pinned binaries have not been distributed, despite a fixed build and isolated TLS/authentication/API/WebSocket validation. Thanks @abworks-dev for [#176](https://github.com/saya-ch/dsh-mobile/pull/176). [Status](docs/CADDY_MANAGED.en.md).
-- Reorganize setup, connection and developer guides; distinguish stable/candidate features, precise cleanup scope and Cloudflare Quick Tunnel notification limits. Add local documentation checks and release guards for stale Android manuals.
+- Reorganize setup, connection and developer guides; clarify component availability, cleanup scope and Cloudflare Quick Tunnel notification limits. Add local documentation checks and release guards for stale Android manuals.
 
 ## 0.5.5 - 2026-10-04
 

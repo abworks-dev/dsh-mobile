@@ -31,14 +31,14 @@
 
 > DSH Mobile is a DeepSeek Harness community plugin; the native app supports Android only.
 >
-> **Current stable release: 0.5.5**. Improve the phone composer and model-search input sizes, fix Android model-menu Back, rotation attachment loss and revocation status, and add macOS cloudflared support. [Release notes](CHANGELOG.md#055---2026-10-04).
+> **Current stable release: 0.6.0**. Add mobile page module management, app icon choices and device ordering; improve scanning, mobile layout, remote loading and older WebView compatibility. [Release notes](CHANGELOG.md#060---2026-10-07).
 >
-> **Upgrade reminder**: update the plugin and Android app together to 0.5.5 for all fixes. Older official apps with the same signer can be upgraded in place while keeping pairings. [Compatibility notes](#compatibility).
+> **Upgrade reminder**: update the plugin and Android app together to 0.6.0 for all features and fixes. Older official apps with the same signer can be upgraded in place while keeping pairings. [Compatibility notes](#compatibility).
 
 <p align="center">
-  <a href="https://github.com/saya-ch/dsh-mobile/releases/download/v0.5.5/dsh-mobile-android-v0.5.5.apk"><img src="https://raw.githubusercontent.com/saya-ch/dsh-mobile/main/assets/brand/app-icon-rounded.svg" alt="DSH Mobile Android app icon" width="72" height="72"></a><br>
-  <a href="https://github.com/saya-ch/dsh-mobile/releases/download/v0.5.5/dsh-mobile-android-v0.5.5.apk"><strong>Download Android app 0.5.5</strong></a><br>
-  <sub><a href="https://github.com/saya-ch/dsh-mobile/releases/tag/v0.5.5">Release notes and checksums</a></sub>
+  <a href="https://github.com/saya-ch/dsh-mobile/releases/download/v0.6.0/dsh-mobile-android-v0.6.0.apk"><img src="https://raw.githubusercontent.com/saya-ch/dsh-mobile/main/assets/brand/app-icon-rounded.svg" alt="DSH Mobile Android app icon" width="72" height="72"></a><br>
+  <a href="https://github.com/saya-ch/dsh-mobile/releases/download/v0.6.0/dsh-mobile-android-v0.6.0.apk"><strong>Download Android app 0.6.0</strong></a><br>
+  <sub><a href="https://github.com/saya-ch/dsh-mobile/releases/tag/v0.6.0">Release notes and checksums</a></sub>
 </p>
 
 DSH Mobile is a DeepSeek Harness plugin that lets a mobile browser or the Android app connect over a protected LAN or an optional Tailscale Funnel, cpolar, cloudflared, self-hosted FRP, or own reverse-proxy remote path. Both routes reach the same sessions, Workspaces, messages, and tools. The computer manages their switches and pairing authorizations separately; the Android app lists paired computers together. The plugin does not modify DeepSeek Harness source.
@@ -71,9 +71,9 @@ Model-search and pairing-page input sizes are corrected, and Android Back naviga
 
 </details>
 
-## 0.5.6 update (unreleased)
+## 0.6.0 update
 
-This section describes the development candidate. The official download remains **0.5.5**; 0.5.6 is not released. See the complete [changelog](CHANGELOG.md#unreleased).
+This update focuses on module management, app personalization and mobile access. See the complete [changelog](CHANGELOG.md#060---2026-10-07).
 
 - **Connections and loading**: retry transient static-resource failures, and separate long-running DSH API waits from ordinary transport timeouts. API and write requests are not replayed. [Slow-link guide](docs/SLOW_CONNECTIONS.en.md)
 - **Mobile layout**: a compact composer with reachable controls while the keyboard is open or text is enlarged; independent mobile font size, touch-browser Enter for newlines, and narrow-panel Back to conversation.
@@ -90,6 +90,8 @@ Install the plugin on the computer, then pair the Android app or a mobile browse
 ### Official DSH Desktop
 
 Install and enable `dsh-mobile` from the app's **Plugins** page, then open **Mobile Access** to configure LAN or a remote channel. The app manages its Desktop profile; the `--profile web` commands below do not apply to it.
+
+After installing or updating, quit Desktop from the application menu and reopen it. If it reports `dsh-mobile-question-fixes: failed to import`, complete this restart so Desktop reads the bundled component again. You do not need to clear sessions or pairing data.
 
 ### DSH Web
 
@@ -155,7 +157,7 @@ Port note: `dsh web --port` changes the DSH Web upstream port (3080 by default),
 
 Headless Linux hosts, and browsers that open DSH Web through a LAN IP or reverse proxy, can use the same **Mobile access** control in the lower-left corner. The admin API still requires a loopback TCP peer (for example a local `socat` or reverse proxy to `127.0.0.1`) so the plugin itself is not LAN-exposed. The browser Host may be `localhost`, RFC1918, or an IPv4 link-local address; public IPs and arbitrary DNS names still return 403. The reverse proxy must be limited to trusted local or LAN callers and must not publicly forward `/api/mobile-access`. The dedicated Mobile HTTPS listener (3443 by default) remains the phone surface and does not become the desktop admin panel.
 
-For a routed network such as WireGuard, the 0.5.6 candidate offers [additional trusted networks](docs/TRUSTED_NETWORKS.en.md). It adds explicit source CIDRs only, without creating a VPN or routes or changing Windows firewall rules.
+For a routed network such as WireGuard, 0.6.0 offers [additional trusted networks](docs/TRUSTED_NETWORKS.en.md). It adds explicit source CIDRs only, without creating a VPN or routes or changing Windows firewall rules.
 
 </details>
 
@@ -260,7 +262,7 @@ Each row shows its custom name, transport, Origin, periodically refreshed reacha
 - **Startup behavior → Show device list**: choose a computer on every launch, which is useful when switching between several machines. Open the list's top-right **Settings → Startup behavior**; changes are saved immediately.
 - Tap a row to connect. The overflow button and long press open the same action sheet for rename, check now, pair again, or delete the local record. Deletion has a second confirmation and a short undo window; undo restores only the local row and never restores a computer-side revocation.
 - Open DSH **Settings → General → Switch computer** in the WebView to return to the list. An online computer-side revocation keeps the row as **Removed on computer**, stops reconnection and offers re-pairing or local deletion.
-- **Added in the 0.5.6 candidate**: fixed order, new computers appended, and migration of the previously visible order. **Move up / Move to top** save the arrangement independently from startup selection. Inside the app, hold the top-left drawer toggle to return to the list; a normal tap still toggles the drawer. Browsers have no such native action.
+- **Added in 0.6.0**: fixed order, new computers appended, and migration of the previously visible order. **Move up / Move to top** save the arrangement independently from startup selection. Inside the app, hold the top-left drawer toggle to return to the list; a normal tap still toggles the drawer. Browsers have no such native action.
 
 Revoking a device permanently deletes its durable record and token digest instead of retaining a `revokedAt` tombstone. Startup also removes legacy revoked rows. A deleted token receives `401 authentication_failed`, just like an unknown token. Existing apps checking a device that was revoked while offline may therefore show **Pairing expired** and require pairing again; online Sessions still receive the revocation notification and disconnect immediately.
 
@@ -297,7 +299,7 @@ Allowing HTTP frames in the gateway does not make every client load them: the co
 
 ### Optional modules and advanced configuration
 
-The 0.5.6 candidate adds [mobile page module settings](docs/CLIENT_MODULES.en.md) for computer defaults and device choices without uninstalling plugins. Changes apply on the next manual open, not an automatic conversation reload; an outdated saved selection offers an explicit recovery action.
+Version 0.6.0 adds [mobile page module settings](docs/CLIENT_MODULES.en.md) for computer defaults and device choices without uninstalling plugins. Changes apply on the next manual open, not an automatic conversation reload; an outdated saved selection offers an explicit recovery action.
 
 <details>
 <summary>Configure excludedClientModules in the profile</summary>
@@ -340,7 +342,7 @@ The Android app is a thin Kotlin WebView shell and contains no frontend copy; mo
 
 In 0.5.5, the dedicated mobile page synchronously loads the authenticated, same-origin `/mobile-access/compat.js` before the first DSH boot script. This bundled core-js compatibility layer supplies `Iterator` / Iterator helpers to WebViews that lack them, preventing the startup error `Iterator is not defined`. It uses feature detection to preserve or repair native helpers, needs no CDN, and does not weaken CSP. The desktop and `?frontend=stock` pages do not load this gateway script.
 
-Version 0.5.6 (unreleased) adds feature-detected `Promise.withResolvers` and `AbortSignal.any` implementations to the same pre-boot script. On WebViews that support document-start injection, the Android app also supplies `Promise.withResolvers` early for the paired exact Origin. This covers identified missing APIs, not every old engine; the frontend still targets ES2022, and this version has not been verified on the reported physical Huawei WebView 114 device. If other compatibility errors remain and the device allows updates, update Android System WebView / Chrome first. If the system component cannot be updated, retain the full error, engine version, and entry mode for diagnosis.
+Version 0.6.0 adds feature-detected `Promise.withResolvers` and `AbortSignal.any` implementations to the same pre-boot script. On WebViews that support document-start injection, the Android app also supplies `Promise.withResolvers` early for the paired exact Origin. This covers identified missing APIs, not every old engine; the frontend still targets ES2022, and this version has not been verified on the reported physical Huawei WebView 114 device. If other compatibility errors remain and the device allows updates, update Android System WebView / Chrome first. If the system component cannot be updated, retain the full error, engine version, and entry mode for diagnosis.
 
 > **Community client (unofficial)**: [WeChat Mini-Program client](https://github.com/StrawberryAO/dsh-mobile-minapp)
 > A native WeChat Mini-Program that reuses the Mobile Access pairing and Remote stream protocol (requires dsh-mobile ≥ 0.3.8).
@@ -405,7 +407,7 @@ On macOS, local network, cloudflared, self-hosted FRP and the own reverse proxy 
 | DSH Mobile plugin | Verified DeepSeek Harness version |
 | --- | --- |
 | `0.5.5` | `0.1.7-alpha.2`, `0.1.7-rc.1`, `0.1.7-rc.2`, `0.2.0-rc.1`, and `0.2.0-rc.2` (npm installation, isolated pairing, mobile-page boot, and WebSocket Workspace baseline) |
-| `0.5.6` candidate | Feature-integration CI covered `0.1.7-alpha.2`, `0.1.7-rc.1`, `0.1.7-rc.2`, `0.2.0-rc.1` and `0.2.0-rc.2`; local checks also covered composer/module settings. After documentation/release-check updates, validate the final commit before publication |
+| `0.6.0` | `0.1.7-alpha.2`, `0.1.7-rc.1`, `0.1.7-rc.2`, `0.2.0-rc.1` and `0.2.0-rc.2` (packed installation, pairing, mobile-page boot and WebSocket Workspace reads); additional checks cover the mobile composer, module settings and component loading after a normal official Desktop restart |
 
 <details>
 <summary>Historical version checks</summary>
@@ -436,7 +438,7 @@ On macOS, local network, cloudflared, self-hosted FRP and the own reverse proxy 
 
 Existing apps (0.3.3 and later) do not need re-pairing. cpolar users should use app 0.3.15 or later because earlier apps may time out before a slow first load over the free route finishes; earlier apps also use a different status-bar strategy. The 0.4.0 app adds the multi-device list, startup behavior, and computer-side revocation status; older apps continue to connect to their saved single device. App 0.1.3 or earlier requires reinstalling and pairing again.
 
-Version 0.5.5 keeps the native pairing and renewal protocol compatible, so normally working older apps can continue connecting. Update to app 0.5.5 (build 75) for rotation state preservation, model-menu Back and revocation-status fixes, while retaining the authentication Cookie corrections from 0.5.4.
+Version 0.6.0 keeps the native pairing and renewal protocol compatible, so normally working older apps can continue connecting. Update to app 0.6.0 (build 76) for icon choices, scanning improvements, device ordering and the switching shortcut, while retaining earlier connection, rotation and authentication fixes.
 
 GitHub Release APKs use a stable signing certificate, so an older official APK with the same signer can be upgraded in place while retaining pairings. A locally built Debug APK with a different signer cannot be overwritten by the official APK; plan to pair again when switching between them.
 

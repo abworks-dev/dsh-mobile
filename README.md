@@ -31,14 +31,14 @@
 
 > DSH Mobile 是 DeepSeek Harness 社区插件，原生 App 仅支持 Android。
 >
-> **当前正式版本：0.5.5**。优化手机输入栏与模型搜索字号，修复 Android 模型菜单返回、旋转时附件丢失和撤销状态覆盖，新增 macOS cloudflared 支持。[更新记录](CHANGELOG.md#055---2026-10-04)。
+> **当前正式版本：0.6.0**。新增移动页面模块管理、App 图标选择与设备排序，升级扫码体验，改善移动布局、远程加载和旧 WebView 兼容。[更新记录](CHANGELOG.md#060---2026-10-07)。
 >
-> **升级提醒**：请同步更新插件与 Android App 至 0.5.5，以获得完整修复；同一正式签名的旧 App 可原位升级并保留配对。[兼容说明](#兼容性)。
+> **升级提醒**：请同步更新插件与 Android App 至 0.6.0，以获得完整功能与修复；同一正式签名的旧 App 可原位升级并保留配对。[兼容说明](#兼容性)。
 
 <p align="center">
-  <a href="https://github.com/saya-ch/dsh-mobile/releases/download/v0.5.5/dsh-mobile-android-v0.5.5.apk"><img src="https://raw.githubusercontent.com/saya-ch/dsh-mobile/main/assets/brand/app-icon-rounded.svg" alt="DSH Mobile 安卓应用图标" width="72" height="72"></a><br>
-  <a href="https://github.com/saya-ch/dsh-mobile/releases/download/v0.5.5/dsh-mobile-android-v0.5.5.apk"><strong>下载 Android App 0.5.5</strong></a><br>
-  <sub><a href="https://github.com/saya-ch/dsh-mobile/releases/tag/v0.5.5">版本说明与校验文件</a></sub>
+  <a href="https://github.com/saya-ch/dsh-mobile/releases/download/v0.6.0/dsh-mobile-android-v0.6.0.apk"><img src="https://raw.githubusercontent.com/saya-ch/dsh-mobile/main/assets/brand/app-icon-rounded.svg" alt="DSH Mobile 安卓应用图标" width="72" height="72"></a><br>
+  <a href="https://github.com/saya-ch/dsh-mobile/releases/download/v0.6.0/dsh-mobile-android-v0.6.0.apk"><strong>下载 Android App 0.6.0</strong></a><br>
+  <sub><a href="https://github.com/saya-ch/dsh-mobile/releases/tag/v0.6.0">版本说明与校验文件</a></sub>
 </p>
 
 DSH Mobile 是一个 DeepSeek Harness 插件，让手机浏览器或 Android App 通过局域网，或可选的 Tailscale Funnel、cpolar、cloudflared、自建 FRP 或自有反向代理远程通道连接电脑，继续使用同一份会话、工作区、消息和工具。电脑端分别启停局域网与远程访问、分别管理配对授权；Android App 统一显示已配对电脑。插件不修改 DeepSeek Harness 源码。
@@ -71,9 +71,9 @@ DSH Mobile 是一个 DeepSeek Harness 插件，让手机浏览器或 Android App
 
 </details>
 
-## 0.5.6 更新（待发布）
+## 0.6.0 更新
 
-本节介绍开发分支的候选内容。正式下载仍为 **0.5.5**，0.5.6 尚未发布；完整记录见 [CHANGELOG](CHANGELOG.md#unreleased)。
+本次更新聚焦模块管理、App 个性化与移动访问体验；完整记录见 [CHANGELOG](CHANGELOG.md#060---2026-10-07)。
 
 - **连接与加载**：重试临时失败的静态资源请求，长时间 DSH API 操作不再被普通传输超时截断；不重放 API 或写入请求。[慢链路说明](docs/SLOW_CONNECTIONS.md)
 - **移动布局**：输入栏更紧凑，改善键盘打开和大字号时的按钮可达性；支持独立移动字号、触屏浏览器 Enter 换行，以及窄屏面板“返回会话”。
@@ -90,6 +90,8 @@ DSH Mobile 是一个 DeepSeek Harness 插件，让手机浏览器或 Android App
 ### 官方 DSH Desktop
 
 在应用的 **插件** 页面安装并启用 `dsh-mobile`，再打开 **移动访问** 配置局域网或远程通道。Desktop 的 profile 由应用管理，不适用下面的 `--profile web` 命令。
+
+安装或更新后，请从应用菜单正常退出并重新打开 Desktop。若提示 `dsh-mobile-question-fixes: failed to import`，先完成这次重启，让 Desktop 重新读取附带组件；无需清除会话或配对数据。
 
 ### DSH Web
 
@@ -155,7 +157,7 @@ dsh plugin --profile web add dshmarket
 
 无图形界面的 Linux 主机，或通过局域网 IP / 反向代理打开 DSH Web 时，左下角 **移动访问** 管理口同样可用。管理 API 仍要求 TCP 对端是本机回环（例如本机 `socat` / 反向代理连到 `127.0.0.1`），不会把插件自己暴露到公网；浏览器 Host 可以是 `localhost`、RFC1918 或 IPv4 链路本地地址，公网 IP 和任意域名仍会返回 403。反向代理必须只对可信的本机或内网请求开放，不能把 `/api/mobile-access` 管理路径公开转发到互联网。手机走的独立 HTTPS 入口（默认 3443）仍是移动端界面，不会变成桌面管理口。
 
-已有 WireGuard 等受控路由网络时，0.5.6 候选提供[额外可信网段](docs/TRUSTED_NETWORKS.md)。它只追加明确的来源 CIDR，不建立 VPN 或路由，也不自动改 Windows 防火墙。
+已有 WireGuard 等受控路由网络时，0.6.0 提供[额外可信网段](docs/TRUSTED_NETWORKS.md)。它只追加明确的来源 CIDR，不建立 VPN 或路由，也不自动改 Windows 防火墙。
 
 </details>
 
@@ -260,7 +262,7 @@ Android App 在“已配对设备”中统一显示电脑及其局域网／远�
 - **启动行为 → 显示设备列表**：每次启动先选择电脑，适合经常在多台设备之间切换。入口是列表右上角 **设置 → 启动行为**，修改后立即保存。
 - 点按设备行可连接；右侧“…”和长按提供相同的操作面板，可编辑名称、立即检测、重新配对或删除本地记录。删除前会二次确认，并提供短暂撤销；撤销只恢复本机记录，不恢复电脑端已经撤销的授权。
 - 在 WebView 页面打开 DSH **设置 → 通用设置 → 切换电脑** 可回到已配对设备列表。在线收到电脑端撤销通知后，App 保留条目并显示“电脑端已移除”，停止自动重连，提供重新配对和删除本地记录。
-- **0.5.6 候选新增**：列表保持固定顺序，新配对追加到末尾，升级保留旧版可见顺序；操作面板提供 **上移／置顶**，顺序与启动选择分开。App 内还可长按左上角抽屉开关返回列表，短按仍开关抽屉；手机浏览器没有此原生动作。
+- **0.6.0 新增**：列表保持固定顺序，新配对追加到末尾，升级保留旧版可见顺序；操作面板提供 **上移／置顶**，顺序与启动选择分开。App 内还可长按左上角抽屉开关返回列表，短按仍开关抽屉；手机浏览器没有此原生动作。
 
 电脑端撤销会永久删除持久化存储中的设备记录及令牌摘要，而不是保留 `revokedAt` 标记；启动时也会清理旧版留下的已撤销记录。删除后，旧令牌与未知令牌一样返回 `401 authentication_failed`。现有 App 若在离线期间被撤销，再次检测时可能显示“配对已过期”，需要重新配对；在线会话仍会收到撤销通知并立即断开。
 
@@ -297,7 +299,7 @@ DSH Mobile 保留工作区、任务管理、终端和文件面板入口，第三
 
 ### 可选模块与高级配置
 
-0.5.6 候选新增[移动页面模块设置](docs/CLIENT_MODULES.md)，可分别设置电脑默认和当前设备选择，不卸载电脑插件。保存后下次手动打开生效，不自动刷新会话；已保存选择失效时提供恢复入口。
+0.6.0 新增[移动页面模块设置](docs/CLIENT_MODULES.md)，可分别设置电脑默认和当前设备选择，不卸载电脑插件。保存后下次手动打开生效，不自动刷新会话；已保存选择失效时提供恢复入口。
 
 <details>
 <summary>通过 profile 配置 excludedClientModules</summary>
@@ -340,7 +342,7 @@ Android App 只是 Kotlin WebView 薄壳，不内置另一份网页；手机浏�
 
 0.5.5 的专用移动页面会在 DSH 的第一个启动脚本之前，同步加载经网关鉴权的同源 `/mobile-access/compat.js`，为缺少 `Iterator` / Iterator helpers 的 WebView 提供随插件打包的 core-js 兼容实现，避免启动时出现 `Iterator is not defined`。兼容层按能力检测保留或修正原生 helper，不依赖 CDN，也不会放宽 CSP；桌面页面与 `?frontend=stock` 页面不会加载这个网关脚本。
 
-0.5.6（待发布）在同一个启动前脚本中增加 `Promise.withResolvers` 与 `AbortSignal.any` 的能力检测和兼容实现。Android App 还会在支持 document-start 注入的 WebView 中，为配对的精确 Origin 提前补齐 `Promise.withResolvers`。这只覆盖已识别的缺失 API，不是所有旧内核的支持承诺；前端仍以 ES2022 为构建目标，尚未在报告中的华为 WebView 114 真机上验收。出现其他兼容错误时，若设备允许更新，请优先更新 Android System WebView / Chrome；若系统组件不可更新，请保留完整错误、内核版本与进入方式供排查。
+0.6.0 在同一个启动前脚本中增加 `Promise.withResolvers` 与 `AbortSignal.any` 的能力检测和兼容实现。Android App 还会在支持 document-start 注入的 WebView 中，为配对的精确 Origin 提前补齐 `Promise.withResolvers`。这只覆盖已识别的缺失 API，不是所有旧内核的支持承诺；前端仍以 ES2022 为构建目标，尚未在报告中的华为 WebView 114 真机上验收。出现其他兼容错误时，若设备允许更新，请优先更新 Android System WebView / Chrome；若系统组件不可更新，请保留完整错误、内核版本与进入方式供排查。
 
 > **社区客户端（非官方）**：[微信小程序客户端](https://github.com/StrawberryAO/dsh-mobile-minapp)
 > 原生微信小程序实现，复用「移动访问」的配对与 Remote 流协议（需 dsh-mobile ≥ 0.3.8）。
@@ -406,7 +408,7 @@ macOS 上局域网、cloudflared、自建 FRP 与自有反向代理可用；Funn
 | DSH Mobile 插件                         | 验证支持的 DeepSeek Harness 版本                             |
 | ----------------------------------------- | -------------------------------------------------------------- |
 | `0.5.5` | `0.1.7-alpha.2`、`0.1.7-rc.1`、`0.1.7-rc.2`、`0.2.0-rc.1`、`0.2.0-rc.2`（npm 打包安装、隔离配对、移动页面启动及 WebSocket 工作区读取） |
-| `0.5.6` 候选 | 功能整合的 CI 已覆盖 `0.1.7-alpha.2`、`0.1.7-rc.1`、`0.1.7-rc.2`、`0.2.0-rc.1`、`0.2.0-rc.2`；本地另验证输入栏与模块设置。文档／发布检查更新后，正式发布前仍按最终提交重验 |
+| `0.6.0` | `0.1.7-alpha.2`、`0.1.7-rc.1`、`0.1.7-rc.2`、`0.2.0-rc.1`、`0.2.0-rc.2`（打包安装、配对、移动页面启动与 WebSocket 工作区读取）；另验证移动输入栏、模块设置及官方 Desktop 正常重启后的组件加载 |
 
 <details>
 <summary>历史版本验证记录</summary>
@@ -437,7 +439,7 @@ macOS 上局域网、cloudflared、自建 FRP 与自有反向代理可用；Funn
 
 现有 App（0.3.3 及更新）无需重新配对；cpolar 用户应使用 0.3.15 或更新 App，较早版本可能在免费线路的慢速首次加载完成前超时；更早的 App 还使用不同的状态栏策略。App 0.4.0 才支持多设备列表、启动行为设置和电脑端撤销状态同步；旧版 App 仍可连接已保存的单台设备。App 0.1.3 及更早版本需卸载重装并重新配对。
 
-0.5.5 的原生配对与续期协议保持兼容，旧 App 的正常连接可继续使用；建议同步升级至 0.5.5（build 75），以获得旋转保持页面、模型菜单返回和撤销状态修复，同时保留 0.5.4 的认证 Cookie 修正。
+0.6.0 保持原生配对与续期协议兼容，旧 App 的正常连接可继续使用；建议同步升级至 0.6.0（build 76），以获得图标选择、扫码改进、设备排序和切换快捷方式，并保留此前的连接、旋转及认证修复。
 
 GitHub Release 的正式 APK 使用固定签名，可从同一签名的旧正式版原位升级并保留配对。自行构建的 Debug APK 若使用不同签名，不能直接覆盖安装正式版；切换前请准备重新配对。
 

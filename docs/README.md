@@ -15,14 +15,14 @@
 
 在 Android App 中连接公开隧道或自建入口时请选择 **远程访问**。公开受信任证书也可用手机浏览器配对；既有 frps 的自签入口需要 **0.4.6 或更高版本 App** 固定远程 CA。各通道仍要求 DSH Mobile 配对，不能直接暴露普通 DSH 或私有 HTTP 后端。
 
-## 0.5.6 候选功能 / Candidate features
+## 0.6.0 新增功能 / New features
 
-正式下载仍为 0.5.5；以下指南说明当前开发候选，不表示已有正式 0.5.6 安装包。
+以下指南介绍 0.6.0 的模块管理与局域网高级设置，以及尚未开放安装的托管 Caddy 模式。
 
 | 功能 | 中文 | English | 使用状态 |
 | --- | --- | --- | --- |
-| 为移动页面选择加载模块 | [模块设置](CLIENT_MODULES.md) | [Module settings](CLIENT_MODULES.en.md) | 候选提供；电脑默认与设备覆盖分别保存，不自动刷新会话 |
-| 允许受控路由网络访问 LAN Gateway | [额外可信网段](TRUSTED_NETWORKS.md) | [Trusted networks](TRUSTED_NETWORKS.en.md) | 候选提供；不建立 VPN，不自动扩大防火墙规则 |
+| 为移动页面选择加载模块 | [模块设置](CLIENT_MODULES.md) | [Module settings](CLIENT_MODULES.en.md) | 电脑默认与设备覆盖分别保存，不自动刷新会话 |
+| 允许受控路由网络访问 LAN Gateway | [额外可信网段](TRUSTED_NETWORKS.md) | [Trusted networks](TRUSTED_NETWORKS.en.md) | 不建立 VPN，不自动扩大防火墙规则 |
 | 由插件管理 Caddy HTTPS 上游 | [托管 Caddy](CADDY_MANAGED.md) | [Managed Caddy](CADDY_MANAGED.en.md) | 尚无可信固定二进制分发，安装与连接仍禁用 |
 
 ## 开发与安全 / Development and security
@@ -33,7 +33,7 @@
 
 ## 历史验证 / Historical records
 
-以下记录保留原来的版本和测试范围，不能当作当前候选或你的网络环境已验证的证明。
+以下记录保留原来的版本和测试范围，不能当作当前版本或你的网络环境已验证的证明。
 
 | 记录 | 范围 |
 | --- | --- |

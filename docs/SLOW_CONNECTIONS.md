@@ -76,7 +76,7 @@ websocketCompression:
 
 修改后重启 DSH 并重新打开手机页面。可在开发者工具中查看 WebSocket 握手是否协商了 `permessage-deflate`；客户端没有协商时仍可无压缩连接。对比同一会话的实际通道传输量与 CPU 使用，不能仅以开发者工具显示的解压后消息长度判断节省比例。需要关闭时把 `paths` 改回 `[]`；压缩不能提高服务商限额，也不能替代连接故障排查。
 
-## 手动压缩会话与长时间 API 请求（0.5.6 待发布）
+## 手动压缩会话与长时间 API 请求（0.6.0）
 
 手机发出的 `/compact` 等命令要通过移动网关的 HTTP API；DSH 内部触发的自动压缩不经过这次网关请求。旧版网关对所有上游代理请求都使用默认 30 秒的 `upstreamTimeoutMs`，因此模型仍在生成摘要时，手动压缩可能先收到 `502 upstream_unavailable`。[#171](https://github.com/saya-ch/dsh-mobile/issues/171) 记录了这一情况。
 

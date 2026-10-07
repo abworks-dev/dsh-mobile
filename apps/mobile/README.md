@@ -6,16 +6,16 @@ DeepSeek Harness is the display name of this lightweight, community-maintained A
 
 Android is the only supported native target. The iOS client remains an unpublished local experiment and is outside the build, release, and support scope.
 
-The current stable app is **0.5.5**; 0.5.6 is an unreleased candidate. Install the signed GitHub Release APK and update it with the plugin. Older official APKs with the same signer retain pairing during in-place upgrades; a differently signed Debug build cannot overwrite the official app.
+The current stable app is **0.6.0**. Install the signed GitHub Release APK and update it with the plugin. Older official APKs with the same signer retain pairing during in-place upgrades; a differently signed Debug build cannot overwrite the official app.
 
-## 0.5.6 candidate changes
+## 0.6.0 updates
 
 - Fixed list order with new pairings appended. Move up / Move to top affect presentation only; startup still prefers the last-used computer.
 - The list's **Settings → App icon** offers the mascot and six whale-mark colors without changing package identity or paired data.
 - Proportionally cropped scanner preview, camera-supported continuous focus, pinch/double-tap zoom and 48dp zoom controls.
 - Hold the top-left drawer toggle inside the app to return to the list. **Settings → General → Switch computer** remains available.
 
-These features are not in the 0.5.5 official download. Plugin module management, mobile font size and compatibility improvements are described in the [candidate summary](../../README.en.md#056-update-unreleased).
+Update both the app and plugin to use these features. See the [release summary](../../README.en.md#060-update) for module management, mobile font size and compatibility improvements.
 
 ## Use the app
 
@@ -88,7 +88,7 @@ Only one file-selection or camera interaction runs at a time, with a five-minute
 
 From 0.4.7, the app uses plain Enter for a new draft line only when an inset-backed on-screen keyboard is visible, Android reports no hardware keyboard, and an active session composer is focused. The Send button still submits a multiline draft. Floating keyboards, unknown state, older apps, and mobile browsers retain DSH's original Enter behavior; physical keyboards can still use Shift+Enter for a line break.
 
-The 0.5.6 candidate separately changes the main composer in touch-primary browsers: Enter adds a line to a nonempty draft and does nothing for an empty draft. DSH retains menus, composition and modified shortcuts. An external keyboard on a touch-primary browser uses that same rule; a non-touch desktop is unchanged. General settings offers a mobile font size of 12–32px, default 16px, saved for the current address only; editable inputs retain a 16px minimum.
+From 0.6.0, the main composer in touch-primary browsers uses Enter to add a line to a nonempty draft and does nothing for an empty draft. DSH retains menus, composition and modified shortcuts. An external keyboard on a touch-primary browser uses that same rule; a non-touch desktop is unchanged. General settings offers a mobile font size of 12–32px, default 16px, saved for the current address only; editable inputs retain a 16px minimum.
 
 DSH records through `getUserMedia` and sends audio to the configured computer-side DSH speech provider for transcription, not browser-native SpeechRecognition or the extension bridge. The app requests microphone permission on first use and grants audio-only capture for the paired HTTPS Origin. Computer components, model and network must be available; permission does not guarantee transcription. Same-origin client plugins share the page's permissions, so grant recording only when you trust them.
 
@@ -111,6 +111,6 @@ The debug APK is written to `app/build/outputs/apk/debug/app-debug.apk`. GitHub 
 
 Shared URL-policy tests cover origin normalization, pairing entry, same-origin navigation and download paths. PJW110 with Android 16 and WebView 151 was used to verify model-menu Back, rotation with draft/reference/image retention, known revocation through checks and restart, and re-pairing the same device. That evidence uses an isolated HTTPS instance over USB, not a public tunnel. A real VPS plus phone end-to-end test of the self-signed FRP entry has not been recorded; other devices, cutouts, font scaling, TLS failures, file input and downloads still require device-specific acceptance.
 
-The 0.5.6 candidate additionally verified in-place Debug upgrade with paired data retained, all seven Launcher choices, two isolated computers, explicit order surviving later connections, scanner buttons/double-tap zoom and camera release on this device. Physical pinch, real QR recognition, older-Android fallback and process-death restoration are not represented as completed device checks.
+A 0.5.6 development build used to prepare 0.6.0 additionally verified in-place Debug upgrade with paired data retained, all seven Launcher choices, two isolated computers, explicit order surviving later connections, scanner buttons/double-tap zoom and camera release on this device. Physical pinch, real QR recognition, older-Android fallback and process-death restoration are not represented as completed device checks.
 
 Apache-2.0 licensed. See [LICENSE](../../LICENSE).

@@ -2,7 +2,7 @@
 
 [中文](TRUSTED_NETWORKS.md) · [Back to the LAN guide](../README.en.md#local-network)
 
-> The computer-side advanced control is part of the unreleased 0.5.6. The stable plugin and app remain 0.5.5.
+> DSH Mobile 0.6.0 provides this computer-side advanced control. Update the plugin and app together.
 
 Default LAN setup permits the LAN source subnet of the selected interface. Explicitly append source CIDRs when an existing routed network you control, such as WireGuard, needs access. This does not create a VPN, route, IPv6 listener, or public entry.
 

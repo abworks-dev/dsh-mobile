@@ -1,8 +1,8 @@
 # Mobile page modules
 
-[中文](CLIENT_MODULES.md) · [Back to README](../README.en.md#056-update-unreleased)
+[中文](CLIENT_MODULES.md) · [Back to README](../README.en.md#060-update)
 
-> The General settings control is part of the unreleased 0.5.6. The stable plugin and app remain 0.5.5.
+> DSH Mobile 0.6.0 provides module management in General settings. Update the plugin and app together.
 
 Choose which client components the dedicated mobile page loads. This does not uninstall computer plugins, stop their services, or restrict device permissions. A paired device remains a trusted DSH operator.
 
