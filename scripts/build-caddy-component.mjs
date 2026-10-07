@@ -4,11 +4,10 @@ import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promis
 import { isAbsolute, join, resolve } from 'node:path'
 import { promisify } from 'node:util'
 
+import { CADDY_BUILD_LOCK, caddyBuildEnvironment, verifyCaddySources, verifyCaddyBuild } from './caddy-component-build-inputs.mjs'
+
 // This build produces private review artifacts only. Publication and production pins are separate steps.
-const CORE = 'v2.11.6'
-const DNS = 'v0.4.3'
-const XCADDY = 'v0.4.7'
-const TOOLCHAIN = 'go1.26.6'
+const { core: CORE, dns: DNS, xcaddy: XCADDY, toolchain: TOOLCHAIN } = CADDY_BUILD_LOCK
 const args = process.argv.slice(2)
 const outputIndex = args.indexOf('--output-dir')
 const requested = outputIndex === -1 ? undefined : args[outputIndex + 1]
@@ -20,12 +19,12 @@ await mkdir(output, { recursive: false, mode: 0o700 })
 const work = await mkdtemp(join(output, '.build-'))
 const tools = join(work, 'tools')
 const temporary = join(work, 'tmp')
-await mkdir(tools); await mkdir(temporary)
+const cache = join(work, 'cache')
+const modulesCache = join(work, 'modules')
+await mkdir(tools); await mkdir(temporary); await mkdir(cache); await mkdir(modulesCache)
 const binary = join(output, process.platform === 'win32' ? 'caddy.exe' : 'caddy')
 const go = process.env.GO_BINARY ?? 'go'
-const environment = { ...process.env, GOBIN: tools, GOTOOLCHAIN: 'local', CGO_ENABLED: '0',
-  TMPDIR: temporary, TEMP: temporary, TMP: temporary, XCADDY_GO_BUILD_FLAGS: '-trimpath',
-}
+const environment = caddyBuildEnvironment(process.env, { go, tools, temporary, cache, modules: modulesCache })
 const run = promisify(execFile)
 const command = async (file, argv) => (await run(file, argv, {
   cwd: work, env: environment, windowsHide: true, timeout: 1_200_000, maxBuffer: 32 * 1024 * 1024,
@@ -35,16 +34,28 @@ const licensePattern = /^(LICENSE|LICENCE|COPYING|NOTICE|PATENTS)(\..*)?$/i
 try {
   const toolchain = await command(go, ['version'])
   if (!toolchain.startsWith('go version ' + TOOLCHAIN + ' ')) throw new Error('Go toolchain must be ' + TOOLCHAIN)
+  const sources = {}
+  for (const [name, pin] of Object.entries(CADDY_BUILD_LOCK.sources)) {
+    sources[name] = JSON.parse(await command(go, ['mod', 'download', '-json', `${pin.path}@${pin.version}`]))
+  }
+  const sourceRevisions = verifyCaddySources(sources)
   await command(go, ['install', 'github.com/caddyserver/xcaddy/cmd/xcaddy@' + XCADDY])
   await command(join(tools, process.platform === 'win32' ? 'xcaddy.exe' : 'xcaddy'),
     ['build', CORE, '--with', 'github.com/caddy-dns/tencentcloud@' + DNS, '--output', binary])
+  const retained = (await readdir(temporary, { withFileTypes: true }))
+    .filter(entry => entry.isDirectory() && entry.name.startsWith('buildenv_'))
+  if (retained.length !== 1) throw new Error('Missing unique xcaddy build environment')
+  await run(go, ['mod', 'verify'], { cwd: join(temporary, retained[0].name), env: environment,
+    windowsHide: true, timeout: 120_000, maxBuffer: 1024 * 1024 })
+  const build = JSON.parse(await command(go, ['version', '-m', '-json', binary]))
+  // Diagnostic metadata is safe to inspect on a rejected build; never treat it as a passing manifest.
+  await writeFile(join(output, 'go-build.json'), JSON.stringify(build, null, 2) + '\n')
+  verifyCaddyBuild(build)
+  const embedded = build.Deps
   const version = await command(binary, ['version'])
   const modules = await command(binary, ['list-modules', '--versions'])
   if (!version.startsWith(CORE + ' ') || !modules.includes('dns.providers.tencentcloud ' + DNS)
     || !modules.includes('Non-standard modules: 1')) throw new Error('Built Caddy version/modules do not match pins')
-  const build = JSON.parse(await command(go, ['version', '-m', '-json', binary]))
-  const embedded = build.Deps
-  if (!Array.isArray(embedded) || embedded.length === 0 || build.GoVersion !== TOOLCHAIN) throw new Error('Missing Go build metadata')
   const licenses = ['DSH Mobile optional managed Caddy - embedded dependency licenses', '', `Go: ${TOOLCHAIN}`, '']
   const dependencies = []
   for (const entry of embedded.sort((a, b) => a.Path.localeCompare(b.Path, 'en'))) {
@@ -67,7 +78,8 @@ try {
   const manifest = { version: CORE.slice(1), dnsPluginVersion: DNS, xcaddyVersion: XCADDY, goVersion: TOOLCHAIN,
     platform: process.platform, arch: process.arch, executableName: binary.split(/[\\/]/u).at(-1),
     downloadBytes: bytes.length, executableBytes: bytes.length, downloadSha256: sha(bytes), executableSha256: sha(bytes),
-    sourceRevisions: { caddy: '14571dec859484962a2c63c9820c297424d8c184', tencentcloud: 'e1d4c80e2ffc2777aee0f06969fc27fb8a928ec8', xcaddy: '270324f13896e13586710c8f0765b7d4d17839bf' },
+    sourceRevisions, sourceProvenanceVerified: true,
+    buildLockSha256: sha(Buffer.from(JSON.stringify(CADDY_BUILD_LOCK))),
     dependencies, publication: 'not-published',
   }
   await writeFile(join(output, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n')
