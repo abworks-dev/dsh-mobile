@@ -1071,7 +1071,22 @@ describe('switch computer hold', () => {
     await harness.settle()
     harness.elapse(SWITCH_COMPUTER_LONG_PRESS_MS)
     harness.hold.end()
-    expect(harness.hold.consumeClickSuppression(1)).toBe(true)
+    expect(harness.hold.consumeClickSuppression(1)).toBe(false)
+    expect(harness.switches()).toEqual([])
+  })
+
+  it('ignores capability results that arrive after disposal', async () => {
+    let resolveSupport: ((supported: boolean) => void) | undefined
+    const harness = switchComputerHarness({ canSwitchComputer: () => new Promise<boolean>(resolve => { resolveSupport = resolve }) })
+    harness.hold.start(20, 20)
+    await harness.settle()
+    harness.hold.dispose()
+    resolveSupport?.(true)
+    await harness.settle()
+    harness.hold.start(20, 20)
+    harness.elapse(SWITCH_COMPUTER_LONG_PRESS_MS)
+    expect(harness.switches()).toEqual([])
+    expect(harness.pending()).toBe(0)
   })
 
   it('binds the hold to the App drawer toggle and releases it with the surface', () => {
@@ -1080,7 +1095,7 @@ describe('switch computer hold', () => {
     expect(NATIVE_MOBILE_TOGGLE_QUERY).toBe('[data-dsh-mobile-toggle]')
     expect(source).toContain("capabilities()).includes(SWITCH_COMPUTER_NATIVE_ACTION)")
     expect(source).toContain("bridge.invoke(SWITCH_COMPUTER_NATIVE_ACTION, {})")
-    expect(source).toContain("if (!event.isPrimary || !isDrawerToggleTarget(event.target)) return")
+    expect(source).toContain("if (!event.isPrimary || event.button !== 0 || !isDrawerToggleTarget(event.target)) return")
     expect(source).toContain("target instanceof Element && target.closest(NATIVE_MOBILE_TOGGLE_QUERY) !== null")
     expect(source).toContain("document.addEventListener('pointerdown', onTogglePointerDown, true)")
     expect(source).toContain("document.addEventListener('pointerup', onTogglePointerEnd, true)")
@@ -1089,6 +1104,8 @@ describe('switch computer hold', () => {
     expect(source).toContain("document.addEventListener('contextmenu', onToggleContextMenu, true)")
     expect(source).toContain("document.removeEventListener('pointerdown', onTogglePointerDown, true)")
     expect(source).toContain("document.removeEventListener('contextmenu', onToggleContextMenu, true)")
+    expect(source).toContain("window.removeEventListener('blur', onTogglePointerEnd)")
+    expect(source).toContain("document.removeEventListener('visibilitychange', onToggleVisibilityChange)")
     expect(source).toContain('switchComputerHold.dispose()')
     // The gesture never invents drawer chrome of its own.
     expect(NATIVE_MOBILE_STYLES).not.toContain('dsh-mobile-switch-computer')

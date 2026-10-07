@@ -1,8 +1,8 @@
 # 贡献者 / Contributors
 
-GitHub 的 [Contributors 图表](https://github.com/saya-ch/dsh-mobile/graphs/contributors) 按进入默认分支的提交自动统计，无法手动加入仅提交 issue 或 PR 提案的成员。本页按截至 2026-10-06 的实际参与方式感谢社区成员；仓库维护者与自动依赖更新仍可在 GitHub 历史记录中查看。
+GitHub 的 [Contributors 图表](https://github.com/saya-ch/dsh-mobile/graphs/contributors) 按进入默认分支的提交自动统计，无法手动加入仅提交 issue 或 PR 提案的成员。本页按截至 2026-10-07 的实际参与方式感谢社区成员；仓库维护者与自动依赖更新仍可在 GitHub 历史记录中查看。
 
-GitHub's Contributors graph counts commits on the default branch; issue reports and PR proposals cannot be manually added to it. This page credits community members by how they contributed, through 2026-10-06. The repository maintainer and automated dependency updates remain visible in GitHub's history.
+GitHub's Contributors graph counts commits on the default branch; issue reports and PR proposals cannot be manually added to it. This page credits community members by how they contributed, through 2026-10-07. The repository maintainer and automated dependency updates remain visible in GitHub's history.
 
 ## 已合并 PR / Merged PRs
 
@@ -28,10 +28,14 @@ GitHub's Contributors graph counts commits on the default branch; issue reports 
 
 以下 PR 构成 0.5.6 待发布版本的新代码贡献，保留原作者提交并追加维护者修正。 / These PRs contribute code to the unreleased 0.5.6 version; original author commits are retained alongside maintainer corrections.
 
+本轮 #173、#175、#176、#177、#179、#180、#181 已在开发整合分支本地合并，截至 2026-10-07 在 GitHub 上仍为 Open，不计入上方默认分支的已合并记录。0.5.6 尚未发布。 / PRs #173, #175, #176, #177, #179, #180, and #181 are locally merged in the development integration branch and remain Open on GitHub as of 2026-10-07. They are not listed as default-branch merges above; 0.5.6 is not released.
+
 | 社区成员 / Community member | 已整合 PR / Integrated PRs |
 | --- | --- |
+| [@abworks-dev](https://github.com/abworks-dev) | [#173](https://github.com/saya-ch/dsh-mobile/pull/173), [#175](https://github.com/saya-ch/dsh-mobile/pull/175), [#176](https://github.com/saya-ch/dsh-mobile/pull/176), [#177](https://github.com/saya-ch/dsh-mobile/pull/177), [#179](https://github.com/saya-ch/dsh-mobile/pull/179) |
 | [@chintoleung](https://github.com/chintoleung) | [#167](https://github.com/saya-ch/dsh-mobile/pull/167) |
 | [@fqf060420](https://github.com/fqf060420) | [#170](https://github.com/saya-ch/dsh-mobile/pull/170) |
+| [@xhwxt](https://github.com/xhwxt) | [#180](https://github.com/saya-ch/dsh-mobile/pull/180), [#181](https://github.com/saya-ch/dsh-mobile/pull/181) |
 
 ## 已吸收但未直接合并的 PR / Incorporated without a direct merge
 
@@ -48,6 +52,7 @@ GitHub's Contributors graph counts commits on the default branch; issue reports 
 | 反馈贡献者 / Issue reporter | 提交的问题 / Issues |
 | --- | --- |
 | [@1624318455](https://github.com/1624318455) | [#92](https://github.com/saya-ch/dsh-mobile/issues/92) |
+| [@abworks-dev](https://github.com/abworks-dev) | [#174](https://github.com/saya-ch/dsh-mobile/issues/174) |
 | [@Ann-luo](https://github.com/Ann-luo) | [#150](https://github.com/saya-ch/dsh-mobile/issues/150) |
 | [@azri57806-design](https://github.com/azri57806-design) | [#97](https://github.com/saya-ch/dsh-mobile/issues/97) |
 | [@BrainZombie](https://github.com/BrainZombie) | [#128](https://github.com/saya-ch/dsh-mobile/issues/128) |
@@ -68,6 +73,7 @@ GitHub's Contributors graph counts commits on the default branch; issue reports 
 | [@oliverwan97](https://github.com/oliverwan97) | [#26](https://github.com/saya-ch/dsh-mobile/issues/26) |
 | [@optttt](https://github.com/optttt) | [#111](https://github.com/saya-ch/dsh-mobile/issues/111) |
 | [@qjjer](https://github.com/qjjer) | [#156](https://github.com/saya-ch/dsh-mobile/issues/156) |
+| [@Quadrapole](https://github.com/Quadrapole) | [#178](https://github.com/saya-ch/dsh-mobile/issues/178) |
 | [@reducm](https://github.com/reducm) | [#127](https://github.com/saya-ch/dsh-mobile/issues/127) |
 | [@rgshendong](https://github.com/rgshendong) | [#87](https://github.com/saya-ch/dsh-mobile/issues/87) |
 | [@RonaldinhoL](https://github.com/RonaldinhoL) | [#89](https://github.com/saya-ch/dsh-mobile/issues/89) |

@@ -78,6 +78,18 @@ Before DSH boots, the dedicated mobile page supplies missing `Promise.withResolv
 
 Long-running authenticated DSH API requests use a separate `upstreamApiTimeoutMs`, defaulting to `0` (no response-wait timeout), rather than the ordinary 30-second transport budget. An explicit timeout returns `504 upstream_timeout`. Extension actions and route handlers retain a default 30-second deadline, with a per-operation `timeoutMs` override; the gateway releases the request slot when its caller leaves. See the [slow-link and reconnection guide](docs/SLOW_CONNECTIONS.en.md) for the separate budgets and error codes.
 
+On a cold load, the gateway retries transient upstream disconnects for read-only plugin and static-resource requests before returning any response headers, reducing occasional blank pages. It does not replay API or write requests, or cache error responses for a year.
+
+The Android paired-computer list settings add **App icon**, with the default mascot and whale-mark choices. Pairing data is retained; some launchers need a moment to refresh. The scanner fills its preview without stretching, uses continuous focus where the camera supports it, and provides pinch, double-tap, and accessible ± zoom controls. Available ratios depend on the camera.
+
+Paired computers retain a fixed order: new pairings append, and connecting or changing reachability does not reorder rows. Long-press a device or open its more menu to **Move up** or **Move to top**; upgrades retain the previously visible order. List position is separate from startup restoration of the last computer. Inside the app, long-press the conversation's top-left drawer toggle to return to the computer list. Ordinary drawer taps and **General → Switch computer** remain available; mobile browsers do not perform this app-only action.
+
+**General → Mobile page modules** sets defaults for mobile access on the computer, or an override for the current paired device on the phone. Checked means loaded; required boot modules cannot be disabled, and saving checks dependencies. This does not uninstall computer plugins or reload the current conversation. Apply the selection by manually reopening the page. See the [mobile page modules guide](docs/CLIENT_MODULES.en.md).
+
+Managed LAN setup adds **Additional trusted networks · Advanced** for explicitly selected IPv4 / IPv6 source CIDRs. Saving requires a DSH restart; the current LAN subnet remains allowed, and access is not broadened automatically. Windows firewall rules must allow the extra sources separately. See the [additional trusted networks guide](docs/TRUSTED_NETWORKS.en.md).
+
+The own-proxy provider now includes managed Caddy upstream code; your existing external proxy remains the default. A fixed source build and isolated TLS validation have passed, but no trusted pinned binary has been published. Managed installation and connection remain unavailable in this candidate. Existing Lucky / Nginx / Caddy settings and other remote providers are unaffected. See [managed Caddy status and requirements](docs/CADDY_MANAGED.en.md).
+
 ## Quick start
 
 With an installed `dsh` command:
@@ -262,6 +274,8 @@ excludedClientModules:
 ```
 
 There is no default exclusion list. The plugin rejects unknown or boot-critical modules and modules still referenced through `inject` or `external` by retained entries. If a DSH or community-plugin update invalidates the selection, the mobile page returns `409 excluded_client_modules_invalid` with the conflicting module; the computer also warns so you can adjust or remove the option. Bundle sizes and dependencies change between DSH installations and versions; another user's savings are not a prediction for yours.
+
+The unreleased 0.5.6 also provides the [General settings control](docs/CLIENT_MODULES.en.md): a device override takes precedence over the computer default, which takes precedence over this plugin configuration. Restore defaults removes only the current override. Saving does not require a DSH restart and never reloads an already open page automatically.
 
 <table>
   <tr>

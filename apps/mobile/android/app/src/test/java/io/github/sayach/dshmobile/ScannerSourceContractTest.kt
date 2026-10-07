@@ -7,10 +7,12 @@ import org.junit.Test
 
 /** Checks Activity wiring that pure preview/zoom tests cannot exercise on the JVM. */
 class ScannerSourceContractTest {
-    private val source: String by lazy {
-        val relative = "src/main/java/io/github/sayach/dshmobile/ScanActivity.kt"
+    private val source: String by lazy { sourceText("ScanActivity.kt") }
+
+    private fun sourceText(file: String): String {
+        val relative = "src/main/java/io/github/sayach/dshmobile/$file"
         val paths = listOf(relative, "app/$relative", "apps/mobile/android/app/$relative")
-        generateSequence(File(requireNotNull(System.getProperty("user.dir")))) { it.parentFile }
+        return generateSequence(File(requireNotNull(System.getProperty("user.dir")))) { it.parentFile }
             .flatMap { base -> paths.asSequence().map { File(base, it) } }
             .first { it.isFile }.readText()
     }
@@ -25,16 +27,22 @@ class ScannerSourceContractTest {
         assertTrue(layout.contains("previewContainer.height - previewContainer.paddingTop"))
         assertFalse(layout.contains("preview.width"))
         assertFalse(layout.contains("preview.height"))
+        assertTrue(layout.contains("layout.gravity = Gravity.CENTER"))
     }
 
     @Test
     fun scannerConsumesTouchSequencesAndOffersAccessibleButtonAlternatives() {
         val gestures = source.substringAfter("private fun installGestures").substringBefore("private fun applyZoom")
         assertTrue(gestures.contains("GestureDetector(this"))
-        assertTrue(gestures.contains("preview.performClick()"))
         assertTrue(gestures.contains("MotionEvent.ACTION_CANCEL"))
-        assertTrue(gestures.contains("            true\n        }"))
+        assertTrue(gestures.contains("preview.gestureEvents ="))
         assertFalse(gestures.contains("else false"))
+        val view = sourceText("ScannerPreview.kt")
+        assertTrue(view.contains("override fun onTouchEvent(event: MotionEvent)"))
+        assertTrue(view.contains("event.actionMasked == MotionEvent.ACTION_UP) performClick()"))
+        assertTrue(view.contains("override fun performClick(): Boolean"))
+        assertTrue(view.contains("super.performClick()"))
+        assertTrue(view.contains("return true"))
         assertTrue(source.contains("LinearLayout.LayoutParams(dp(48), dp(48))"))
         assertTrue(source.contains("R.string.scan_zoom_in"))
         assertTrue(source.contains("R.string.scan_zoom_out"))

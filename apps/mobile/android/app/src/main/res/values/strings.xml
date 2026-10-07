@@ -185,8 +185,6 @@
     <string name="icon_settings_failed">Could not change the app icon. Please try again.</string>
     <string name="scan_zoom_in">Zoom in</string>
     <string name="scan_zoom_out">Zoom out</string>
-    <string name="scan_zoom_plus" translatable="false">+</string>
-    <string name="scan_zoom_minus" translatable="false">−</string>
     <string name="scan_zoom_ratio">%1$.1f×</string>
     <string name="scan_zoom_current">Zoom: %1$.1f times</string>
     <string name="scan_zoom_unavailable">Camera zoom is unavailable. You can still scan without zoom.</string>

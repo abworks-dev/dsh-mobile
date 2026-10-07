@@ -184,8 +184,6 @@
     <string name="icon_settings_failed">图标切换失败，请重试。</string>
     <string name="scan_zoom_in">放大</string>
     <string name="scan_zoom_out">缩小</string>
-    <string name="scan_zoom_plus" translatable="false">+</string>
-    <string name="scan_zoom_minus" translatable="false">−</string>
     <string name="scan_zoom_ratio">%1$.1f×</string>
     <string name="scan_zoom_current">当前放大 %1$.1f 倍</string>
     <string name="scan_zoom_unavailable">相机缩放暂不可用，仍可正常扫码。</string>

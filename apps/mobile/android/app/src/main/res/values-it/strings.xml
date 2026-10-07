@@ -186,8 +186,6 @@
     <string name="icon_settings_failed">Impossibile cambiare l’icona. Riprova.</string>
     <string name="scan_zoom_in">Aumenta zoom</string>
     <string name="scan_zoom_out">Riduci zoom</string>
-    <string name="scan_zoom_plus" translatable="false">+</string>
-    <string name="scan_zoom_minus" translatable="false">−</string>
     <string name="scan_zoom_ratio">%1$.1f×</string>
     <string name="scan_zoom_current">Zoom: %1$.1f volte</string>
     <string name="scan_zoom_unavailable">Zoom della fotocamera non disponibile. Puoi comunque scansionare il codice.</string>

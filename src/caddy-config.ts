@@ -1,21 +1,15 @@
-import { randomBytes } from 'node:crypto'
-import { lstat, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
-import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
-import { restrictPrivateFile } from './private-file.js'
+import { lstat, readFile } from 'node:fs/promises'
+import { isAbsolute, join, resolve } from 'node:path'
+import { assertCaddyParents, ensureCaddyDirectory, removeCaddyTree, writeCaddyPrivateFile } from './caddy-files.js'
 import { isCaddyDnsProvider, type CaddyDnsProvider } from './caddy-component.js'
+import { validateOriginPublicOrigin } from './origin-proxy-config.js'
+import { isIP } from './ip.js'
+import { restrictPrivateFile } from './private-file.js'
 
-/** Default public HTTPS port for the managed Caddy upstream. */
 export const DEFAULT_CADDY_LISTEN_PORT = 8443
-const MAX_CADDY_SETTINGS_BYTES = 8 * 1024
-const MAX_CADDY_ENV_BYTES = 4 * 1024
+const MAX_CONFIG_BYTES = 16 * 1024
 
-/**
- * Settings for the managed Caddy upstream behind the origin provider.
- *
- * `publicOrigin` reuses the origin provider's own validation; the managed
- * upstream never accepts a plaintext public origin because its only job is to
- * terminate TLS in front of the private HTTP backend.
- */
+/** Public HTTPS address and local TLS listener; a router may map their ports differently. */
 export interface CaddySettings {
   readonly version: 1
   readonly publicOrigin: string
@@ -23,219 +17,165 @@ export interface CaddySettings {
   readonly listenPort: number
 }
 
-/**
- * DNS API credentials. Stored in their own private file, injected into the
- * caddy process environment at spawn, and never written into the Caddyfile.
- */
-export interface CaddyCredentials {
-  readonly secretId: string
-  readonly secretKey: string
+/** DNS-01 credentials persisted only in the private authoritative configuration file. */
+export interface CaddyCredentials { readonly secretId: string; readonly secretKey: string }
+
+export interface CaddyConfigurationStatus {
+  readonly configured: boolean
+  readonly credentialsConfigured: boolean
+  readonly storagePath: string
+  readonly publicOrigin?: string
+  readonly dnsProvider?: CaddyDnsProvider
+  readonly listenPort?: number
+  readonly errorCode?: string
 }
 
-/**
- * Environment variable names each supported DNS provider reads, mapped to the
- * stored credential fields.
- */
-const DNS_PROVIDER_ENV: Readonly<Record<CaddyDnsProvider, readonly [string, string]>> = Object.freeze({
-  tencentcloud: ['TENCENTCLOUD_SECRET_ID', 'TENCENTCLOUD_SECRET_KEY'],
-})
-
-/** Environment variables for one provider, ready to merge into a spawn env. */
-export function caddyCredentialEnvironment(
-  provider: CaddyDnsProvider,
-  credentials: CaddyCredentials,
-): Record<string, string> {
-  const [idName, keyName] = DNS_PROVIDER_ENV[provider]
-  return { [idName]: credentials.secretId, [keyName]: credentials.secretKey }
+/** Inject only the DNS credentials needed by the managed child. */
+export function caddyCredentialEnvironment(provider: CaddyDnsProvider, credentials: CaddyCredentials): Record<string, string> {
+  if (!isCaddyDnsProvider(provider)) throw new Error('caddy_dns_provider_invalid')
+  return { TENCENTCLOUD_SECRET_ID: credentials.secretId, TENCENTCLOUD_SECRET_KEY: credentials.secretKey }
 }
 
-/**
- * Render the managed Caddyfile. The template bakes in the three behaviors the
- * origin backend requires or that field experience showed break the link when
- * missing: the host header must keep the public port (the backend validates
- * the exact host:port), upstream keep-alive must be off (the Node backend
- * closes idle connections well before Caddy's pool would reuse them, which
- * surfaces as intermittent 502s), and automatic redirects must be disabled
- * because home networks commonly cannot serve port 80. DNS credentials ride in
- * through the environment only.
- */
-export function renderCaddyfile(settings: CaddySettings, stateDirectory: string): string {
-  const dataDir = join(resolve(stateDirectory), 'caddy', 'data').replaceAll('\\', '/')
-  const origin = new URL(settings.publicOrigin)
-  const port = origin.port === '' ? '' : `:${origin.port}`
-  return [
-    '{',
-    '\tauto_https disable_redirects',
-    `\tstorage file_system "${dataDir}"`,
-    '',
-    '\tlog {',
-    `\t\toutput file "${dataDir}/caddy.log"`,
-    '\t\tlevel INFO',
-    '\t}',
-    '}',
-    '',
-    `https://${origin.hostname}${port} {`,
-    '\ttls {',
-    `\t\tdns ${settings.dnsProvider} {`,
-    `\t\t\t${DNS_PROVIDER_ENV[settings.dnsProvider][0].toLowerCase()} {env.${DNS_PROVIDER_ENV[settings.dnsProvider][0]}}`,
-    `\t\t\t${DNS_PROVIDER_ENV[settings.dnsProvider][1].toLowerCase()} {env.${DNS_PROVIDER_ENV[settings.dnsProvider][1]}}`,
-    '\t\t}',
-    '\t}',
-    '',
-    '\treverse_proxy 127.0.0.1:3444 {',
-    '\t\theader_up Host {http.request.hostport}',
-    '\t\theader_up X-Real-IP {remote_host}',
-    '\t\ttransport http {',
-    '\t\t\tkeepalive off',
-    '\t\t\tdial_timeout 5s',
-    '\t\t\tresponse_header_timeout 300s',
-    '\t\t}',
-    '\t}',
-    '}',
-    '',
-  ].join('\n')
-}
-
-async function atomicPrivateWrite(file: string, body: string): Promise<void> {
-  const directory = dirname(file)
-  await mkdir(directory, { recursive: true, mode: 0o700 })
-  try {
-    const current = await lstat(file)
-    if (!current.isFile() || current.isSymbolicLink()) throw new Error('caddy_config_target_invalid')
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-  }
-  const temporary = join(directory, '.' + basename(file) + '.' + randomBytes(12).toString('hex') + '.tmp')
-  try {
-    await writeFile(temporary, body, { encoding: 'utf8', flag: 'wx', mode: 0o600 })
-    await rename(temporary, file)
-    await restrictPrivateFile(file)
-  } catch (error) {
-    await rm(temporary, { force: true })
-    throw error
-  }
-}
-
-/** Validate a public origin for the managed upstream by reusing the origin rules. */
-function validateCaddyPublicOrigin(value: unknown): string {
-  if (typeof value !== 'string' || value.length > 512 || /[\s\u0000-\u001f\u007f\\@?#]/u.test(value)) {
-    throw new Error('caddy_public_origin_invalid')
-  }
-  let url: URL
-  try { url = new URL(value) } catch { throw new Error('caddy_public_origin_invalid') }
-  if (url.protocol !== 'https:' || url.pathname !== '/' || url.username !== '' || url.password !== ''
-    || url.search !== '' || url.hash !== '') throw new Error('caddy_public_origin_invalid')
-  return url.origin
-}
-
-function validateCaddyListenPort(value: unknown): number {
-  if (!Number.isSafeInteger(value) || Number(value) < 1024 || Number(value) > 65_535) {
-    throw new Error('caddy_listen_port_invalid')
-  }
-  // 3444 belongs to the origin backend itself and 3443/3080 to the LAN gateway
-  // and DSH WebServer; the managed upstream must not take any of them.
-  if (value === 3444 || value === 3443 || value === 3080) throw new Error('caddy_listen_port_reserved')
-  return Number(value)
-}
-
-/** Validate both saved settings and local administrative requests. */
+/** Validate saved or administrative settings, including ports reserved by DSH. */
 export function parseCaddySettings(value: unknown): CaddySettings {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new Error('caddy_settings_invalid')
   const record = value as Record<string, unknown>
   if (Reflect.ownKeys(record).some(key => !['version', 'publicOrigin', 'dnsProvider', 'listenPort'].includes(String(key)))
     || (record.version !== undefined && record.version !== 1)) throw new Error('caddy_settings_invalid')
   if (!isCaddyDnsProvider(record.dnsProvider)) throw new Error('caddy_dns_provider_invalid')
-  return Object.freeze({
-    version: 1,
-    publicOrigin: validateCaddyPublicOrigin(record.publicOrigin),
-    dnsProvider: record.dnsProvider,
-    listenPort: validateCaddyListenPort(record.listenPort === undefined ? DEFAULT_CADDY_LISTEN_PORT : record.listenPort),
-  })
+  const listenPort = record.listenPort ?? DEFAULT_CADDY_LISTEN_PORT
+  if (!Number.isSafeInteger(listenPort) || Number(listenPort) < 1024 || Number(listenPort) > 65535) throw new Error('caddy_listen_port_invalid')
+  if ([3444, 3443, 3080].includes(Number(listenPort))) throw new Error('caddy_listen_port_reserved')
+  const publicOrigin = validateOriginPublicOrigin(record.publicOrigin)
+  if (isIP(new URL(publicOrigin).hostname) !== 0) throw new Error('caddy_domain_required')
+  return Object.freeze({ version: 1, publicOrigin, dnsProvider: record.dnsProvider, listenPort: Number(listenPort) })
 }
 
 function parseCredentials(value: unknown): CaddyCredentials {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new Error('caddy_credentials_invalid')
   const record = value as Record<string, unknown>
-  for (const key of ['secretId', 'secretKey']) {
-    const entry = record[key]
-    if (typeof entry !== 'string' || entry.length === 0 || entry.length > 512 || /\s/u.test(entry)) {
-      throw new Error('caddy_credentials_invalid')
-    }
-  }
-  return Object.freeze({ secretId: record.secretId as string, secretKey: record.secretKey as string })
+  if (Reflect.ownKeys(record).some(key => key !== 'secretId' && key !== 'secretKey')) throw new Error('caddy_credentials_invalid')
+  const { secretId, secretKey } = record
+  if (typeof secretId !== 'string' || typeof secretKey !== 'string' || secretId.length === 0 || secretKey.length === 0
+    || secretId.length > 512 || secretKey.length > 512 || /[\s\u0000-\u001f\u007f]/u.test(secretId + secretKey)) throw new Error('caddy_credentials_invalid')
+  return Object.freeze({ secretId, secretKey })
 }
 
-/** Owns the generated Caddyfile and the DNS credential file. */
+/** Render a single TLS site, with no admin API, config autosave, or embedded DNS secrets. */
+export function renderCaddyfile(settings: CaddySettings, stateDirectory: string, backendPort = 3444): string {
+  const validated = parseCaddySettings(settings)
+  if (!Number.isSafeInteger(backendPort) || backendPort < 1 || backendPort > 65535) throw new Error('caddy_backend_port_invalid')
+  const root = resolve(stateDirectory, 'caddy')
+  const dataDirectory = join(root, 'data').replaceAll('\\', '/')
+  const hostname = new URL(validated.publicOrigin).hostname
+  return [
+    '{', '\tadmin off', '\tpersist_config off', '\tauto_https disable_redirects',
+    `\tstorage file_system ${JSON.stringify(dataDirectory)}`,
+    // DNS module errors can contain provider response details; raw child logs are not persisted.
+    '\tlog {', '\t\toutput discard', '\t}', '}', '',
+    `https://${hostname}:${String(validated.listenPort)} {`, '\ttls {', '\t\tdns tencentcloud {',
+    '\t\t\tsecret_id {env.TENCENTCLOUD_SECRET_ID}', '\t\t\tsecret_key {env.TENCENTCLOUD_SECRET_KEY}', '\t\t}', '\t}',
+    `\treverse_proxy 127.0.0.1:${String(backendPort)} {`,
+    '\t\theader_up Host {http.request.hostport}', '\t\ttransport http {', '\t\t\tkeepalive off', '\t\t\tdial_timeout 5s', '\t\t}', '\t}', '}', '',
+  ].join('\n')
+}
+
+/** Owns one atomic configuration record and every Caddy-created private file. */
 export class CaddyConfigStore {
+  readonly rootDirectory: string
   readonly settingsFile: string
   readonly envFile: string
   readonly caddyfile: string
+  readonly dataDirectory: string
+  readonly configDirectory: string
+  readonly logsDirectory: string
   private settingsValue: CaddySettings | undefined
   private credentialsValue: CaddyCredentials | undefined
   private errorCodeValue: string | undefined
+  private queue: Promise<void> = Promise.resolve()
 
-  constructor(stateDirectory: string) {
+  constructor(private readonly stateDirectory: string) {
     if (!isAbsolute(stateDirectory)) throw new Error('caddy config state directory must be absolute')
-    const root = resolve(stateDirectory, 'caddy')
-    this.settingsFile = join(root, 'settings.json')
-    this.envFile = join(root, 'env.json')
-    this.caddyfile = join(root, 'Caddyfile')
+    this.rootDirectory = resolve(stateDirectory, 'caddy')
+    this.settingsFile = join(this.rootDirectory, 'config.json')
+    this.envFile = this.settingsFile
+    this.caddyfile = join(this.rootDirectory, 'Caddyfile')
+    this.dataDirectory = join(this.rootDirectory, 'data')
+    this.configDirectory = join(this.rootDirectory, 'xdg-config')
+    this.logsDirectory = join(this.rootDirectory, 'logs')
   }
 
   settings(): CaddySettings | undefined { return this.settingsValue }
   credentials(): CaddyCredentials | undefined { return this.credentialsValue }
   errorCode(): string | undefined { return this.errorCodeValue }
 
+  status(): CaddyConfigurationStatus {
+    const settings = this.settingsValue
+    return Object.freeze({ configured: settings !== undefined && this.credentialsValue !== undefined, credentialsConfigured: this.credentialsValue !== undefined,
+      storagePath: this.rootDirectory,
+      ...(settings === undefined ? {} : { publicOrigin: settings.publicOrigin, listenPort: settings.listenPort, dnsProvider: settings.dnsProvider }),
+      ...(this.errorCodeValue === undefined ? {} : { errorCode: this.errorCodeValue }),
+    })
+  }
+
   async initialize(): Promise<void> {
-    this.settingsValue = undefined
-    this.credentialsValue = undefined
-    this.errorCodeValue = undefined
-    await this.loadOne(this.settingsFile, raw => {
-      this.settingsValue = parseCaddySettings(JSON.parse(raw) as unknown)
+    await this.enqueue(async () => {
+      this.settingsValue = undefined; this.credentialsValue = undefined; this.errorCodeValue = undefined
+      await assertCaddyParents(this.stateDirectory, this.settingsFile)
+      let entry
+      try { entry = await lstat(this.settingsFile) } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return
+        throw error
+      }
+      if (!entry.isFile() || entry.isSymbolicLink() || entry.size > MAX_CONFIG_BYTES) { this.errorCodeValue = 'caddy_config_invalid'; return }
+      await restrictPrivateFile(this.settingsFile)
+      try {
+        const record: unknown = JSON.parse(await readFile(this.settingsFile, 'utf8'))
+        if (typeof record !== 'object' || record === null || Array.isArray(record)) throw new Error('invalid')
+        const values = record as Record<string, unknown>
+        if (Reflect.ownKeys(values).some(key => key !== 'settings' && key !== 'credentials')) throw new Error('invalid')
+        const settings = parseCaddySettings(values.settings)
+        const credentials = parseCredentials(values.credentials)
+        this.settingsValue = settings; this.credentialsValue = credentials
+      } catch { this.errorCodeValue = 'caddy_config_invalid' }
     })
-    await this.loadOne(this.envFile, raw => {
-      this.credentialsValue = parseCredentials(JSON.parse(raw) as unknown)
+  }
+
+  /** Atomically save validated settings and credentials; omitted or both-blank secrets retain saved ones. */
+  configure(value: unknown, credentialInput?: unknown): Promise<void> {
+    return this.enqueue(async () => {
+      const settings = parseCaddySettings(value)
+      const blank = typeof credentialInput === 'object' && credentialInput !== null && !Array.isArray(credentialInput)
+        && (credentialInput as Record<string, unknown>).secretId === '' && (credentialInput as Record<string, unknown>).secretKey === ''
+        && Reflect.ownKeys(credentialInput).every(key => key === 'secretId' || key === 'secretKey')
+      const credentials = credentialInput === undefined || blank ? this.credentialsValue : parseCredentials(credentialInput)
+      if (credentials === undefined) throw new Error('caddy_credentials_missing')
+      await writeCaddyPrivateFile(this.stateDirectory, this.settingsFile, JSON.stringify({ settings, credentials }) + '\n')
+      this.settingsValue = settings; this.credentialsValue = credentials; this.errorCodeValue = undefined
     })
   }
 
-  private async loadOne(file: string, assign: (raw: string) => void): Promise<void> {
-    let entry
-    try { entry = await lstat(file) } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return
-      throw error
-    }
-    if (!entry.isFile() || entry.isSymbolicLink() || entry.size > MAX_CADDY_SETTINGS_BYTES) {
-      this.errorCodeValue = 'caddy_config_invalid'
-      return
-    }
-    await restrictPrivateFile(file)
-    try { assign(await readFile(file, 'utf8')) } catch { this.errorCodeValue = 'caddy_config_invalid' }
+  /** Write derived runtime files after authoritative settings are available. */
+  prepareCaddyfile(backendPort: number): Promise<void> {
+    return this.enqueue(async () => {
+      const settings = this.settingsValue
+      if (settings === undefined || this.credentialsValue === undefined) throw new Error('caddy_config_missing')
+      for (const directory of [this.dataDirectory, this.configDirectory, this.logsDirectory]) await ensureCaddyDirectory(this.stateDirectory, directory)
+      await writeCaddyPrivateFile(this.stateDirectory, this.caddyfile, renderCaddyfile(settings, this.stateDirectory, backendPort))
+    })
   }
 
-  /** Persist settings and rewrite the Caddyfile from the template. */
-  async configure(value: unknown, stateDirectory: string): Promise<void> {
-    const settings = parseCaddySettings(value)
-    await atomicPrivateWrite(this.settingsFile, JSON.stringify(settings) + '\n')
-    this.settingsValue = settings
-    this.errorCodeValue = undefined
-    await atomicPrivateWrite(this.caddyfile, renderCaddyfile(settings, stateDirectory))
+  /** Remove credentials, certificates, private keys, configuration, logs, and runtime cache. */
+  purge(): Promise<void> {
+    return this.enqueue(async () => {
+      await removeCaddyTree(this.stateDirectory, this.rootDirectory)
+      this.settingsValue = undefined; this.credentialsValue = undefined; this.errorCodeValue = undefined
+    })
   }
 
-  /** Persist or replace the DNS credentials. */
-  async configureCredentials(value: unknown): Promise<void> {
-    const credentials = parseCredentials(value)
-    await atomicPrivateWrite(this.envFile, JSON.stringify(credentials) + '\n')
-    this.credentialsValue = credentials
-  }
-
-  async purge(): Promise<void> {
-    await Promise.all([
-      rm(this.settingsFile, { force: true }),
-      rm(this.envFile, { force: true }),
-      rm(this.caddyfile, { force: true }),
-    ])
-    this.settingsValue = undefined
-    this.credentialsValue = undefined
-    this.errorCodeValue = undefined
+  private enqueue(operation: () => Promise<void>): Promise<void> {
+    const task = this.queue.then(operation, operation)
+    this.queue = task.then(() => undefined, () => undefined)
+    return task
   }
 }

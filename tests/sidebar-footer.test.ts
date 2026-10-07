@@ -89,6 +89,7 @@ function installFooter(locale = 'en-US', hostname = 'localhost') {
   const window = Object.assign(new EventTarget(), { setTimeout, clearTimeout, setInterval, clearInterval })
   const disconnect = vi.fn()
   const disposeSlot = vi.fn()
+  const disposeSettings = vi.fn()
   const injectSlot = vi.fn((_name: string, install: () => () => void) => install())
   let renderer: ((wide: boolean) => ReactElement<TriggerProps>) | undefined
 
@@ -112,6 +113,13 @@ function installFooter(locale = 'en-US', hostname = 'localhost') {
     slots: {
       inject: injectSlot,
       register(options, component) {
+        if (options.name === 'settings.general.item') {
+          expect(options).toMatchObject({ id: 'dsh-mobile-client-modules', order: 120 })
+          const row = component({} as never) as ReactElement<{ scope: string; locale: string }>
+          expect(row.props.scope).toBe('computer')
+          expect(row.props.locale).toBe(locale.split('-')[0] === 'zh' ? 'zh' : locale.split('-')[0] === 'it' ? 'it' : 'en')
+          return disposeSettings
+        }
         expect(options).toMatchObject({ name: 'sidebar.footer.action', id: 'dsh-mobile' })
         renderer = wide => component({ wide } as never) as ReactElement<TriggerProps>
         return disposeSlot
@@ -123,6 +131,7 @@ function installFooter(locale = 'en-US', hostname = 'localhost') {
     document,
     disconnect,
     disposeSlot,
+    disposeSettings,
     injectSlot,
     render(wide: boolean): ReactElement<TriggerProps> {
       if (renderer === undefined) throw new Error('Mobile Access footer was not registered')
@@ -195,7 +204,8 @@ describe('desktop Mobile Access footer', () => {
     ['it-IT', 'Accesso mobile'],
   ])('keeps a localized accessible name and the same vector icon in both widths for %s', (locale, label) => {
     const footer = installFooter(locale)
-    expect(footer.injectSlot).toHaveBeenCalledExactlyOnceWith('sidebar.footer.action', expect.any(Function))
+    expect(footer.injectSlot.mock.calls.map(([name]) => name)).toEqual(['settings.general.item', 'sidebar.footer.action'])
+    expect(footer.injectSlot).toHaveBeenNthCalledWith(2, 'sidebar.footer.action', expect.any(Function))
     for (const wide of [true, false]) {
       const tree = footer.render(wide)
       const children = Children.toArray(tree.props.children) as ReactElement[]
@@ -249,7 +259,8 @@ describe('desktop Mobile Access footer', () => {
 
   it('registers the desktop footer on a private LAN address', () => {
     const footer = installFooter('zh-CN', '192.168.50.23')
-    expect(footer.injectSlot).toHaveBeenCalledExactlyOnceWith('sidebar.footer.action', expect.any(Function))
+    expect(footer.injectSlot.mock.calls.map(([name]) => name)).toEqual(['settings.general.item', 'sidebar.footer.action'])
+    expect(footer.injectSlot).toHaveBeenNthCalledWith(2, 'sidebar.footer.action', expect.any(Function))
     expect(footer.render(true).props).toMatchObject({ 'aria-label': '移动访问', title: '移动访问' })
   })
 
@@ -269,6 +280,7 @@ describe('desktop Mobile Access footer', () => {
     expect(footer.document.querySelector('.dsh-mobile-control__panel')).toBeNull()
     expect(footer.document.head.children).toHaveLength(0)
     expect(footer.disposeSlot).toHaveBeenCalledOnce()
+    expect(footer.disposeSettings).toHaveBeenCalledOnce()
     expect(footer.disconnect).toHaveBeenCalledOnce()
   })
 })

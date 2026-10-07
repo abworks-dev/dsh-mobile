@@ -827,15 +827,16 @@ export function createSwitchComputerHold(options: SwitchComputerHoldOptions): Sw
   let hold: { readonly x: number; readonly y: number; timer: number; fired: boolean } | undefined
   let supported = false
   let probing = false
+  let disposed = false
   let suppressClickUntil = 0
   let firedAt = 0
 
   const probeSupport = (): void => {
-    if (supported || probing) return
+    if (disposed || supported || probing) return
     probing = true
     void Promise.resolve().then(options.canSwitchComputer).then(value => {
       probing = false
-      if (value) supported = true
+      if (!disposed && value) supported = true
     }, () => { probing = false })
   }
 
@@ -855,6 +856,7 @@ export function createSwitchComputerHold(options: SwitchComputerHoldOptions): Sw
 
   return {
     start: (x, y) => {
+      if (disposed) return
       stopTimer()
       suppressClickUntil = 0
       firedAt = 0
@@ -876,6 +878,7 @@ export function createSwitchComputerHold(options: SwitchComputerHoldOptions): Sw
     },
     blocksContextMenu: () => firedAt !== 0 && options.now() - firedAt <= SWITCH_COMPUTER_CLICK_SUPPRESSION_MS,
     dispose: () => {
+      disposed = true
       stopTimer()
       suppressClickUntil = 0
       firedAt = 0
@@ -955,13 +958,14 @@ export function installNativeMobileSurface(backServices: NativeMobileBackService
   const isDrawerToggleTarget = (target: EventTarget | null): boolean =>
     target instanceof Element && target.closest(NATIVE_MOBILE_TOGGLE_QUERY) !== null
   const onTogglePointerDown = (event: PointerEvent): void => {
-    if (!event.isPrimary || !isDrawerToggleTarget(event.target)) return
+    if (!event.isPrimary || event.button !== 0 || !isDrawerToggleTarget(event.target)) return
     switchComputerHold.start(event.clientX, event.clientY)
   }
   const onTogglePointerMove = (event: PointerEvent): void => {
     switchComputerHold.move(event.clientX, event.clientY)
   }
   const onTogglePointerEnd = (): void => { switchComputerHold.end() }
+  const onToggleVisibilityChange = (): void => { if (document.hidden) switchComputerHold.end() }
   const onToggleClickCapture = (event: MouseEvent): void => {
     if (!isDrawerToggleTarget(event.target) || !switchComputerHold.consumeClickSuppression(event.detail)) return
     event.preventDefault()
@@ -978,6 +982,8 @@ export function installNativeMobileSurface(backServices: NativeMobileBackService
   document.addEventListener('pointercancel', onTogglePointerEnd, true)
   document.addEventListener('click', onToggleClickCapture, true)
   document.addEventListener('contextmenu', onToggleContextMenu, true)
+  window.addEventListener('blur', onTogglePointerEnd)
+  document.addEventListener('visibilitychange', onToggleVisibilityChange)
   // The scrim is drawer chrome: it belongs on screen only while the overlay
   // query matches. A resize crosses that breakpoint without touching the DOM
   // the observer below watches, so the query wakes the same sync pass itself.
@@ -1635,6 +1641,8 @@ export function installNativeMobileSurface(backServices: NativeMobileBackService
     document.removeEventListener('pointercancel', onTogglePointerEnd, true)
     document.removeEventListener('click', onToggleClickCapture, true)
     document.removeEventListener('contextmenu', onToggleContextMenu, true)
+    window.removeEventListener('blur', onTogglePointerEnd)
+    document.removeEventListener('visibilitychange', onToggleVisibilityChange)
     switchComputerHold.dispose()
     document.removeEventListener('click', animateNavigation)
     backdrop.remove()

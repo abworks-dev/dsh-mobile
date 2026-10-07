@@ -31,7 +31,8 @@ internal object LauncherIconPolicy {
 
     /**
      * Enables a selected launcher alias before removing another on legacy Android.
-     * Atomic updates receive the complete batch; failures restore the exact previous states.
+     * Atomic updates receive the complete batch. Failures attempt to restore previous states;
+     * if every old entry rejects restoration, the new fallback remains enabled.
      * The caller persists its preference only after this function returns.
      */
     fun switchIcon(
@@ -55,11 +56,24 @@ internal object LauncherIconPolicy {
                     error.addSuppressed(restoreError)
                 }
             } else {
-                restore.forEach { change ->
+                val active = restore.filter { isEnabled(it.icon, it.state) }
+                var entryRestored = false
+                active.forEach { change ->
                     try {
                         update(listOf(change))
+                        entryRestored = true
                     } catch (restoreError: Exception) {
                         error.addSuppressed(restoreError)
+                    }
+                }
+                // Never disable the newly enabled fallback if every attempt to restore an old entry failed.
+                if (entryRestored) {
+                    restore.filterNot { isEnabled(it.icon, it.state) }.forEach { change ->
+                        try {
+                            update(listOf(change))
+                        } catch (restoreError: Exception) {
+                            error.addSuppressed(restoreError)
+                        }
                     }
                 }
             }

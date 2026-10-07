@@ -1,29 +1,16 @@
 import { createHash, randomBytes } from 'node:crypto'
-import {
-  chmod,
-  copyFile,
-  lstat,
-  mkdir,
-  mkdtemp,
-  readFile,
-  rename,
-  rm,
-  writeFile,
-} from 'node:fs/promises'
-import { isAbsolute, join, relative, resolve } from 'node:path'
+import { chmod, lstat, mkdtemp, readFile, rename, writeFile } from 'node:fs/promises'
+import { isAbsolute, join, resolve } from 'node:path'
+import { assertCaddyParents, ensureCaddyDirectory, removeCaddyTree } from './caddy-files.js'
 import { downloadPinnedArtifact } from './component-download.js'
+import { execFileText } from './exec-file.js'
 
-/**
- * Pinned managed-Caddy components fetched only after an explicit user action.
- *
- * Caddy's standard distribution has no DNS-provider plugins, and DNS-01 is what
- * lets a home connection renew certificates without ports 80/443, so the pinned
- * artifacts come from Caddy's official custom-build CDN with exactly one extra
- * module: the DNS provider. Each entry carries the wire digest
- * (`downloadBytes`/`downloadSha256`) and the installed-executable digest
- * (`executableBytes`/`executableSha256`); bare artifacts make the pairs equal.
- */
-interface CaddyArtifact {
+export const CADDY_VERSION = '2.11.6'
+export const CADDY_DNS_PLUGIN_VERSION = 'v0.4.3'
+export const CADDY_DOWNLOAD_PAGE = 'https://caddyserver.com/download'
+
+/** An immutable release asset with independent wire and installed-byte checks. */
+export interface CaddyArtifact {
   readonly version: string
   readonly platform: NodeJS.Platform
   readonly arch: string
@@ -33,106 +20,17 @@ interface CaddyArtifact {
   readonly executableName: string
   readonly executableBytes: number
   readonly executableSha256: string
+  readonly dnsPluginVersion: string
 }
 
-const DOWNLOAD_TIMEOUT_MS = 600_000
+// The custom-download service returned v2.11.7 when v2.11.6 was requested.
+// Production installation stays disabled until immutable assets have been published and verified.
+export const CADDY_COMPONENT_RELEASES: Readonly<Record<string, CaddyArtifact>> = Object.freeze({})
+export const CADDY_COMPONENT_RELEASE = Object.freeze({ version: CADDY_VERSION, dnsPluginVersion: CADDY_DNS_PLUGIN_VERSION })
+export type CaddyDnsProvider = 'tencentcloud'
 
-const CADDY_VERSION = '2.11.6'
-const TENCENTCLOUD_PLUGIN_VERSION = 'v0.4.3'
+export function isCaddyDnsProvider(value: unknown): value is CaddyDnsProvider { return value === 'tencentcloud' }
 
-const customBuildUrl = (platform: string, arch: string): string =>
-  `https://caddyserver.com/api/download?os=${platform}&arch=${arch}&p=github.com%2Fcaddy-dns%2Ftencentcloud%40${TENCENTCLOUD_PLUGIN_VERSION}`
-
-const releases = [
-  {
-    version: CADDY_VERSION,
-    platform: 'win32',
-    arch: 'x64',
-    downloadUrl: customBuildUrl('windows', 'amd64'),
-    downloadBytes: 51_867_136,
-    downloadSha256: '7110a0a0b4a7b87771c301542002c43303768e9f3c6215b04050e665fd3a1937',
-    executableName: 'caddy.exe',
-    executableBytes: 51_867_136,
-    executableSha256: '7110a0a0b4a7b87771c301542002c43303768e9f3c6215b04050e665fd3a1937',
-  },
-  {
-    version: CADDY_VERSION,
-    platform: 'linux',
-    arch: 'x64',
-    downloadUrl: customBuildUrl('linux', 'amd64'),
-    downloadBytes: 0,
-    downloadSha256: '',
-    executableName: 'caddy',
-    executableBytes: 0,
-    executableSha256: '',
-  },
-  {
-    version: CADDY_VERSION,
-    platform: 'linux',
-    arch: 'arm64',
-    downloadUrl: customBuildUrl('linux', 'arm64'),
-    downloadBytes: 0,
-    downloadSha256: '',
-    executableName: 'caddy',
-    executableBytes: 0,
-    executableSha256: '',
-  },
-] as const satisfies readonly CaddyArtifact[]
-
-/**
- * Pinned managed-Caddy release metadata. Entries with empty digests are
- * placeholders that `supported` reports as false until real hashes are pinned
- * from a verified build of that target.
- */
-export const CADDY_COMPONENT_RELEASES: Readonly<Record<string, CaddyArtifact>> = Object.freeze(
-  Object.fromEntries(releases.map(release => [`${release.platform}-${release.arch}`, Object.freeze(release)])),
-)
-
-export const CADDY_COMPONENT_RELEASE = CADDY_COMPONENT_RELEASES['win32-x64'] as CaddyArtifact
-
-/** Caddy download page shown next to the pinned artifact. */
-export const CADDY_DOWNLOAD_PAGE = 'https://caddyserver.com/download'
-
-const DNS_PROVIDERS = ['tencentcloud'] as const
-export type CaddyDnsProvider = (typeof DNS_PROVIDERS)[number]
-
-/** First-release allowlist; more providers ride new pinned builds. */
-export function isCaddyDnsProvider(value: unknown): value is CaddyDnsProvider {
-  return typeof value === 'string' && (DNS_PROVIDERS as readonly string[]).includes(value)
-}
-
-function inside(parent: string, child: string): boolean {
-  const candidate = relative(parent, child)
-  return candidate !== '' && !candidate.startsWith('..') && !isAbsolute(candidate)
-}
-
-async function sha256(file: string): Promise<string> {
-  return createHash('sha256').update(await readFile(file)).digest('hex')
-}
-
-async function regularFile(file: string, expectedBytes?: number): Promise<boolean> {
-  try {
-    const stat = await lstat(file)
-    return stat.isFile() && !stat.isSymbolicLink() && (expectedBytes === undefined || stat.size === expectedBytes)
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false
-    throw error
-  }
-}
-
-async function defaultFetchArtifact(
-  url: string,
-  signal: AbortSignal,
-  expectedBytes: number,
-): Promise<Uint8Array> {
-  return downloadPinnedArtifact({ url, expectedBytes, errorPrefix: 'caddy', signal })
-}
-
-function lookupRelease(platform: NodeJS.Platform, arch: string): CaddyArtifact | undefined {
-  return CADDY_COMPONENT_RELEASES[`${platform}-${arch}`]
-}
-
-/** Public, credential-free description of the managed Caddy component. */
 export interface CaddyComponentStatus {
   readonly supported: boolean
   readonly installed: boolean
@@ -149,131 +47,156 @@ interface CaddyComponentManagerOptions {
   readonly stateDirectory: string
   readonly platform?: NodeJS.Platform
   readonly arch?: string
+  /** Instance-local artifact metadata for tests or a verified immutable release. */
+  readonly artifact?: CaddyArtifact
   readonly fetchArtifact?: (url: string, signal: AbortSignal) => Promise<Uint8Array>
+  readonly inspectExecutable?: (executable: string) => Promise<{ version: string; modules: string }>
+  readonly promoteDirectory?: (source: string, destination: string) => Promise<void>
 }
 
-/**
- * Owns the optional managed-Caddy binary inside DSH Mobile state. The download
- * is gated on an explicit user action and verified twice: the wire bytes are
- * checked against the pinned digest, and the staged executable is rehashed
- * before it is promoted over the previous version.
- */
+async function digest(file: string): Promise<string> { return createHash('sha256').update(await readFile(file)).digest('hex') }
+
+/** Minimal process environment for version/module checks, without ambient API credentials or proxy overrides. */
+export function caddyInspectionEnvironment(environment: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const result: NodeJS.ProcessEnv = {}
+  for (const name of ['SystemRoot', 'WINDIR', 'TEMP', 'TMP', 'LANG', 'LC_ALL']) {
+    if (environment[name] !== undefined) result[name] = environment[name]
+  }
+  return result
+}
+
+async function inspect(executable: string): Promise<{ version: string; modules: string }> {
+  const options = { env: caddyInspectionEnvironment(), timeout: 15_000, maxBuffer: 256 * 1024 }
+  const version = (await execFileText(executable, ['version'], options)).stdout.trim()
+  const modules = (await execFileText(executable, ['list-modules', '--versions'], options)).stdout
+  return { version, modules }
+}
+
+/** Owns only the optional pinned executable; runtime configuration belongs to CaddyConfigStore. */
 export class CaddyComponentManager {
   readonly executable: string
   readonly componentRoot: string
   readonly componentStorage: string
   readonly logRoot: string
-  private readonly stateRoot: string
+  private readonly stateDirectory: string
   private readonly stagingRoot: string
-  private readonly platform: NodeJS.Platform
-  private readonly arch: string
-  private readonly release: CaddyArtifact | undefined
+  private readonly artifact: CaddyArtifact | undefined
   private readonly fetchArtifact: (url: string, signal: AbortSignal) => Promise<Uint8Array>
+  private readonly inspectExecutable: (executable: string) => Promise<{ version: string; modules: string }>
+  private readonly promote: (source: string, destination: string) => Promise<void>
   private installed = false
   private errorCode: string | undefined
   private queue: Promise<void> = Promise.resolve()
 
   constructor(options: CaddyComponentManagerOptions) {
-    const stateDirectory = resolve(options.stateDirectory)
-    if (!isAbsolute(stateDirectory)) throw new Error('caddy state directory must be absolute')
-    this.platform = options.platform ?? process.platform
-    this.arch = options.arch ?? process.arch
-    this.release = lookupRelease(this.platform, this.arch)
-    this.componentRoot = join(stateDirectory, 'components', 'caddy')
-    this.componentStorage = join(this.componentRoot, this.release?.version ?? CADDY_VERSION)
-    this.executable = join(this.componentStorage, this.release?.executableName ?? 'caddy')
-    this.stateRoot = join(stateDirectory, 'state', 'caddy')
-    this.logRoot = join(stateDirectory, 'logs', 'caddy')
-    this.stagingRoot = join(stateDirectory, 'staging', 'caddy')
-    for (const child of [this.componentRoot, this.componentStorage, this.stateRoot, this.logRoot, this.stagingRoot]) {
-      if (!inside(stateDirectory, child)) throw new Error('caddy component path escaped its state directory')
-    }
-    const release = this.release
-    this.fetchArtifact = options.fetchArtifact
-      ?? ((url, signal) => defaultFetchArtifact(url, signal, release?.downloadBytes ?? 0))
+    if (!isAbsolute(options.stateDirectory)) throw new Error('caddy state directory must be absolute')
+    this.stateDirectory = resolve(options.stateDirectory)
+    const platform = options.platform ?? process.platform
+    const arch = options.arch ?? process.arch
+    const artifact = options.artifact ?? CADDY_COMPONENT_RELEASES[`${platform}-${arch}`]
+    if (artifact !== undefined && (artifact.platform !== platform || artifact.arch !== arch
+      || !/^https:\/\//u.test(artifact.downloadUrl) || !/^[a-f0-9]{64}$/u.test(artifact.downloadSha256)
+      || !/^[a-f0-9]{64}$/u.test(artifact.executableSha256) || artifact.downloadBytes < 1 || artifact.executableBytes < 1
+      || !/^[a-z0-9.-]+$/u.test(artifact.executableName))) throw new Error('caddy_artifact_invalid')
+    this.artifact = artifact
+    this.componentRoot = join(this.stateDirectory, 'components', 'caddy')
+    this.componentStorage = join(this.componentRoot, artifact?.version ?? CADDY_VERSION)
+    this.executable = join(this.componentStorage, artifact?.executableName ?? (platform === 'win32' ? 'caddy.exe' : 'caddy'))
+    this.logRoot = join(this.stateDirectory, 'caddy', 'logs')
+    this.stagingRoot = join(this.stateDirectory, 'staging', 'caddy')
+    this.fetchArtifact = options.fetchArtifact ?? ((url, signal) => downloadPinnedArtifact({ url, signal, expectedBytes: artifact?.downloadBytes ?? 0, errorPrefix: 'caddy' }))
+    this.inspectExecutable = options.inspectExecutable ?? inspect
+    this.promote = options.promoteDirectory ?? rename
   }
 
-  /** Inspect the managed binary without touching any caddy process. */
+  /** Recheck a pinned executable before launching; no unverified local binary can run. */
+  async ensureExecutable(): Promise<void> {
+    const artifact = this.artifact
+    if (artifact === undefined) throw new Error('caddy_component_unavailable')
+    await assertCaddyParents(this.stateDirectory, this.executable)
+    const entry = await lstat(this.executable)
+    if (!entry.isFile() || entry.isSymbolicLink() || entry.size !== artifact.executableBytes
+      || await digest(this.executable) !== artifact.executableSha256) throw new Error('caddy_component_invalid')
+    await this.verifyMetadata(this.executable, artifact)
+  }
+
   async initialize(): Promise<void> {
-    const release = this.release
-    this.errorCode = undefined
-    this.installed = release !== undefined && release.executableSha256 !== ''
-      && await regularFile(this.executable, release.executableBytes)
-    if (this.installed && release !== undefined && await sha256(this.executable) !== release.executableSha256) {
-      this.installed = false
-      this.errorCode = 'caddy_component_invalid'
+    this.installed = false; this.errorCode = undefined
+    if (this.artifact === undefined) { this.errorCode = 'caddy_component_unavailable'; return }
+    try { await this.ensureExecutable(); this.installed = true } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') this.errorCode = 'caddy_component_invalid'
     }
   }
 
-  /** Return a safe status that never includes DNS credentials. */
   status(): CaddyComponentStatus {
-    const release = this.release ?? CADDY_COMPONENT_RELEASE
-    return Object.freeze({
-      supported: this.release !== undefined && release.executableSha256 !== '',
-      installed: this.installed,
-      version: release.version,
-      downloadBytes: release.downloadBytes,
-      installedBytes: release.executableBytes,
-      sourceUrl: release.downloadUrl,
-      downloadPage: CADDY_DOWNLOAD_PAGE,
-      storagePath: this.componentRoot,
+    const artifact = this.artifact
+    return Object.freeze({ supported: artifact !== undefined, installed: this.installed,
+      version: artifact?.version ?? CADDY_VERSION, downloadBytes: artifact?.downloadBytes ?? 0,
+      installedBytes: this.installed ? artifact?.executableBytes ?? 0 : 0,
+      sourceUrl: artifact?.downloadUrl ?? CADDY_DOWNLOAD_PAGE, downloadPage: CADDY_DOWNLOAD_PAGE, storagePath: this.componentRoot,
       ...(this.errorCode === undefined ? {} : { errorCode: this.errorCode }),
     })
   }
 
-  /** Download, verify, and install the pinned Caddy executable after explicit confirmation. */
+  /** Explicit installation verifies bytes and reported modules before preserving-old promotion. */
   install(): Promise<CaddyComponentStatus> {
     return this.enqueue(async () => {
-      const release = this.release
-      if (release === undefined || release.executableSha256 === '') {
-        throw new Error('caddy_component_unsupported')
-      }
-      await mkdir(this.stagingRoot, { recursive: true, mode: 0o700 })
+      const artifact = this.artifact
+      if (artifact === undefined) throw new Error('caddy_component_unavailable')
+      await ensureCaddyDirectory(this.stateDirectory, this.stagingRoot)
+      await ensureCaddyDirectory(this.stateDirectory, this.componentRoot)
       const staging = await mkdtemp(join(this.stagingRoot, 'install-'))
+      const candidate = join(this.componentRoot, '.install-' + randomBytes(12).toString('hex'))
+      const backup = join(this.componentRoot, '.previous-' + randomBytes(12).toString('hex'))
+      let previous = false
+      let promoted = false
       try {
         const controller = new AbortController()
-        const timeout = setTimeout(() => { controller.abort() }, DOWNLOAD_TIMEOUT_MS)
+        const timeout = setTimeout(() => { controller.abort() }, 600_000)
         timeout.unref()
         let bytes: Uint8Array
-        try { bytes = await this.fetchArtifact(release.downloadUrl, controller.signal) } finally { clearTimeout(timeout) }
-        if (bytes.byteLength !== release.downloadBytes) throw new Error('caddy_download_size_mismatch')
-        const digest = createHash('sha256').update(bytes).digest('hex')
-        if (digest !== release.downloadSha256) throw new Error('caddy_download_hash_mismatch')
-        // Caddy custom builds ship a bare executable, so the downloaded bytes are
-        // already the install pair.
-        const staged = join(staging, release.executableName)
-        await writeFile(staged, bytes, { flag: 'wx', mode: 0o600 })
-        await chmod(staged, 0o700)
-        if (!await regularFile(staged, release.executableBytes)
-          || await sha256(staged) !== release.executableSha256) {
-          throw new Error('caddy_executable_hash_mismatch')
+        try { bytes = await this.fetchArtifact(artifact.downloadUrl, controller.signal) } finally { clearTimeout(timeout) }
+        if (bytes.byteLength !== artifact.downloadBytes) throw new Error('caddy_download_size_mismatch')
+        if (createHash('sha256').update(bytes).digest('hex') !== artifact.downloadSha256) throw new Error('caddy_download_hash_mismatch')
+        await ensureCaddyDirectory(this.stateDirectory, candidate)
+        const executable = join(candidate, artifact.executableName)
+        await writeFile(executable, bytes, { flag: 'wx', mode: 0o700 })
+        await chmod(executable, 0o700)
+        if (bytes.byteLength !== artifact.executableBytes || await digest(executable) !== artifact.executableSha256) throw new Error('caddy_executable_hash_mismatch')
+        await this.verifyMetadata(executable, artifact)
+        try {
+          const entry = await lstat(this.componentStorage)
+          if (!entry.isDirectory() || entry.isSymbolicLink()) throw new Error('caddy_path_invalid')
+          await rename(this.componentStorage, backup); previous = true
+        } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
+        try { await this.promote(candidate, this.componentStorage); promoted = true } catch (error) {
+          if (previous) { await rename(backup, this.componentStorage); previous = false }
+          throw error
         }
-        const candidate = join(this.componentRoot, `.install-${randomBytes(12).toString('hex')}`)
-        await mkdir(candidate, { recursive: true, mode: 0o700 })
-        await copyFile(staged, join(candidate, release.executableName))
-        await chmod(join(candidate, release.executableName), 0o700)
-        await rm(this.componentStorage, { recursive: true, force: true })
-        await rename(candidate, this.componentStorage)
-        this.installed = true
-        this.errorCode = undefined
+        this.installed = true; this.errorCode = undefined
       } finally {
-        await rm(staging, { recursive: true, force: true })
+        await removeCaddyTree(this.stateDirectory, staging)
+        await removeCaddyTree(this.stateDirectory, candidate)
+        if (previous && promoted) await removeCaddyTree(this.stateDirectory, backup)
       }
     })
   }
 
-  /** Remove every managed-Caddy file owned by DSH Mobile. */
+  /** Remove optional component files; callers stop the controller and purge runtime configuration separately. */
   purge(): Promise<CaddyComponentStatus> {
     return this.enqueue(async () => {
-      await Promise.all([
-        rm(this.componentRoot, { recursive: true, force: true }),
-        rm(this.stateRoot, { recursive: true, force: true }),
-        rm(this.logRoot, { recursive: true, force: true }),
-        rm(this.stagingRoot, { recursive: true, force: true }),
-      ])
-      this.installed = false
-      this.errorCode = undefined
+      await removeCaddyTree(this.stateDirectory, this.componentRoot)
+      await removeCaddyTree(this.stateDirectory, this.stagingRoot)
+      this.installed = false; this.errorCode = this.artifact === undefined ? 'caddy_component_unavailable' : undefined
     })
+  }
+
+  private async verifyMetadata(executable: string, artifact: CaddyArtifact): Promise<void> {
+    const info = await this.inspectExecutable(executable)
+    if (!info.version.startsWith('v' + artifact.version + ' ')) throw new Error('caddy_executable_version_mismatch')
+    const nonstandard = info.modules.split(/\r?\n/u).filter(line => line.startsWith('dns.providers.'))
+    if (nonstandard.length !== 1 || nonstandard[0] !== 'dns.providers.tencentcloud ' + artifact.dnsPluginVersion
+      || !info.modules.includes('Non-standard modules: 1')) throw new Error('caddy_executable_modules_mismatch')
   }
 
   private enqueue(operation: () => Promise<void>): Promise<CaddyComponentStatus> {

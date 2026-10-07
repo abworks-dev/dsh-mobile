@@ -85,21 +85,24 @@ class LauncherIconPolicyTest {
     }
 
     @Test
-    fun rollbackFailuresDoNotPreventRestoringOtherEntries() {
+    fun rollbackFailureKeepsTheNewFallbackLauncherEnabled() {
         var calls = 0
         val failure = IllegalStateException("original failure")
+        val states = LauncherIconPolicy.icons.associateWith { LauncherIconPolicy.STATE_DEFAULT }.toMutableMap()
         try {
             LauncherIconPolicy.switchIcon(LauncherIconPolicy.icons.last().key, false,
-                { LauncherIconPolicy.STATE_DEFAULT }) {
+                { states.getValue(it) }) { changes ->
                 calls++
-                if (calls == 2) throw failure
-                if (calls == 3) throw IllegalStateException("rollback failure")
+                if (calls == 3) throw failure
+                if (calls == 4) throw IllegalStateException("rollback failure")
+                changes.forEach { states[it.icon] = it.state }
             }
             throw AssertionError("component update should fail")
         } catch (error: IllegalStateException) {
             assertTrue(error === failure)
             assertEquals(1, error.suppressed.size)
-            assertEquals(9, calls)
+            assertEquals(4, calls)
+            assertTrue(LauncherIconPolicy.isEnabled(LauncherIconPolicy.icons.last(), states.getValue(LauncherIconPolicy.icons.last())))
         }
     }
 

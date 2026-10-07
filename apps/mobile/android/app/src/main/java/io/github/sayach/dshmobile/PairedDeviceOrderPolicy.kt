@@ -3,14 +3,27 @@ package io.github.sayach.dshmobile
 /**
  * Presentation order of the paired-device list.
  *
- * The list is fixed: rows keep the order they were paired or last arranged in, so connecting to
- * a computer no longer moves it to the top. Only the two arrangement actions change that order,
- * and the stored array is the single source of truth.
+ * Rows keep their persisted display order; connection times select startup devices but do not
+ * rearrange the list. The first upgrade persists the last-used order visible in older releases.
  *
  * Startup selection is deliberately independent of this order: `ConnectionRestorePolicy`
  * prefers the saved last-used key and otherwise the most recently connected valid row.
  */
 internal object PairedDeviceOrderPolicy {
+    enum class MigrationWrite { NONE, EMPTY_MARKER, SORTED_ROWS }
+    data class InitialOrder(val rows: List<PairedDeviceRecord>, val write: MigrationWrite)
+
+    /** Null means unreadable encrypted data: leave both the original payload and marker untouched. */
+    fun initialOrder(decoded: List<PairedDeviceRecord>?, migrationComplete: Boolean): InitialOrder {
+        if (decoded == null) return InitialOrder(emptyList(), MigrationWrite.NONE)
+        if (migrationComplete) return InitialOrder(displayOrder(decoded), MigrationWrite.NONE)
+        if (decoded.isEmpty()) return InitialOrder(decoded, MigrationWrite.EMPTY_MARKER)
+        val visible = decoded.sortedWith(
+            compareByDescending<PairedDeviceRecord> { it.lastConnectedAt ?: Long.MIN_VALUE }.thenBy { it.key },
+        )
+        return InitialOrder(visible, MigrationWrite.SORTED_ROWS)
+    }
+
     /**
      * The rows in display order: the stored array already is that order.
      *

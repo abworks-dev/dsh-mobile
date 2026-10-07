@@ -12,9 +12,7 @@ import android.view.MotionEvent
 import android.view.ScaleGestureDetector
 import android.view.Surface
 import android.view.SurfaceHolder
-import android.view.SurfaceView
 import android.view.View
-import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.ImageButton
 import android.widget.LinearLayout
@@ -33,12 +31,12 @@ class ScanActivity : Activity(), SurfaceHolder.Callback {
     private var resumed = false
     private var decoding = false
     private var finished = false
-    private lateinit var preview: SurfaceView
+    private lateinit var preview: ScannerPreview
     private lateinit var previewContainer: FrameLayout
     private lateinit var scanFrame: View
     private lateinit var scanHint: TextView
-    private lateinit var zoomOut: Button
-    private lateinit var zoomIn: Button
+    private lateinit var zoomOut: ImageButton
+    private lateinit var zoomIn: ImageButton
     private lateinit var zoomLabel: TextView
     private var zoom = ScannerZoomState(0, null)
 
@@ -50,9 +48,6 @@ class ScanActivity : Activity(), SurfaceHolder.Callback {
         applySafeAreaInsets(previewContainer)
         preview.holder.addCallback(this)
         installGestures()
-        previewContainer.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
-            if (camera == null) openCamera() else updatePreviewGeometry()
-        }
     }
 
     override fun onResume() {
@@ -86,10 +81,6 @@ class ScanActivity : Activity(), SurfaceHolder.Callback {
         var multiTouch = false
         val taps = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
             override fun onDown(event: MotionEvent): Boolean = true
-            override fun onSingleTapConfirmed(event: MotionEvent): Boolean {
-                preview.performClick()
-                return true
-            }
             override fun onDoubleTap(event: MotionEvent): Boolean {
                 applyZoom(if (zoom.requestedRatio > 1.5f) 1f else 2f)
                 return true
@@ -101,7 +92,7 @@ class ScanActivity : Activity(), SurfaceHolder.Callback {
                 return true
             }
         }).apply { isQuickScaleEnabled = false }
-        preview.setOnTouchListener { _, event ->
+        preview.gestureEvents = { event ->
             if (event.actionMasked == MotionEvent.ACTION_DOWN) multiTouch = false
             if (event.pointerCount > 1 && !multiTouch) {
                 multiTouch = true
@@ -111,8 +102,6 @@ class ScanActivity : Activity(), SurfaceHolder.Callback {
             }
             scales.onTouchEvent(event)
             if (!multiTouch) taps.onTouchEvent(event)
-            // Consume DOWN through UP/CANCEL so the non-clickable SurfaceView retains its touch target.
-            true
         }
     }
 
@@ -151,10 +140,16 @@ class ScanActivity : Activity(), SurfaceHolder.Callback {
     }
 
     private fun buildInterface(): View {
-        val root = FrameLayout(this).apply { setBackgroundColor(Color.BLACK) }
+        val root = object : FrameLayout(this) {
+            override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
+                super.onLayout(changed, left, top, right, bottom)
+                // Padding can change with safe-area insets even when these outer bounds stay identical.
+                if (camera == null) openCamera() else updatePreviewGeometry()
+            }
+        }.apply { setBackgroundColor(Color.BLACK) }
         previewContainer = root
-        preview = SurfaceView(this)
-        root.addView(preview, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+        preview = ScannerPreview(this).apply { importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO }
+        root.addView(preview, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT, Gravity.CENTER))
 
         scanFrame = View(this).apply {
             background = GradientDrawable().apply {
@@ -181,21 +176,19 @@ class ScanActivity : Activity(), SurfaceHolder.Callback {
             background = GradientDrawable().apply { setColor(Color.BLACK); cornerRadius = dp(24).toFloat() }
             setPadding(dp(8), 0, dp(8), 0)
         }
-        fun zoomButton(label: Int, glyph: Int, direction: Int): Button = Button(this).apply {
-            setText(glyph)
-            textSize = 24f
-            setTextColor(Color.WHITE)
+        fun zoomButton(label: Int, glyph: Int, direction: Int): ImageButton = ImageButton(this).apply {
+            setImageResource(glyph)
             contentDescription = getString(label)
-            minWidth = dp(48)
-            minHeight = dp(48)
+            minimumWidth = dp(48)
+            minimumHeight = dp(48)
             setPadding(0, 0, 0, 0)
             val styled = obtainStyledAttributes(intArrayOf(android.R.attr.selectableItemBackgroundBorderless))
             background = styled.getDrawable(0)
             styled.recycle()
             setOnClickListener { applyZoom(zoom.stepRatio(direction)) }
         }
-        zoomOut = zoomButton(R.string.scan_zoom_out, R.string.scan_zoom_minus, -1)
-        zoomIn = zoomButton(R.string.scan_zoom_in, R.string.scan_zoom_plus, 1)
+        zoomOut = zoomButton(R.string.scan_zoom_out, R.drawable.ic_scan_zoom_out, -1)
+        zoomIn = zoomButton(R.string.scan_zoom_in, R.drawable.ic_scan_zoom_in, 1)
         zoomLabel = TextView(this).apply {
             setTextColor(Color.WHITE)
             textSize = 16f
@@ -301,9 +294,9 @@ class ScanActivity : Activity(), SurfaceHolder.Callback {
         }
         val frame = PreviewLayoutPolicy.previewFrame(width, height, previewWidth, previewHeight, rotation % 180 != 0)
         val layout = preview.layoutParams as FrameLayout.LayoutParams
-        if (layout.leftMargin != frame[0] || layout.topMargin != frame[1] || layout.width != frame[2] || layout.height != frame[3]) {
-            layout.leftMargin = frame[0]
-            layout.topMargin = frame[1]
+        if (layout.gravity != Gravity.CENTER || layout.width != frame[2] || layout.height != frame[3]) {
+            // Framework centering handles both crop axes identically in LTR and RTL locales.
+            layout.gravity = Gravity.CENTER
             layout.width = frame[2]
             layout.height = frame[3]
             preview.layoutParams = layout

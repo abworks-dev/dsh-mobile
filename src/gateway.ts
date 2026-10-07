@@ -2,7 +2,7 @@ import { createHash, X509Certificate } from 'node:crypto'
 import { createSocket, type Socket as DatagramSocket } from 'node:dgram'
 import { lstat, readFile, stat } from 'node:fs/promises'
 import { hostname } from 'node:os'
-import { extname } from 'node:path'
+import { basename, dirname, extname, join } from 'node:path'
 import {
   createServer as createHttpServer,
   request as requestHttp,
@@ -31,6 +31,8 @@ import {
   type SessionAuthorization,
 } from './access.js'
 import type { ResolvedGatewayConfig } from './config.js'
+import { ClientModulePreferenceStore, parseExcludedClientModules, type ClientModuleEntry, type ClientModulePreferenceView } from './client-module-preferences.js'
+import { renderClientModuleRecoveryPage } from './client-module-recovery.js'
 import { ensureMobileCompatibility, MOBILE_COMPAT_PATH } from './mobile-compat-bootstrap.js'
 import {
   AUTH_PREFIX,
@@ -393,16 +395,34 @@ class ExcludedClientModulesError extends Error {
   constructor(message: string) { super(`excludedClientModules: ${message}`) }
 }
 
-/** Validate graph edges before removing application rows from both manifest views. */
-function excludeMobileBootEntries(
-  entries: BootGraphEntry[],
-  batches: BootGraphBatch[],
-  excludedIds: readonly string[],
-): void {
-  if (excludedIds.length === 0) return
-  const excluded = new Set(excludedIds)
-  if (excluded.size !== excludedIds.length) throw new ExcludedClientModulesError('duplicate module ids')
-  const byId = new Map(entries.map(entry => [entry.id, entry]))
+/** A graph-selection conflict with a bounded diagnostic safe for authenticated callers. */
+export class ClientModuleConflictError extends HttpError {
+  readonly detail: string
+
+  constructor(detail: string) {
+    super(409, 'excluded_client_modules_invalid')
+    this.detail = detail.replace(/[\u0000-\u001f\u007f]/gu, ' ')
+      .replace(/(?:https?:\/\/|[a-z]:[\\/])\S+/giu, '[redacted]')
+      .slice(0, 512)
+  }
+}
+
+function requiredClientModule(entry: BootGraphEntry, phase: BootGraphBatch['phase'] | undefined): boolean {
+  return MOBILE_BOOT_CORE_MODULES.has(entry.id) || entry.immediately === true || phase !== 'application'
+}
+
+function clientModuleDependencies(entry: BootGraphEntry): readonly string[] {
+  const dependencies = new Set<string>()
+  for (const [field, edges] of [['inject', entry.inject], ['external', entry.external]] as const) {
+    if (edges !== undefined && (!Array.isArray(edges) || edges.some(id => typeof id !== 'string'))) {
+      throw new ExcludedClientModulesError(`upstream module ${entry.id} has malformed ${field} dependencies`)
+    }
+    for (const dependency of edges ?? []) dependencies.add(dependency.endsWith('/client') ? dependency.slice(0, -'/client'.length) : dependency)
+  }
+  return Object.freeze([...dependencies])
+}
+
+function clientModulePhases(entries: readonly BootGraphEntry[], batches: readonly BootGraphBatch[]): ReadonlyMap<string, BootGraphBatch['phase']> {
   const phases = new Map<string, BootGraphBatch['phase']>()
   for (const batch of batches) {
     for (const id of batch.entries) {
@@ -413,24 +433,44 @@ function excludeMobileBootEntries(
   for (const entry of entries) {
     if (!phases.has(entry.id)) throw new ExcludedClientModulesError(`upstream module ${entry.id} belongs to no batch`)
   }
+  return phases
+}
+
+/** Read only installed module ids and declared edges from the same boot parser used for serving. */
+export function describeMobileClientModules(html: string): readonly ClientModuleEntry[] {
+  const plan = parseMobileBootPlan(html)
+  const ids = new Set(plan.entries.map(entry => entry.id))
+  const phases = plan.batches === undefined ? new Map<string, BootGraphBatch['phase']>() : clientModulePhases(plan.entries, plan.batches)
+  return Object.freeze(plan.entries.map(entry => Object.freeze({
+    id: entry.id,
+    required: requiredClientModule(entry, phases.get(entry.id)),
+    dependencies: Object.freeze(clientModuleDependencies(entry).filter(id => ids.has(id))),
+  })))
+}
+
+/** Validate graph edges before removing application rows from both manifest views. */
+function excludeMobileBootEntries(
+  entries: BootGraphEntry[],
+  batches: BootGraphBatch[],
+  excludedIds: readonly string[],
+): void {
+  if (excludedIds.length === 0) return
+  const excluded = new Set(excludedIds)
+  if (excluded.size !== excludedIds.length) throw new ExcludedClientModulesError('duplicate module ids')
+  const byId = new Map(entries.map(entry => [entry.id, entry]))
+  const phases = clientModulePhases(entries, batches)
   for (const id of excluded) {
     const entry = byId.get(id)
     if (entry === undefined) throw new ExcludedClientModulesError(`module ${id} is not installed in this DSH client graph`)
-    if (MOBILE_BOOT_CORE_MODULES.has(id) || entry.immediately === true || phases.get(id) !== 'application') {
+    if (requiredClientModule(entry, phases.get(id))) {
       throw new ExcludedClientModulesError(`module ${id} is required for mobile boot or belongs to a bootstrap batch`)
     }
   }
   for (const entry of entries) {
     if (excluded.has(entry.id)) continue
-    for (const [field, edges] of [['inject', entry.inject], ['external', entry.external]] as const) {
-      if (edges !== undefined && (!Array.isArray(edges) || edges.some(id => typeof id !== 'string'))) {
-        throw new ExcludedClientModulesError(`upstream module ${entry.id} has malformed ${field} dependencies`)
-      }
-      for (const dependency of edges ?? []) {
-        const packageId = dependency.endsWith('/client') ? dependency.slice(0, -'/client'.length) : dependency
-        if (excluded.has(packageId)) {
-          throw new ExcludedClientModulesError(`module ${entry.id} still depends on excluded module ${packageId}; exclude the dependent too or keep ${packageId}`)
-        }
+    for (const packageId of clientModuleDependencies(entry)) {
+      if (excluded.has(packageId)) {
+        throw new ExcludedClientModulesError(`module ${entry.id} still depends on excluded module ${packageId}; exclude the dependent too or keep ${packageId}`)
       }
     }
   }
@@ -1133,6 +1173,10 @@ export class MobileAccessGateway {
   private readonly removeExtensionContentListener: () => void
   private readonly renewLimiter: BoundedRateLimiter
   private readonly probeLimiter: BoundedRateLimiter
+  private readonly clientModulePreferences: ClientModulePreferenceStore
+  private readonly clientModuleOperations = new Set<AbortController>()
+  private readonly clientModuleTasks = new Set<Promise<ClientModulePreferenceView>>()
+  private readonly clientModuleRevocations = new Set<Promise<void>>()
 
   constructor(
     readonly config: ResolvedGatewayConfig,
@@ -1142,7 +1186,11 @@ export class MobileAccessGateway {
     private readonly extraWebSocketPaths?: { has(pathname: string): boolean },
     private readonly blockedUpgradeLog?: BlockedUpgradePathLog,
     private readonly onDiscoveryDegraded?: (source: 'broadcast' | 'mdns', code: string) => void,
+    clientModulePreferences?: ClientModulePreferenceStore,
   ) {
+    this.clientModulePreferences = clientModulePreferences ?? new ClientModulePreferenceStore(
+      join(dirname(config.stateFile), `${basename(config.stateFile)}.client-modules.json`), config.excludedClientModules,
+    )
     this.listenerTlsEnabled = config.tls.mode === 'provided'
     this.tlsEnabled = config.publicTls
     this.access = new AccessController(store, {
@@ -1169,6 +1217,10 @@ export class MobileAccessGateway {
     )
     this.removeSessionListener = this.access.onSessionEnded((authorization, reason) => {
       if (reason === 'revoked') {
+        const cleanup = this.clientModulePreferences.removeDevice(authorization.deviceId)
+          .catch(() => { process.emitWarning('Unable to remove revoked device client preferences', { code: 'DSH_MOBILE_PREFERENCE_CLEANUP_FAILED' }) })
+        this.clientModuleRevocations.add(cleanup)
+        void cleanup.finally(() => this.clientModuleRevocations.delete(cleanup))
         if (!this.pendingDeviceRevocations.has(authorization.deviceId)) {
           this.pendingDeviceRevocations.add(authorization.deviceId)
           this.broadcastDeviceRevoked(authorization.deviceId)
@@ -1194,6 +1246,7 @@ export class MobileAccessGateway {
     this.started = true
     await this.access.initialize()
     try {
+      await this.clientModulePreferences.initialize()
       if (this.config.pairingCaFile !== undefined) {
         const certificate = new X509Certificate(await readFile(this.config.pairingCaFile))
         const fingerprint = certificate.fingerprint256.replaceAll(':', '').toLowerCase()
@@ -1738,6 +1791,7 @@ export class MobileAccessGateway {
     }
     const computerImages = request.method === 'GET' && target.decodedPathname === `${AUTH_PREFIX}/computer-images`
     const computerImage = request.method === 'GET' && target.decodedPathname === `${AUTH_PREFIX}/computer-image`
+    const clientModules = target.decodedPathname === `${AUTH_PREFIX}/client-modules`
     const requestedExtension = extensionTarget(target.decodedPathname)
     const requestedMobileBootBatch = mobileBootBatchKey(target.decodedPathname)
     const customAsset = request.method === 'GET'
@@ -1767,7 +1821,7 @@ export class MobileAccessGateway {
                 }
               : undefined
       : undefined
-    if (customAsset === undefined && requestedMobileBootBatch === undefined && !computerImages && !computerImage
+    if (customAsset === undefined && requestedMobileBootBatch === undefined && !computerImages && !computerImage && !clientModules
       && extensionTarget(target.decodedPathname) === undefined
       && (target.decodedPathname === AUTH_PREFIX || target.decodedPathname.startsWith(`${AUTH_PREFIX}/`))) {
       throw new HttpError(404, 'not_found')
@@ -1801,6 +1855,36 @@ export class MobileAccessGateway {
       throw error
     }
     if (isMutation) this.requireCsrf(request, authorization)
+    if (clientModules) {
+      if (target.search !== '') throw new HttpError(400, 'bad_request')
+      if (request.method !== 'GET' && request.method !== 'POST') throw new HttpError(405, 'method_not_allowed')
+      const operation = this.allocateRequest(authorization, response, {})
+      const onClose = (): void => { operation.abort(); operation.release() }
+      response.once('close', onClose)
+      try {
+        let kind: 'describe' | 'configure' | 'reset' = 'describe'
+        let excluded: unknown
+        if (request.method === 'POST') {
+          const body = await readJsonObject(request, this.config.maxBodyBytes)
+          const keys = Object.keys(body)
+          if (keys.length !== 1) throw new HttpError(400, 'bad_request')
+          if (keys[0] === 'reset' && body.reset === true) kind = 'reset'
+          else if (keys[0] === 'excludedClientModules') { kind = 'configure'; excluded = body.excludedClientModules }
+          else throw new HttpError(400, 'bad_request')
+        }
+        const view = await this.clientModulePreferenceOperation(kind, excluded, authorization.deviceId, operation.signal)
+        operation.signal.throwIfAborted()
+        sendJson(response, 200, view, this.tlsEnabled)
+      } catch (error) {
+        if (operation.signal.aborted) return
+        if (error instanceof ClientModuleConflictError) sendJson(response, 409, { error: error.code, detail: error.detail }, this.tlsEnabled)
+        else throw error
+      } finally {
+        response.removeListener('close', onClose)
+        operation.release()
+      }
+      return
+    }
     const extension = requestedExtension
     if (extension !== undefined) {
       await this.handleExtensionRequest(extension, target, request, response, authorization)
@@ -2128,37 +2212,111 @@ export class MobileAccessGateway {
     }
   }
 
-  private async proxyMobileIndex(
-    request: IncomingMessage,
-    response: ServerResponse,
-    authorization: SessionAuthorization,
-  ): Promise<void> {
-    const holder: { request?: ClientRequest } = {}
-    const operation = this.allocateRequest(authorization, response, holder)
+  /** List installed modules and resolve the next-open selection.
+   * @param deviceId - Authenticated device identity; omitted for computer defaults.
+   * @param callerSignal - Cancels catalog fetching when the admin request closes.
+   * @returns The installed catalog and effective module selection.
+   */
+  describeClientModules(deviceId?: string, callerSignal?: AbortSignal): Promise<ClientModulePreferenceView> {
+    return this.clientModulePreferenceOperation('describe', undefined, deviceId, callerSignal)
+  }
+
+  /** Persist a validated device override or computer default.
+   * @param excluded - Untrusted module IDs to validate against the current boot graph.
+   * @param deviceId - Authenticated device identity; omitted for computer defaults.
+   * @param callerSignal - Cancels fetching and validation, not an atomic write already started.
+   * @returns The catalog and saved selection without reloading clients.
+   */
+  configureClientModules(excluded: unknown, deviceId?: string, callerSignal?: AbortSignal): Promise<ClientModulePreferenceView> {
+    return this.clientModulePreferenceOperation('configure', excluded, deviceId, callerSignal)
+  }
+
+  /** Reset one override without reloading connected clients.
+   * @param deviceId - Authenticated device identity; omitted to reset computer defaults.
+   * @param callerSignal - Cancels fetching and validation, not an atomic write already started.
+   * @returns The catalog and inherited selection.
+   */
+  resetClientModules(deviceId?: string, callerSignal?: AbortSignal): Promise<ClientModulePreferenceView> {
+    return this.clientModulePreferenceOperation('reset', undefined, deviceId, callerSignal)
+  }
+
+  private async clientModulePreferenceOperation(
+    kind: 'describe' | 'configure' | 'reset', excluded: unknown, deviceId?: string, callerSignal?: AbortSignal,
+  ): Promise<ClientModulePreferenceView> {
+    if (this.closing || !this.started) throw new HttpError(503, 'unavailable')
+    const controller = new AbortController()
+    const abort = (): void => controller.abort()
+    if (callerSignal?.aborted === true) controller.abort()
+    callerSignal?.addEventListener('abort', abort, { once: true })
+    this.clientModuleOperations.add(controller)
+    const task = (async (): Promise<ClientModulePreferenceView> => {
+      let html = ''
+      const validate = async (selection: readonly string[]): Promise<void> => {
+        html = (await this.fetchAuthenticatedUpstreamIndex(controller.signal)).html
+        try { parseMobileBootPlan(html, selection) } catch (error) {
+          if (error instanceof ExcludedClientModulesError) throw new ClientModuleConflictError(error.message)
+          throw new HttpError(502, 'upstream_unavailable')
+        }
+        controller.signal.throwIfAborted()
+      }
+      let selection
+      if (kind === 'configure') {
+        let ids: readonly string[]
+        try { ids = parseExcludedClientModules(excluded) } catch { throw new HttpError(400, 'excluded_client_modules_invalid') }
+        selection = await this.clientModulePreferences.configure(ids, deviceId, validate)
+      } else if (kind === 'reset') selection = await this.clientModulePreferences.reset(deviceId, validate)
+      else {
+        html = (await this.fetchAuthenticatedUpstreamIndex(controller.signal)).html
+        selection = await this.clientModulePreferences.read(deviceId)
+      }
+      controller.signal.throwIfAborted()
+      try {
+        const plan = parseMobileBootPlan(html)
+        return Object.freeze({
+          entries: describeMobileClientModules(html),
+          ...selection,
+          ...(plan.batches === undefined ? { excludedClientModules: Object.freeze([]), defaultExcludedClientModules: Object.freeze([]) } : {}),
+          reloadRequired: true,
+        })
+      } catch (error) {
+        if (error instanceof HttpError) throw error
+        throw new HttpError(502, 'upstream_unavailable')
+      }
+    })()
+    this.clientModuleTasks.add(task)
+    try { return await task } finally {
+      callerSignal?.removeEventListener('abort', abort)
+      this.clientModuleOperations.delete(controller)
+      this.clientModuleTasks.delete(task)
+    }
+  }
+
+  private async fetchAuthenticatedUpstreamIndex(
+    signal: AbortSignal, incoming?: IncomingMessage,
+  ): Promise<{ readonly html: string; readonly headers: IncomingHttpHeaders }> {
+    signal.throwIfAborted()
+    let upstreamRequest: ClientRequest | undefined
+    const abort = (): void => { upstreamRequest?.destroy(requestAbortedError()) }
+    signal.addEventListener('abort', abort, { once: true })
     try {
-      const upstreamHeaders = sanitizeRequestHeaders(request, this.config.upstreamOrigin)
-      const upstreamCookie = await this.upstreamCookieHeader()
-      if (upstreamCookie !== undefined) upstreamHeaders.cookie = upstreamCookie
-      upstreamHeaders['accept-encoding'] = 'identity'
+      const headers = incoming === undefined
+        ? { host: this.config.upstreamOrigin.host, accept: 'text/html', 'accept-encoding': 'identity' }
+        : sanitizeRequestHeaders(incoming, this.config.upstreamOrigin)
+      const upstreamCookie = await waitForRequestTask(this.upstreamCookieHeader(), signal)
+      signal.throwIfAborted()
+      if (upstreamCookie !== undefined) headers.cookie = upstreamCookie
+      headers['accept-encoding'] = 'identity'
       const proxied = await new Promise<IncomingMessage>((resolve, reject) => {
-        const upstreamRequest = requestHttp({
-          protocol: 'http:',
-          hostname: stripIpv6Brackets(this.config.upstreamOrigin.hostname),
-          port: Number(this.config.upstreamOrigin.port),
-          method: 'GET',
-          path: '/',
-          headers: upstreamHeaders,
-          agent: false,
+        upstreamRequest = requestHttp({
+          protocol: 'http:', hostname: stripIpv6Brackets(this.config.upstreamOrigin.hostname),
+          port: Number(this.config.upstreamOrigin.port), method: 'GET', path: '/', headers, agent: false,
         })
-        holder.request = upstreamRequest
-        upstreamRequest.setTimeout(this.config.upstreamTimeoutMs, () => {
-          upstreamRequest.destroy(new HttpError(504, 'upstream_timeout'))
-        })
+        upstreamRequest.setTimeout(this.config.upstreamTimeoutMs, () => { upstreamRequest?.destroy(new HttpError(504, 'upstream_timeout')) })
         upstreamRequest.once('response', resolve)
         upstreamRequest.once('error', reject)
         upstreamRequest.end()
       })
-      if ((proxied.statusCode ?? 502) !== 200) throw new HttpError(502, 'upstream_unavailable')
+      if (proxied.statusCode !== 200) throw new HttpError(502, 'upstream_unavailable')
       const chunks: Buffer[] = []
       let bytes = 0
       for await (const chunk of proxied) {
@@ -2167,13 +2325,37 @@ export class MobileAccessGateway {
         if (bytes > 4 * 1024 * 1024) throw new HttpError(502, 'upstream_unavailable')
         chunks.push(buffer)
       }
+      signal.throwIfAborted()
+      return { html: Buffer.concat(chunks).toString('utf8'), headers: proxied.headers }
+    } catch (error) {
+      if (signal.aborted || error instanceof HttpError) throw error
+      throw new HttpError(502, 'upstream_unavailable')
+    } finally {
+      signal.removeEventListener('abort', abort)
+      upstreamRequest?.destroy()
+    }
+  }
+
+  private async proxyMobileIndex(
+    request: IncomingMessage,
+    response: ServerResponse,
+    authorization: SessionAuthorization,
+  ): Promise<void> {
+    const holder: { request?: ClientRequest } = {}
+    const operation = this.allocateRequest(authorization, response, holder)
+    const onClose = (): void => { operation.abort(); operation.release() }
+    response.once('close', onClose)
+    try {
+      const index = await this.fetchAuthenticatedUpstreamIndex(operation.signal, request)
+      const preference = await this.clientModulePreferences.read(authorization.deviceId)
+      const excludedClientModules = preference.excludedClientModules
       let body: Buffer
       try {
-        const html = Buffer.concat(chunks).toString('utf8')
-        const plan = parseMobileBootPlan(html, this.config.excludedClientModules)
+        const html = index.html
+        const plan = parseMobileBootPlan(html, excludedClientModules)
         const options = plan.rewrittenBatchEntries === undefined
-          ? { excludedClientModules: this.config.excludedClientModules }
-          : { ...await this.resolveMobileBootSizes(plan.rewrittenBatchEntries.flatMap(batch => batch.entries)), excludedClientModules: this.config.excludedClientModules }
+          ? { excludedClientModules }
+          : { ...await this.resolveMobileBootSizes(plan.rewrittenBatchEntries.flatMap(batch => batch.entries), operation.signal), excludedClientModules }
         const cookies = browserAuthCookies(request.headers.cookie)
         const csrfCookie = this.tlsEnabled && cookies.has(HOST_SESSION_COOKIE) ? HOST_CSRF_COOKIE : CSRF_COOKIE
         const rewritten = rewriteMobileIndexWithBatch(html, { ...options, csrfCookie })
@@ -2186,12 +2368,23 @@ export class MobileAccessGateway {
             this.lastModuleExclusionError = detail
             process.emitWarning(detail, { code: 'DSH_MOBILE_MODULE_EXCLUSION_INVALID' })
           }
+          if (preference.source === 'device' || preference.source === 'computer') {
+            operation.signal.throwIfAborted()
+            const locale = resolveAuthPageLocale(headerValue(request.headers, 'accept-language'))
+            const recovery = Buffer.from(renderClientModuleRecoveryPage(locale))
+            // A valid owned document uses 200 so Android does not replace its recovery action with a generic HTTP-error dialog.
+            setSecurityHeaders(response, this.tlsEnabled)
+            response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Content-Length': recovery.byteLength })
+            response.end(recovery)
+            return
+          }
           sendJson(response, 409, { error: 'excluded_client_modules_invalid', detail }, this.tlsEnabled)
           return
         }
         throw new HttpError(502, 'upstream_unavailable')
       }
-      const headers = sanitizeResponseHeaders(proxied.headers, this.config.upstreamOrigin)
+      operation.signal.throwIfAborted()
+      const headers = sanitizeResponseHeaders(index.headers, this.config.upstreamOrigin)
       delete headers['content-length']
       delete headers['content-encoding']
       delete headers.etag
@@ -2209,6 +2402,7 @@ export class MobileAccessGateway {
       if (response.headersSent) response.destroy()
       else throw new HttpError(502, 'upstream_unavailable')
     } finally {
+      response.removeListener('close', onClose)
       operation.release()
     }
   }
@@ -2233,6 +2427,7 @@ export class MobileAccessGateway {
    */
   private async resolveMobileBootSizes(
     planEntries: readonly MobileBootBatchEntry[],
+    signal?: AbortSignal,
   ): Promise<{ sizes: Map<string, number>; passThrough: Set<string> }> {
     const sizes = new Map<string, number>()
     const passThrough = new Set<string>()
@@ -2241,9 +2436,10 @@ export class MobileAccessGateway {
     let cursor = 0
     const worker = async (): Promise<void> => {
       while (cursor < candidates.length) {
+        signal?.throwIfAborted()
         const index = cursor++
         const source = candidates[index]!.url
-        const size = await this.upstreamBundleSize(source)
+        const size = await this.upstreamBundleSize(source, signal)
         if (size === undefined || size >= MAX_MOBILE_BOOT_ENTRY_BYTES) passThrough.add(source)
         else sizes.set(source, size)
       }
@@ -2258,14 +2454,20 @@ export class MobileAccessGateway {
    * counts bytes; it aborts instantly past the per-entry cap. Measurements are
    * cached for a short window.
    */
-  private async upstreamBundleSize(source: string): Promise<number | undefined> {
+  private async upstreamBundleSize(source: string, signal?: AbortSignal): Promise<number | undefined> {
+    signal?.throwIfAborted()
     const target = upstreamPluginBundleUrl(source, this.config.upstreamOrigin)
     if (target === undefined) return undefined
     const cached = this.bootEntrySizeCache.get(source)
     if (cached !== undefined && Date.now() - cached.at < MOBILE_BOOT_SIZE_CACHE_TTL_MS) return cached.size
-    const upstreamCookie = await this.upstreamCookieHeader()
     let upstreamRequest: ClientRequest | undefined
+    const abort = (): void => { upstreamRequest?.destroy(requestAbortedError()) }
+    signal?.addEventListener('abort', abort, { once: true })
     try {
+      const upstreamCookie = signal === undefined
+        ? await this.upstreamCookieHeader()
+        : await waitForRequestTask(this.upstreamCookieHeader(), signal)
+      signal?.throwIfAborted()
       const proxied = await new Promise<IncomingMessage>((resolve, reject) => {
         upstreamRequest = requestHttp({
           protocol: 'http:',
@@ -2308,9 +2510,11 @@ export class MobileAccessGateway {
       if (size === undefined) return undefined
       this.bootEntrySizeCache.set(source, { size, at: Date.now() })
       return size
-    } catch {
+    } catch (error) {
+      if (signal?.aborted === true) throw error
       return undefined
     } finally {
+      signal?.removeEventListener('abort', abort)
       upstreamRequest?.destroy()
     }
   }
@@ -2493,6 +2697,7 @@ export class MobileAccessGateway {
     response: ServerResponse,
     upstream: { request?: ClientRequest },
   ): { id: number; signal: AbortSignal; abort: () => void; release: () => void } {
+    if (this.closing || response.destroyed || response.writableEnded) throw requestAbortedError()
     if (this.activeRequests.size >= this.config.maxActiveRequests) throw new HttpError(429, 'busy')
     const id = this.nextOperationId++
     const controller = new AbortController()
@@ -2517,53 +2722,12 @@ export class MobileAccessGateway {
   }
 
   /**
-   * Proxy one request upstream. Pass-through client bundles (`GET /plugins`)
-   * and static assets (`GET /assets`) receive bounded transient retries — the
-   * upstream resets a fraction of fresh connections — matching the resilience
-   * the merged-batch assembly already has.
-   * A request is only retried before any byte reached the client.
+   * Proxy one request, retrying transient failures for plugin and asset GETs.
+   * Only bodyless GETs can be replayed, before response headers reach the client.
+   * One request slot and cancellation signal cover attempts and backoff together.
+   * API requests and requests with bodies are forwarded once.
    */
   private async proxyHttp(
-    request: IncomingMessage,
-    response: ServerResponse,
-    authorization: SessionAuthorization,
-  ): Promise<void> {
-    const retryable = request.method === 'GET'
-      && (request.url?.split('?', 1)[0]?.startsWith('/plugins/') === true
-        || request.url?.split('?', 1)[0]?.startsWith('/assets/') === true)
-    if (!retryable) {
-      try {
-        await this.proxyHttpOnce(request, response, authorization)
-      } catch (error) {
-        if (error instanceof HttpError) throw error
-        if (response.headersSent) response.destroy()
-        else throw new HttpError(502, 'upstream_unavailable')
-      }
-      return
-    }
-    const delay = (attempt: number): Promise<void> => (
-      new Promise(resolve => setTimeout(resolve, MOBILE_BOOT_RETRY_DELAY_MS * attempt))
-    )
-    for (let attempt = 1; attempt <= MOBILE_BOOT_UPSTREAM_ATTEMPTS; attempt++) {
-      try {
-        await this.proxyHttpOnce(request, response, authorization)
-        return
-      } catch (error) {
-        if (response.headersSent) {
-          response.destroy()
-          return
-        }
-        if (error instanceof HttpError || !isTransientUpstreamError(error)) {
-          throw error instanceof HttpError ? error : new HttpError(502, 'upstream_unavailable')
-        }
-        if (attempt === MOBILE_BOOT_UPSTREAM_ATTEMPTS) throw new HttpError(502, 'upstream_unavailable')
-        await delay(attempt)
-      }
-    }
-    throw new HttpError(502, 'upstream_unavailable')
-  }
-
-  private async proxyHttpOnce(
     request: IncomingMessage,
     response: ServerResponse,
     authorization: SessionAuthorization,
@@ -2572,15 +2736,63 @@ export class MobileAccessGateway {
     if (declared !== undefined && (!/^\d+$/u.test(declared) || Number(declared) > this.config.maxBodyBytes)) {
       throw new HttpError(413, 'payload_too_large')
     }
+    const replayable = request.method === 'GET'
+      && request.headers['transfer-encoding'] === undefined
+      && (declared === undefined || Number(declared) === 0)
+      && (request.url?.split('?', 1)[0]?.startsWith('/plugins/') === true
+        || request.url?.split('?', 1)[0]?.startsWith('/assets/') === true)
     const holder: { request?: ClientRequest } = {}
     const operation = this.allocateRequest(authorization, response, holder)
     const onClose = (): void => { operation.release(); operation.abort() }
     response.once('close', onClose)
+    // The HTTP parser accepts no payload without Content-Length or Transfer-Encoding.
+    // Draining a bodyless GET once keeps its IncomingMessage out of retry pipelines.
+    if (replayable) request.resume()
+    try {
+      const attempts = replayable ? MOBILE_BOOT_UPSTREAM_ATTEMPTS : 1
+      for (let attempt = 1; attempt <= attempts; attempt++) {
+        operation.signal.throwIfAborted()
+        try {
+          await this.proxyHttpOnce(request, response, holder, operation.signal, replayable)
+          return
+        } catch (error) {
+          if (operation.signal.aborted || response.destroyed) return
+          if (response.headersSent) {
+            response.destroy()
+            return
+          }
+          if (error instanceof HttpError || !isTransientUpstreamError(error)) {
+            throw error instanceof HttpError ? error : new HttpError(502, 'upstream_unavailable')
+          }
+          if (attempt === attempts) throw new HttpError(502, 'upstream_unavailable')
+          await waitForAbortableDelay(MOBILE_BOOT_RETRY_DELAY_MS * attempt, operation.signal)
+        }
+      }
+    } catch (error) {
+      if (!operation.signal.aborted) throw error
+    } finally {
+      response.removeListener('close', onClose)
+      operation.release()
+    }
+  }
+
+  private async proxyHttpOnce(
+    request: IncomingMessage,
+    response: ServerResponse,
+    holder: { request?: ClientRequest },
+    signal: AbortSignal,
+    replayable: boolean,
+  ): Promise<void> {
     let bodyDone: Promise<void> | undefined
     try {
       const upstreamHeaders = sanitizeRequestHeaders(request, this.config.upstreamOrigin)
+      // IncomingMessage removes chunk framing; GET does not opt into Node's
+      // default outgoing chunk framing, so rebuild it when forwarding its body.
+      if (request.headers['transfer-encoding'] !== undefined) {
+        upstreamHeaders['transfer-encoding'] = request.headers['transfer-encoding']
+      }
       const upstreamCookie = await this.upstreamCookieHeader()
-      operation.signal.throwIfAborted()
+      signal.throwIfAborted()
       if (upstreamCookie !== undefined) upstreamHeaders.cookie = upstreamCookie
       const upstreamResponse = new Promise<IncomingMessage>((resolve, reject) => {
         const upstreamRequest = requestHttp({
@@ -2604,8 +2816,11 @@ export class MobileAccessGateway {
         }
         upstreamRequest.once('response', resolve)
         upstreamRequest.once('error', reject)
-        bodyDone = pipeline(request, new ByteLimitTransform(this.config.maxBodyBytes), upstreamRequest)
-        void bodyDone.catch(reject)
+        if (replayable) upstreamRequest.end()
+        else {
+          bodyDone = pipeline(request, new ByteLimitTransform(this.config.maxBodyBytes), upstreamRequest)
+          void bodyDone.catch(reject)
+        }
       })
       const proxied = await upstreamResponse
       // Proxied upstream routes (static assets, the GUI's own /sidebar routes,
@@ -2638,8 +2853,7 @@ export class MobileAccessGateway {
       // becomes the standard upstream-unavailable answer.
       throw error
     } finally {
-      response.removeListener('close', onClose)
-      operation.release()
+      delete holder.request
     }
   }
 
@@ -3019,13 +3233,20 @@ export class MobileAccessGateway {
             }
             const revoked = await this.access.revokeDevice(body.deviceId)
             if (!revoked) throw new HttpError(404, 'not_found')
+            await this.clientModulePreferences.removeDevice(body.deviceId).catch(() => {
+              process.emitWarning('Unable to remove revoked device client preferences', { code: 'DSH_MOBILE_PREFERENCE_CLEANUP_FAILED' })
+            })
             sendJson(response, 200, { revoked: true }, false)
             return
           }
           if (request.method === 'POST' && target.decodedPathname === `${prefix}/devices/reset`) {
             const body = await readJsonObject(request, MAX_CONTROL_BODY_BYTES)
             if (body.confirm !== true) throw new HttpError(400, 'bad_request')
+            const removed = this.access.listDevices().map(device => device.id)
             await this.access.resetDevices()
+            await this.clientModulePreferences.removeDevices(removed).catch(() => {
+              process.emitWarning('Unable to remove revoked device client preferences', { code: 'DSH_MOBILE_PREFERENCE_CLEANUP_FAILED' })
+            })
             sendJson(response, 200, { reset: true }, false)
             return
           }
@@ -3048,6 +3269,7 @@ export class MobileAccessGateway {
 
   private async performClose(): Promise<void> {
     this.closing = true
+    for (const controller of this.clientModuleOperations) controller.abort()
     if (this.extensionChangeTimer !== undefined) clearInterval(this.extensionChangeTimer)
     this.extensionChangeTimer = undefined
     this.removeExtensionContentListener()
@@ -3078,6 +3300,8 @@ export class MobileAccessGateway {
       await new Promise<void>(resolve => { server.close(() => resolve()) })
     }
     await accessClose
+    await Promise.allSettled(this.clientModuleTasks)
+    await Promise.allSettled(this.clientModuleRevocations)
     this.activeRequests.clear()
     this.activeWebSockets.clear()
     this.connectedSockets.clear()

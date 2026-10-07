@@ -11,6 +11,7 @@ import { parseFrpSettings, type FrpSettings } from './frp-config.js'
 import { installNativeMobileSurface, NATIVE_MOBILE_STYLES, resolveNativeMobileLanguage } from './native-mobile.js'
 import { installVoiceSession } from './voice-session.js'
 import { installMobileFontPreference, MobileFontSizeRow } from './mobile-font.js'
+import { CLIENT_MODULE_STYLES, ClientModuleSettingsRow, closeClientModuleDialog, disposeClientModuleDialogs } from './client-module-ui.js'
 import { isDesktopAdminSurface, localAdminRequestHeaders } from './local-admin-host.js'
 import { fireDeviceRevoked, fireTaskNotifyEvent, isDeviceRevokedPayload, parseTaskNotifyPayload, taskCompletionTag } from './task-notify.js'
 
@@ -89,6 +90,7 @@ export function installMobileNativeBack(view: Window, page: Document, blocked: (
   const onBack = (event: Event): void => {
     if (!event.cancelable || event.defaultPrevented) return
     const claim = (): void => { event.preventDefault(); event.stopImmediatePropagation() }
+    if (closeClientModuleDialog()) { claim(); return }
     const surfaces = [...page.querySelectorAll<HTMLElement>('[data-dsh-mobile-surface-placement="page"], [data-dsh-mobile-surface-placement="overlay"]')]
     const surface = surfaces.filter(element => visibleBackLayer(view, element)).at(-1)
     if (surface !== undefined) {
@@ -884,6 +886,54 @@ function installControl(): { remove: () => void; toggle: () => void; isOpen: () 
   const lanSetupRefresh = element('button', 'dsh-mobile-control__secondary'); lanSetupRefresh.type = 'button'; lanSetupRefresh.textContent = t('lanSetupRefresh')
   const lanSetupConfigure = element('button', 'dsh-mobile-control__primary'); lanSetupConfigure.type = 'button'; lanSetupConfigure.textContent = t('lanSetupConfigure')
   const lanSetupStatus = element('p', 'dsh-mobile-control__status'); lanSetupStatus.setAttribute('role', 'status'); lanSetupStatus.setAttribute('aria-live', 'polite')
+  const trustedNetworks = element('details', 'dsh-mobile-control__details')
+  const trustedNetworksSummary = element('summary'); trustedNetworksSummary.textContent = t('trustedNetworksTitle')
+  const trustedNetworksHelp = element('p', 'dsh-mobile-control__component-note'); trustedNetworksHelp.textContent = t('trustedNetworksHelp')
+  const trustedNetworksLabel = element('label', 'dsh-mobile-control__field'); trustedNetworksLabel.textContent = t('trustedNetworksLabel')
+  const trustedNetworksInput = element('textarea'); trustedNetworksInput.rows = 2; trustedNetworksInput.placeholder = '11.24.0.0/24\n2001:db8::/32'; trustedNetworksInput.autocomplete = 'off'; trustedNetworksInput.spellcheck = false
+  const trustedNetworksSave = element('button', 'dsh-mobile-control__secondary'); trustedNetworksSave.type = 'button'; trustedNetworksSave.textContent = t('trustedNetworksSave')
+  const trustedNetworksStatus = element('p', 'dsh-mobile-control__status'); trustedNetworksStatus.setAttribute('role', 'status'); trustedNetworksStatus.setAttribute('aria-live', 'polite')
+  trustedNetworksLabel.append(trustedNetworksInput); trustedNetworks.append(trustedNetworksSummary, trustedNetworksHelp, trustedNetworksLabel, trustedNetworksSave, trustedNetworksStatus)
+  let trustedNetworksLoaded = false
+  let trustedNetworksLoading = false
+  let trustedNetworksSupported = false
+  let trustedNetworksDirty = false
+  let trustedNetworksBusy = false
+  const syncTrustedNetworksControls = (): void => {
+    const enabled = trustedNetworksLoaded && trustedNetworksSupported && !trustedNetworksLoading && !trustedNetworksBusy
+    trustedNetworksInput.disabled = !enabled
+    trustedNetworksSave.disabled = !enabled
+    trustedNetworks.setAttribute('aria-busy', String(trustedNetworksLoading || trustedNetworksBusy))
+  }
+  syncTrustedNetworksControls()
+  const renderTrustedNetworks = (data: Record<string, unknown>): void => {
+    trustedNetworksLoaded = true
+    trustedNetworksSupported = data.supported === true
+    syncTrustedNetworksControls()
+    if (!trustedNetworksDirty) trustedNetworksInput.value = Array.isArray(data.extraAllowedCidrs) ? data.extraAllowedCidrs.filter(value => typeof value === 'string').join('\n') : ''
+    trustedNetworksStatus.textContent = !trustedNetworksSupported ? t('trustedNetworksUnavailable') : data.restartRequired === true ? t('trustedNetworksRestart') : ''
+    trustedNetworksHelp.textContent = `${t('trustedNetworksHelp')}${data.windowsFirewall === true ? ` ${t('trustedNetworksWindows')}` : ''}`
+  }
+  trustedNetworks.addEventListener('toggle', () => {
+    if (!trustedNetworks.open || trustedNetworksLoaded || trustedNetworksLoading) return
+    trustedNetworksLoading = true
+    syncTrustedNetworksControls()
+    trustedNetworksStatus.textContent = t('loadingStatus')
+    void controlRequestJson('/api/mobile-access/lan/trusted-networks').then(renderTrustedNetworks, () => {
+      trustedNetworksLoaded = false; trustedNetworksSupported = false; trustedNetworksStatus.textContent = t('trustedNetworksFailed')
+    }).finally(() => { trustedNetworksLoading = false; syncTrustedNetworksControls() })
+  })
+  trustedNetworksInput.addEventListener('input', () => { trustedNetworksDirty = true; trustedNetworksInput.removeAttribute('aria-invalid') })
+  trustedNetworksSave.addEventListener('click', () => {
+    if (trustedNetworksBusy || !trustedNetworksLoaded || !trustedNetworksSupported) return
+    trustedNetworksBusy = true; syncTrustedNetworksControls()
+    const extraAllowedCidrs = trustedNetworksInput.value.trim().split(/[\s,]+/u).filter(Boolean)
+    void controlRequestJson('/api/mobile-access/lan/trusted-networks', { method: 'POST', body: JSON.stringify({ extraAllowedCidrs }) }).then(data => {
+      trustedNetworksDirty = false; renderTrustedNetworks(data)
+    }, () => { trustedNetworksStatus.textContent = t('trustedNetworksInvalid'); trustedNetworksInput.setAttribute('aria-invalid', 'true') }).finally(() => {
+      trustedNetworksBusy = false; syncTrustedNetworksControls()
+    })
+  })
   lanSetupLabel.append(lanSetupSelect); lanSetupActions.append(lanSetupRefresh, lanSetupConfigure); lanSetupForm.append(lanSetupLabel, lanSetupNote, lanSetupActions); lanSetup.append(lanSetupTitle, lanSetupIntro, lanSetupForm, lanSetupStatus)
   const access = element('div', 'dsh-mobile-control__access'); access.hidden = true
   const accessLabel = element('span', 'dsh-mobile-control__access-label'); accessLabel.textContent = t('browserAccess')
@@ -1177,14 +1227,15 @@ function installControl(): { remove: () => void; toggle: () => void; isOpen: () 
   const originCopyBackend = element('button', 'dsh-mobile-control__secondary'); originCopyBackend.type = 'button'; originCopyBackend.textContent = t('originCopyBackend')
   originBackend.append(originBackendLabel, originBackendAddress, originCopyBackend)
   originSetup.append(originSetupTitle, originHelp, originWarning, originFields, originFeedback, originFormActions, originBackend)
-  originBackend.append(originBackendLabel, originBackendAddress, originCopyBackend)
   const caddyModeRow = element('div', 'dsh-mobile-control__origin-fields')
   const caddyModeManagedLabel = element('label', 'dsh-mobile-control__field')
   const caddyModeManaged = element('input'); caddyModeManaged.type = 'radio'; caddyModeManaged.name = 'caddy-mode'; caddyModeManaged.value = 'managed'
   const caddyModeExternalLabel = element('label', 'dsh-mobile-control__field')
   const caddyModeExternal = element('input'); caddyModeExternal.type = 'radio'; caddyModeExternal.name = 'caddy-mode'; caddyModeExternal.value = 'external'
-  caddyModeManagedLabel.append(caddyModeManaged, document.createTextNode(t('caddyModeManaged')))
-  caddyModeExternalLabel.append(caddyModeExternal, document.createTextNode(t('caddyModeExternal')))
+  const caddyManagedText = element('span'); caddyManagedText.textContent = t('caddyModeManaged')
+  const caddyExternalText = element('span'); caddyExternalText.textContent = t('caddyModeExternal')
+  caddyModeManagedLabel.append(caddyModeManaged, caddyManagedText)
+  caddyModeExternalLabel.append(caddyModeExternal, caddyExternalText)
   caddyModeRow.append(caddyModeManagedLabel, caddyModeExternalLabel)
   const caddyForm = element('div', 'dsh-mobile-control__origin-fields'); caddyForm.hidden = true
   const caddyDomainLabel = element('label', 'dsh-mobile-control__field'); caddyDomainLabel.textContent = t('caddyDomain')
@@ -1418,7 +1469,7 @@ function installControl(): { remove: () => void; toggle: () => void; isOpen: () 
   const diagnosticsReport = element('pre', 'dsh-mobile-control__diagnostic-report')
   diagnosticsDetails.append(diagnosticsDetailsSummary, diagnosticsReport)
   header.append(title, headerActions); actions.append(toggle, pair, linkPair)
-  lanView.append(lanSetup, access, qrBox, status, extensionStatus, actions, manageRow, devicePanel)
+  lanView.append(lanSetup, access, qrBox, status, extensionStatus, actions, manageRow, devicePanel, trustedNetworks)
   remoteView.append(remoteIntro, httpFrameWarning, providerSection, remoteWorkspace)
   diagnosticsView.append(diagnosticsIntro, diagnosticsSummary, diagnosticsToolbar, diagnosticsFeedback, diagnosticsChecks, wsPathsSection, diagnosticsDetails)
   panel.append(header, releaseNotice, updateCard, appDownload, switcher, lanView, remoteView, diagnosticsView); root.append(panel); document.body.append(root)
@@ -1458,6 +1509,8 @@ function installControl(): { remove: () => void; toggle: () => void; isOpen: () 
   let originFormBusy = false
   let caddyFormBusy = false
   let caddyModeManagedSelected = false
+  let caddyFormDirty = false
+  let caddyModePreviewDirty = false
   const showCaddyFeedback = (message: string, isError = false): void => {
     caddyFeedback.textContent = message
     caddyFeedback.classList.toggle('is-error', isError)
@@ -1465,12 +1518,11 @@ function installControl(): { remove: () => void; toggle: () => void; isOpen: () 
   }
   const setCaddyFormBusy = (busy: boolean): void => {
     caddyFormBusy = busy
+    remoteProviderBusy = busy
+    remoteSnapshotEpoch += 1
     caddyInstall.setAttribute('aria-busy', String(busy))
     caddySave.setAttribute('aria-busy', String(busy))
-    for (const input of [caddyDomain, caddySecretId, caddySecretKey, caddyPort]) input.disabled = busy || remoteProviderBusy
-    caddyInstall.disabled = busy || remoteProviderBusy
-    caddySave.disabled = busy || remoteProviderBusy
-    caddyPurgeButton.disabled = busy || remoteProviderBusy
+    renderRemote(latestRemoteState)
   }
   let remoteSnapshotEpoch = 0
   let latestRemoteState: Record<string, unknown> = {}
@@ -1991,21 +2043,38 @@ function installControl(): { remove: () => void; toggle: () => void; isOpen: () 
     const caddyComponentInfo = originProvider.component as Record<string, unknown> | undefined
     const caddyInstalled = caddyComponentInfo !== undefined && caddyComponentInfo.installed === true
     const caddySupported = caddyComponentInfo !== undefined && caddyComponentInfo.supported === true
+    if (!caddyModePreviewDirty) caddyModeManagedSelected = data.originMode === 'managed'
+    const showManaged = origin && caddyModeManagedSelected
+    const caddyConfiguration = typeof data.caddyConfiguration === 'object' && data.caddyConfiguration !== null ? data.caddyConfiguration as Record<string, unknown> : {}
+    const caddyState = typeof data.caddyState === 'object' && data.caddyState !== null ? data.caddyState as Record<string, unknown> : {}
     caddyModeRow.hidden = !origin
-    caddyForm.hidden = !(origin && caddyModeManagedSelected)
-    caddyInstall.hidden = caddyInstalled
-    caddySave.hidden = !caddyInstalled
-    caddyPurgeButton.hidden = !caddyInstalled
-    caddyStatus.hidden = !(origin && caddyInstalled)
-    if (caddyInstalled && origin) caddyStatus.textContent = t('caddyReady')
+    caddyForm.hidden = !showManaged
+    originFields.hidden = showManaged
+    originFormActions.hidden = showManaged
+    originHelp.hidden = showManaged
+    originWarning.hidden = showManaged
+    if (showManaged) originBackend.hidden = true
+    caddyInstall.hidden = !showManaged || caddyInstalled
+    caddyInstallNote.hidden = !showManaged
+    caddySave.hidden = !showManaged || !caddyInstalled
+    caddyPurgeButton.hidden = !showManaged || (!caddyInstalled && caddyConfiguration.configured !== true)
+    caddyStatus.hidden = !showManaged
+    caddyStatus.textContent = !caddySupported && !caddyInstalled ? t('caddyUnavailable')
+      : caddyState.enabled === true && caddyState.state === 'ready' ? t('caddyVerified')
+        : caddyState.state === 'starting' || caddyState.state === 'connecting' ? t('remoteStateConnecting')
+          : caddyState.state === 'error' ? t('caddyConnectionFailed') : caddyInstalled ? t('caddyInstalled') : t('caddyInstallNote')
     caddyModeManaged.checked = caddyModeManagedSelected
     caddyModeExternal.checked = !caddyModeManagedSelected
-    if (!caddyFormBusy) {
-      caddyDomain.value = typeof originConfiguration.publicOrigin === 'string' ? originConfiguration.publicOrigin : ''
-      caddyPort.value = '8443'
+    caddyModeManaged.disabled = remoteProviderBusy
+    caddyModeExternal.disabled = remoteProviderBusy
+    if (!caddyFormBusy && !caddyFormDirty) {
+      caddyDomain.value = typeof caddyConfiguration.publicOrigin === 'string' ? caddyConfiguration.publicOrigin : ''
+      caddyPort.value = typeof caddyConfiguration.listenPort === 'number' ? String(caddyConfiguration.listenPort) : '8443'
     }
     caddyInstall.disabled = remoteProviderBusy || !caddySupported || caddyInstalled
-    for (const input of [caddyDomain, caddyProvider, caddySecretId, caddySecretKey, caddyPort]) input.disabled = remoteProviderBusy
+    caddySave.disabled = remoteProviderBusy || !caddySupported || !caddyInstalled
+    caddyPurgeButton.disabled = remoteProviderBusy
+    for (const input of [caddyDomain, caddyProvider, caddySecretId, caddySecretKey, caddyPort]) input.disabled = remoteProviderBusy || !caddySupported
     selfHostedBadge.textContent = origin
       ? originListening ? t('originBackendReady') : t('advanced')
       : frpConfigured && frpInstalled ? t('ready') : t('advanced')
@@ -2065,17 +2134,18 @@ function installControl(): { remove: () => void; toggle: () => void; isOpen: () 
     remoteSetup.disabled = remoteSetupUrl === '' || remoteReconnectBusy
     remoteSetupRetry.disabled = remoteReconnectBusy
     remoteToggle.textContent = remoteRunning ? t('disableRemote') : t('enableRemote')
+    const originPrepared = data.originMode === 'managed' ? caddySupported && caddyInstalled && caddyConfiguration.configured === true : originConfigured && !caddyModeManagedSelected
     const providerPrepared = cpolar ? cpolarInstalled && cpolarConfigured
       : cloudflared ? cloudflaredInstalled
-        : frp ? frpInstalled && frpConfigured : origin ? originConfigured : true
+        : frp ? frpInstalled && frpConfigured : origin ? originPrepared : true
     remoteToggle.disabled = remoteProviderBusy || (!providerPrepared && !(origin && remoteRunning))
     remoteLogin.hidden = !tailscale || state !== 'needs-login' || remoteLoginUrl === ''
     remoteReconnect.hidden = needsFunnelSetup || (state !== 'error' && state !== 'unavailable')
       || !providerPrepared
     remoteActions.hidden = !providerPrepared && !(origin && remoteRunning)
-    remotePair.disabled = !remoteReady || originFormBusy
-    remoteCopyLink.disabled = !remoteReady || originFormBusy
-    remoteDevices.disabled = !remoteReady || originFormBusy
+    remotePair.disabled = !remoteReady || remoteProviderBusy
+    remoteCopyLink.disabled = !remoteReady || remoteProviderBusy
+    remoteDevices.disabled = !remoteReady || remoteProviderBusy
     if (origin) { remoteReconnect.disabled = remoteProviderBusy || remoteReconnectBusy; remoteReset.disabled = remoteProviderBusy }
     else remoteReset.disabled = false
     if (!remoteReady) {
@@ -2118,7 +2188,7 @@ function installControl(): { remove: () => void; toggle: () => void; isOpen: () 
   })
   let remoteLoadInFlight = false
   const loadRemote = (): void => {
-    if (remoteLoadInFlight || originFormBusy) return
+    if (remoteLoadInFlight || originFormBusy || caddyFormBusy) return
     const epoch = remoteSnapshotEpoch
     remoteLoadInFlight = true
     void controlRequestJson('/api/mobile-access/remote/control')
@@ -2816,20 +2886,41 @@ function installControl(): { remove: () => void; toggle: () => void; isOpen: () 
   }
   const syncCaddyModeVisibility = (): void => {
     caddyModeManagedSelected = caddyModeManaged.checked
-    caddyForm.hidden = !(originChoice.getAttribute('aria-pressed') === 'true' && caddyModeManagedSelected)
+    caddyModePreviewDirty = true
+    renderRemote(latestRemoteState)
   }
-  caddyModeManaged.addEventListener('change', syncCaddyModeVisibility)
-  caddyModeExternal.addEventListener('change', syncCaddyModeVisibility)
-  caddyInstall.addEventListener('click', () => {
+  caddyModeManaged.addEventListener('change', () => {
     if (remoteProviderBusy) return
+    originFeedback.hidden = true
+    syncCaddyModeVisibility()
+  })
+  caddyModeExternal.addEventListener('change', () => {
+    if (remoteProviderBusy) return
+    if (latestRemoteState.originMode === 'managed' && !window.confirm(t('caddyModeChangeConfirm'))) { caddyModeManaged.checked = true; caddyModeExternal.checked = false; return }
+    originFeedback.hidden = true
+    syncCaddyModeVisibility()
+    if (latestRemoteState.originMode !== 'managed') return
+    setCaddyFormBusy(true)
+    void controlRequestJson('/api/mobile-access/remote/origin/mode', { method: 'POST', body: JSON.stringify({ mode: 'external' }) }).then(data => {
+      caddyModePreviewDirty = false; renderRemote(data)
+    }, () => {
+      caddyModePreviewDirty = false
+      renderRemote(latestRemoteState)
+      showOriginFeedback(t('caddyConnectionFailed'), true)
+    }).finally(() => { setCaddyFormBusy(false); loadRemote() })
+  })
+  for (const input of [caddyDomain, caddyProvider, caddySecretId, caddySecretKey, caddyPort]) input.addEventListener('input', () => { caddyFormDirty = true })
+  caddyProvider.addEventListener('change', () => { caddyFormDirty = true })
+  caddyInstall.addEventListener('click', () => {
+    if (remoteProviderBusy || caddyInstall.disabled || !window.confirm(t('caddyInstallConfirm'))) return
     setCaddyFormBusy(true)
     showCaddyFeedback(t('checkingComponent'))
     void controlRequestJson('/api/mobile-access/remote/caddy/component/install', { method: 'POST', body: JSON.stringify({ confirm: true }) })
-      .then(data => { renderRemote(data); showCaddyFeedback(t('caddyReady')) }, error => showCaddyFeedback(error instanceof Error ? error.message : String(error), true))
+      .then(data => { renderRemote(data); showCaddyFeedback(t('caddyInstalled')) }, () => showCaddyFeedback(t('caddyInstallFailed'), true))
       .finally(() => { setCaddyFormBusy(false); loadRemote() })
   })
   caddySave.addEventListener('click', () => {
-    if (remoteProviderBusy) return
+    if (remoteProviderBusy || caddySave.disabled || !caddyModeManagedSelected) return
     clearOriginValidation()
     for (const input of [caddyDomain, caddySecretId, caddySecretKey, caddyPort]) {
       if (!input.reportValidity()) return
@@ -2843,19 +2934,23 @@ function installControl(): { remove: () => void; toggle: () => void; isOpen: () 
       },
       secretId: caddySecretId.value.trim(),
       secretKey: caddySecretKey.value.trim(),
+      connect: true,
     }
     setCaddyFormBusy(true)
     showCaddyFeedback(t('saving'))
     void controlRequestJson('/api/mobile-access/remote/caddy/settings', { method: 'POST', body: JSON.stringify(body) })
-      .then(() => controlRequestJson('/api/mobile-access/remote/control', { method: 'POST', body: JSON.stringify({ running: true }) }))
-      .then(data => { renderRemote(data); if (data.state === 'error') showCaddyFeedback(String(data.errorCode ?? 'caddy_error'), true) }, error => showCaddyFeedback(error instanceof Error ? error.message : String(error), true))
+      .then(data => {
+        caddySecretId.value = ''; caddySecretKey.value = ''; caddyFormDirty = false
+        caddyModePreviewDirty = false; renderRemote(data)
+        if (data.state === 'error') showCaddyFeedback(t('caddyConnectionFailed'), true)
+      }, () => showCaddyFeedback(t('caddyConnectionFailed'), true))
       .finally(() => { setCaddyFormBusy(false); loadRemote() })
   })
   caddyPurgeButton.addEventListener('click', () => {
-    if (remoteProviderBusy) return
+    if (remoteProviderBusy || !window.confirm(t('caddyPurgeConfirm'))) return
     setCaddyFormBusy(true)
     void controlRequestJson('/api/mobile-access/remote/caddy/component/purge', { method: 'POST', body: JSON.stringify({ confirm: true }) })
-      .then(data => { renderRemote(data) }, error => showCaddyFeedback(error instanceof Error ? error.message : String(error), true))
+      .then(data => { caddySecretId.value = ''; caddySecretKey.value = ''; caddyFormDirty = false; caddyModePreviewDirty = false; renderRemote(data) }, () => showCaddyFeedback(t('caddyPurgeFailed'), true))
       .finally(() => { setCaddyFormBusy(false); loadRemote() })
   })
 
@@ -2872,6 +2967,7 @@ function installControl(): { remove: () => void; toggle: () => void; isOpen: () 
     setOriginFormBusy(true)
     showOriginFeedback(t('originSaving'))
     void controlRequestJson('/api/mobile-access/remote/origin/configure', { method: 'POST', body: JSON.stringify(form) })
+      .then(() => controlRequestJson('/api/mobile-access/remote/origin/mode', { method: 'POST', body: JSON.stringify({ mode: 'external' }) }))
       .then(() => controlRequestJson('/api/mobile-access/remote/control', { method: 'POST', body: JSON.stringify({ running: true }) }))
       .then(data => {
         originFormDirty = false
@@ -4311,8 +4407,12 @@ export function apply(ctx: ClientContext): void {
     const style = element('style'); style.dataset.plugin = 'dsh-mobile'; style.textContent = desktopAdmin
       ? CONTROL_STYLES
       : NATIVE_MOBILE_STYLES
+    style.textContent += CLIENT_MODULE_STYLES
     document.head.append(style)
     const removeVoiceSession = installVoiceSession(!desktopAdmin)
+    const removeModuleSettings = ctx.slots.inject('settings.general.item', () => ctx.slots.register({
+      name: 'settings.general.item', id: 'dsh-mobile-client-modules', order: 120,
+    }, () => createElement(ClientModuleSettingsRow, { scope: desktopAdmin ? 'computer' : 'device', locale: selectedMobileControlLocale() })))
     if (!desktopAdmin) {
       const localFont = installMobileFontPreference()
       const removeSettingsAction = ctx.slots.inject('settings.general.item', () => {
@@ -4336,7 +4436,7 @@ export function apply(ctx: ClientContext): void {
         getLayout: () => ctx.get('layout'),
         getSidebarRight: () => ctx.get('sidebarRight'),
       }))
-      return () => { removeSettingsAction(); removeCustom(); removeSurface(); removeVoiceSession(); localFont.dispose(); style.remove() }
+      return () => { disposeClientModuleDialogs(); removeModuleSettings(); removeSettingsAction(); removeCustom(); removeSurface(); removeVoiceSession(); localFont.dispose(); style.remove() }
     }
     const removeControl = installDshLanguageBoundSurface(() => {
       const control = installControl()
@@ -4366,7 +4466,7 @@ export function apply(ctx: ClientContext): void {
       }, createElement('rect', { x: 4, y: 1, width: 8, height: 14, rx: 2 }), createElement('path', { d: 'M7 12h2' })), wide ? createElement('span', { className: 'dsh-mobile-control__trigger-label' }, t('mobileAccess')) : undefined)))
       return () => { disposeSlot(); control.remove() }
     })
-    return () => { removeControl(); removeVoiceSession(); style.remove() }
+    return () => { disposeClientModuleDialogs(); removeModuleSettings(); removeControl(); removeVoiceSession(); style.remove() }
   }, 'dsh-mobile: stock mobile adaptation and local control')
 }
 

@@ -26,7 +26,7 @@ class PairedDeviceOrderPolicyTest {
     }
 
     @Test
-    fun anUpgradeKeepsTheOrderTheUserAlreadyHas() {
+    fun anAlreadyMigratedDisplayOrderDoesNotChange() {
         val current = listOf(hk, tencent, laptop)
 
         assertEquals(listOf("HK8-8", "腾讯云4-4", "Laptop"), names(PairedDeviceOrderPolicy.displayOrder(current)))
@@ -74,6 +74,64 @@ class PairedDeviceOrderPolicyTest {
 
         assertSame(laptop, moved[1])
         assertEquals(listOf(tencent.key, hk.key), listOf(moved[0].key, moved[2].key))
+    }
+
+    @Test
+    fun firstUpgradeUsesThePreviouslyDisplayedOrderNotTheRawArray() {
+        val initial = PairedDeviceOrderPolicy.initialOrder(rows, migrationComplete = false)
+        assertEquals(listOf("HK8-8", "腾讯云4-4", "Laptop"), names(initial.rows))
+        assertEquals(PairedDeviceOrderPolicy.MigrationWrite.SORTED_ROWS, initial.write)
+        assertSame(hk, initial.rows.first())
+        assertSame(tencent, initial.rows[1])
+        assertEquals(rows.map { it.deviceToken }.sorted(), initial.rows.map { it.deviceToken }.sorted())
+    }
+
+    @Test
+    fun changedConnectionTimesDoNotRearrangeTheListAfterMigration() {
+        val first = PairedDeviceOrderPolicy.initialOrder(rows, migrationComplete = false)
+        val updated = first.rows.map { if (it.key == laptop.key) it.copy(lastConnectedAt = 20_000) else it }
+        val next = PairedDeviceOrderPolicy.initialOrder(updated, migrationComplete = true)
+        assertSame(updated, next.rows)
+        assertEquals(PairedDeviceOrderPolicy.MigrationWrite.NONE, next.write)
+        assertEquals(listOf(hk.key, tencent.key, laptop.key), next.rows.map { it.key })
+    }
+
+    @Test
+    fun tiesAndNeverConnectedRowsUseTheOldDeterministicKeyOrder() {
+        val tied = listOf(laptop.copy(lastConnectedAt = 1_000), hk.copy(lastConnectedAt = 1_000), tencent)
+        val initial = PairedDeviceOrderPolicy.initialOrder(tied, migrationComplete = false)
+        assertEquals(listOf(tencent.key, hk.key, laptop.key), initial.rows.map { it.key })
+        val neverConnected = tied.map { it.copy(lastConnectedAt = null) }
+        assertEquals(listOf(tencent.key, hk.key, laptop.key),
+            PairedDeviceOrderPolicy.initialOrder(neverConnected, false).rows.map { it.key })
+    }
+
+    @Test
+    fun freshEmptyStoresOnlyNeedAMarkerAndNoCredentialPayload() {
+        val initial = PairedDeviceOrderPolicy.initialOrder(emptyList(), migrationComplete = false)
+        assertTrue(initial.rows.isEmpty())
+        assertEquals(PairedDeviceOrderPolicy.MigrationWrite.EMPTY_MARKER, initial.write)
+        assertEquals(PairedDeviceOrderPolicy.MigrationWrite.NONE,
+            PairedDeviceOrderPolicy.initialOrder(initial.rows, true).write)
+    }
+
+    @Test
+    fun unreadableEncryptedDataNeverCompletesMigrationOrWritesAnEmptyStore() {
+        for (completed in listOf(false, true)) {
+            val initial = PairedDeviceOrderPolicy.initialOrder(null, migrationComplete = completed)
+            assertTrue(initial.rows.isEmpty())
+            assertEquals(PairedDeviceOrderPolicy.MigrationWrite.NONE, initial.write)
+        }
+    }
+
+    @Test
+    fun manualOrderingAndConnectionUpdatesKeepStartupSelectionIndependent() {
+        val manual = PairedDeviceOrderPolicy.moveToTop(rows, laptop.key)
+        assertSame(laptop, manual.first())
+        assertSame(hk, ConnectionRestorePolicy.selectStartupDevice(manual, null, null, 10_000))
+        assertSame(tencent, ConnectionRestorePolicy.selectStartupDevice(manual, tencent.key, null, 10_000))
+        val lastUsed = manual.map { if (it.key == laptop.key) it.copy(lastConnectedAt = 20_000) else it }
+        assertEquals(laptop.key, ConnectionRestorePolicy.selectStartupDevice(lastUsed, null, null, 30_000)?.key)
     }
 
     private fun names(rows: List<PairedDeviceRecord>): List<String> = rows.map { it.displayName }

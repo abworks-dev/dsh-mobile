@@ -56,9 +56,8 @@ describe('remote provider selection', () => {
     expect(configuredRemoteProvider({ DSH_MOBILE_REMOTE_PROVIDER: 'frp' })).toBe('frp')
     expect(configuredRemoteProvider({ DSH_MOBILE_REMOTE_PROVIDER: 'cloudflared' })).toBe('cloudflared')
     expect(configuredRemoteProvider({ DSH_MOBILE_REMOTE_PROVIDER: 'origin' })).toBe('origin')
-    expect(configuredRemoteProvider({ DSH_MOBILE_REMOTE_PROVIDER: 'caddy' })).toBe('caddy')
     expect(() => configuredRemoteProvider({ DSH_MOBILE_REMOTE_PROVIDER: 'invalid' }))
-      .toThrow('must be tailscale, cpolar, cloudflared, frp, origin, or caddy')
+      .toThrow('must be tailscale, cpolar, cloudflared, frp, or origin')
 
     const directory = await mkdtemp(join(tmpdir(), 'dsh-mobile-remote-provider-'))
     temporaryDirectories.push(directory)
@@ -76,7 +75,6 @@ describe('remote provider selection', () => {
       cloudflared: new FakeRemoteController(),
       frp: new FakeRemoteController(),
       origin: new FakeRemoteController(),
-      caddy: new FakeRemoteController(),
     }
     const saved: string[] = []
     const coordinator = new RemoteProviderCoordinator('tailscale', controllers, {
@@ -111,7 +109,6 @@ describe('remote provider selection', () => {
       cloudflared: new FakeRemoteController(),
       frp: new FakeRemoteController(),
       origin: new FakeRemoteController(),
-      caddy: new FakeRemoteController(),
     }
     controllers.cpolar.enabled = true
     controllers.origin.enabled = true
@@ -120,6 +117,41 @@ describe('remote provider selection', () => {
     expect(controllers.cpolar.enabled).toBe(false)
     expect(controllers.frp.enabled).toBe(false)
     expect(controllers.origin.enabled).toBe(false)
+  })
+
+  it('rejects configuration for a provider that another selection already replaced', async () => {
+    const controllers = { tailscale: new FakeRemoteController(), cpolar: new FakeRemoteController(), cloudflared: new FakeRemoteController(), frp: new FakeRemoteController(), origin: new FakeRemoteController() }
+    const coordinator = new RemoteProviderCoordinator('origin', controllers, { save: async () => {} })
+    const configure = vi.fn(async controller => controller.setEnabled(true))
+    const selected = coordinator.select('cpolar')
+    const configuring = coordinator.mutateSelected('origin', configure)
+    const result = configuring.catch(error => error)
+    await selected
+    expect(await result).toBeInstanceOf(Error)
+    expect((await result).message).toBe('remote_provider_changed')
+    expect(configure).not.toHaveBeenCalled()
+    expect(controllers.cpolar.enabled).toBe(false)
+  })
+
+  it('keeps configuration and activation in one queue item before a later provider selection', async () => {
+    const controllers = { tailscale: new FakeRemoteController(), cpolar: new FakeRemoteController(), cloudflared: new FakeRemoteController(), frp: new FakeRemoteController(), origin: new FakeRemoteController() }
+    const coordinator = new RemoteProviderCoordinator('origin', controllers, { save: async () => {} })
+    let release: (() => void) | undefined
+    let enter: (() => void) | undefined
+    const ready = new Promise<void>(resolve => { enter = resolve })
+    const barrier = new Promise<void>(resolve => { release = resolve })
+    const configuring = coordinator.mutateSelected('origin', async controller => {
+      enter?.(); await barrier
+      return controller.setEnabled(true)
+    })
+    await ready
+    const selected = coordinator.select('cpolar')
+    expect(coordinator.selected).toBe('origin')
+    release?.()
+    await Promise.all([configuring, selected])
+    expect(coordinator.selected).toBe('cpolar')
+    expect(controllers.origin.enabled).toBe(false)
+    expect(controllers.cpolar.enabled).toBe(false)
   })
 
   it('waits for process close after escalating from TERM to KILL', async () => {
