@@ -29,7 +29,8 @@ import {
   MobileAccessGatewayController,
   type MobileAccessRuntime,
 } from './control.js'
-import { MobileAccessGateway } from './gateway.js'
+import { MobileAccessGateway, ClientModuleConflictError } from './gateway.js'
+import { ClientModulePreferenceStore } from './client-module-preferences.js'
 import { createMobileAccessService, type MobileAccessService } from './extensions.js'
 import { listComputerImages, readComputerImage } from './computer-images.js'
 import {
@@ -70,6 +71,10 @@ import { createFrpAttachTemplate } from './frp-attach.js'
 import { createFrpAttachPlan } from './frp-attach-plan.js'
 import { defaultProbeDiscovery, FrpController } from './frp.js'
 import { ensureFrpIngressCertificate, frpIngressPaths, frpIngressSelfCheck, purgeFrpIngressCertificates, type FrpIngressCertificate } from './frp-ingress.js'
+import { CaddyComponentManager, type CaddyComponentStatus } from './caddy-component.js'
+import { CaddyConfigStore } from './caddy-config.js'
+import { CaddyController } from './caddy.js'
+import { ManagedOriginController, JsonOriginModeStore, createVolatileRemoteControlStore } from './managed-origin.js'
 import { OriginConfigStore, parseOriginSettings, validateOriginListenPort, type OriginConfigurationStatus, type OriginSettings } from './origin-proxy-config.js'
 import { OriginController } from './origin-proxy.js'
 import { PluginReleaseManager, releaseProfileDirectory } from './release-update.js'
@@ -89,7 +94,9 @@ import {
   availableLanNetworks,
   isNetworkSelectionError,
   materializeManagedSetup,
+  parseAdditionalTrustedNetworks,
   parseManagedSetup,
+  saveManagedTrustedNetworks,
   preferredLanInterfaceNames,
   selectLanNetwork,
   type ManagedSetup,
@@ -238,6 +245,7 @@ type LoadedSetup = {
   readonly kind: 'managed'
   readonly config: PluginConfig
   readonly setup: ManagedSetup
+  readonly setupFile: string
 }
 
 function withoutSetupKeys(config: PluginConfig): PluginConfig {
@@ -266,7 +274,7 @@ async function loadSetup(config: PluginConfig): Promise<LoadedSetup> {
   }
   const record = parsed as Record<string, unknown>
   if (record.version === 2) {
-    return { kind: 'managed', config: withoutSetupKeys(config), setup: parseManagedSetup(record) }
+    return { kind: 'managed', config: withoutSetupKeys(config), setup: parseManagedSetup(record), setupFile: resolve(config.setupFile) }
   }
   if (record.version !== 1 || Reflect.ownKeys(record).some(key => typeof key !== 'string' || !SETUP_KEYS.has(key))) {
     throw new Error('mobile setup file has an unsupported format')
@@ -418,6 +426,7 @@ function remoteControlPayload(
   frpComponent: FrpComponentStatus,
   frpConfiguration: FrpConfigurationStatus,
   originConfiguration: OriginConfigurationStatus,
+  caddyComponentStatus: CaddyComponentStatus,
 ): Record<string, unknown> {
   return {
     provider,
@@ -456,6 +465,7 @@ function remoteControlPayload(
         running: providerStatuses.origin.enabled,
         state: providerStatuses.origin.state,
         configuration: originConfiguration,
+        component: caddyComponentStatus,
       },
     },
   }
@@ -506,6 +516,10 @@ export async function apply(ctx: Context, config: PluginConfig): Promise<void> {
   await frpConfig.initialize()
   const originConfig = new OriginConfigStore(join(remoteDirectory, 'origin', 'config'))
   await originConfig.initialize()
+  const caddyComponent = new CaddyComponentManager({ stateDirectory })
+  await caddyComponent.initialize()
+  const caddyConfig = new CaddyConfigStore(stateDirectory)
+  await caddyConfig.initialize()
   const cloudflaredTunnel = new CloudflaredTunnelStore(join(remoteDirectory, 'cloudflared'))
   await cloudflaredTunnel.initialize()
   const unregisterBuiltin = mobileAccess.registerExtension({
@@ -535,8 +549,13 @@ export async function apply(ctx: Context, config: PluginConfig): Promise<void> {
   const webSocketPaths = new WebSocketPathStore(join(stateDirectory, 'websocket-paths.json'))
   await webSocketPaths.load()
   const blockedUpgradePaths = new BlockedUpgradePathLog()
+  const clientModulePreferences = new ClientModulePreferenceStore(join(stateDirectory, 'client-modules.json'), template.excludedClientModules)
+  await clientModulePreferences.initialize()
   let lanGateway: MobileAccessGateway | undefined
   let preparedLanSetup: ManagedLanSetupResult | undefined
+  let trustedNetworksRestartRequired = false
+  let trustedNetworksWrite: Promise<void> = Promise.resolve()
+  let adminClosing = false
   const startGateway = async (candidateConfig: PluginConfig): Promise<MobileAccessRuntime> => {
     const resolved = parseGatewayConfig({
       ...candidateConfig,
@@ -550,6 +569,7 @@ export async function apply(ctx: Context, config: PluginConfig): Promise<void> {
       webSocketPaths,
       blockedUpgradePaths,
       (source, code) => { logger.warn('%s discovery degraded while DSH remains available: %s', source, code) },
+      clientModulePreferences,
     )
     await candidate.start()
     lanGateway = candidate
@@ -629,6 +649,8 @@ export async function apply(ctx: Context, config: PluginConfig): Promise<void> {
         upstreamLoginUrl,
         webSocketPaths,
         blockedUpgradePaths,
+        undefined,
+        clientModulePreferences,
       )
       await candidate.start()
       return candidate
@@ -652,6 +674,8 @@ export async function apply(ctx: Context, config: PluginConfig): Promise<void> {
       upstreamLoginUrl,
       webSocketPaths,
       blockedUpgradePaths,
+      undefined,
+      clientModulePreferences,
     )
     try { await candidate.start() } catch (error) {
       await candidate.close()
@@ -663,7 +687,7 @@ export async function apply(ctx: Context, config: PluginConfig): Promise<void> {
     const resolved = originGatewayConfig(template, settings, remoteDeviceFile, instanceId)
     const candidate = new MobileAccessGateway(
       resolved, new JsonDeviceStore(resolved.stateFile, resolved.maxDevices), mobileAccess,
-      upstreamLoginUrl, webSocketPaths, blockedUpgradePaths,
+      upstreamLoginUrl, webSocketPaths, blockedUpgradePaths, undefined, clientModulePreferences,
     )
     try { await candidate.start() } catch (error) {
       await candidate.close()
@@ -676,6 +700,19 @@ export async function apply(ctx: Context, config: PluginConfig): Promise<void> {
   const cloudflaredStore = new JsonMobileAccessControlStore(join(remoteDirectory, 'cloudflared', 'control.json'), false)
   const frpStore = new JsonMobileAccessControlStore(join(remoteDirectory, 'frp', 'control.json'), false)
   const originStore = new JsonMobileAccessControlStore(join(remoteDirectory, 'origin', 'control.json'), false)
+  const caddyController = new CaddyController({
+    store: createVolatileRemoteControlStore(),
+    component: caddyComponent,
+    config: caddyConfig,
+    instanceId,
+    createGateway: settings => createRemoteGateway(settings.publicOrigin),
+  })
+  const originController = new ManagedOriginController({
+    store: originStore,
+    modeStore: new JsonOriginModeStore(join(remoteDirectory, 'origin', 'upstream.json')),
+    external: new OriginController({ store: createVolatileRemoteControlStore(), config: originConfig, createGateway: createOriginGateway }),
+    managed: caddyController,
+  })
   const remoteControllers: Record<RemoteProvider, RemoteProviderController> = {
     tailscale: new FunnelController({
       store: tailscaleStore,
@@ -714,7 +751,7 @@ export async function apply(ctx: Context, config: PluginConfig): Promise<void> {
         await gateway.refreshProvidedTls()
       },
     }),
-    origin: new OriginController({ store: originStore, config: originConfig, createGateway: createOriginGateway }),
+    origin: originController,
   }
   const remoteProviders = new RemoteProviderCoordinator(initialRemoteProvider, remoteControllers, remoteProviderStore)
   const remoteController = () => remoteProviders.controller()
@@ -724,7 +761,7 @@ export async function apply(ctx: Context, config: PluginConfig): Promise<void> {
     const controller = remoteControllers[provider]
     taskEventHub.add({ broadcastTaskEvent: event => { controller.gateway()?.broadcastTaskEvent(event) } })
   }
-  const remotePayload = (): Record<string, unknown> => remoteControlPayload(
+  const remotePayload = (): Record<string, unknown> => ({ ...remoteControlPayload(
     remoteProviders.selected,
     remoteController().status(),
     remoteController().gateway(),
@@ -741,7 +778,8 @@ export async function apply(ctx: Context, config: PluginConfig): Promise<void> {
     frpComponent.status(),
     frpConfig.status(),
     originConfig.status(),
-  )
+    caddyComponent.status(),
+  ), originMode: originController.mode(), caddyConfiguration: caddyConfig.status(), caddyState: caddyController.status() })
   const lanPayload = (): Record<string, unknown> => ({
     ...(loaded.kind === 'unconfigured' ? {
       configured: preparedLanSetup !== undefined,
@@ -767,6 +805,17 @@ export async function apply(ctx: Context, config: PluginConfig): Promise<void> {
         recommended: network.address === recommendedAddress,
       })),
       listenPort: 3443,
+      windowsFirewall: process.platform === 'win32',
+    }
+  }
+
+  const trustedNetworksPayload = async (): Promise<Record<string, unknown>> => {
+    if (loaded.kind !== 'managed') return { supported: false }
+    const saved = parseManagedSetup(JSON.parse(await readFile(loaded.setupFile, 'utf8')))
+    return {
+      supported: true,
+      extraAllowedCidrs: saved.extraAllowedCidrs ?? [],
+      restartRequired: trustedNetworksRestartRequired,
       windowsFirewall: process.platform === 'win32',
     }
   }
@@ -835,6 +884,7 @@ export async function apply(ctx: Context, config: PluginConfig): Promise<void> {
       try {
         const target = parseRequestTarget(request.url)
         assertLocalAdminTrust(request, request.method === 'POST', () => authenticateDesktopAdmin(request))
+        if (adminClosing) throw new HttpError(503, 'unavailable')
         if (target.search !== '') throw new HttpError(400, 'bad_request')
         const lanControl = target.decodedPathname === `${LOCAL_ADMIN_PREFIX}/control`
           || target.decodedPathname === `${LOCAL_ADMIN_PREFIX}/lan/control`
@@ -844,6 +894,54 @@ export async function apply(ctx: Context, config: PluginConfig): Promise<void> {
         }
         if (request.method === 'GET' && target.decodedPathname === `${LOCAL_ADMIN_PREFIX}/lan/setup`) {
           sendJson(response, 200, await lanSetupPayload(), false)
+          return
+        }
+        if (target.decodedPathname === `${LOCAL_ADMIN_PREFIX}/client-modules`) {
+          const gateway = lanGateway ?? remoteController().gateway()
+          if (gateway === undefined) throw new HttpError(409, 'mobile_access_not_running')
+          const operation = new AbortController()
+          const abort = (): void => { operation.abort() }
+          response.once('close', abort)
+          try {
+            if (request.method === 'GET') {
+              sendJson(response, 200, await gateway.describeClientModules(undefined, operation.signal), false)
+              return
+            }
+            if (request.method !== 'POST') throw new HttpError(405, 'method_not_allowed')
+            const body = await readJsonObject(request, template.maxBodyBytes)
+            if (Object.keys(body).length !== 1 || Object.keys(body).some(key => key !== 'reset' && key !== 'excludedClientModules')) throw new HttpError(400, 'bad_request')
+            const view = body.reset === true
+              ? await gateway.resetClientModules(undefined, operation.signal)
+              : await gateway.configureClientModules(body.excludedClientModules, undefined, operation.signal)
+            sendJson(response, 200, view, false)
+          } catch (error) {
+            if (!(error instanceof ClientModuleConflictError)) throw error
+            sendJson(response, 409, { error: 'excluded_client_modules_invalid', detail: error.detail }, false)
+          } finally {
+            response.removeListener('close', abort)
+            operation.abort()
+          }
+          return
+        }
+        if (target.decodedPathname === `${LOCAL_ADMIN_PREFIX}/lan/trusted-networks`) {
+          if (request.method === 'GET') {
+            sendJson(response, 200, await trustedNetworksPayload(), false)
+            return
+          }
+          if (request.method !== 'POST') throw new HttpError(405, 'method_not_allowed')
+          if (loaded.kind !== 'managed') throw new HttpError(409, 'lan_trusted_networks_unavailable')
+          const body = await readJsonObject(request, 4096)
+          let values: readonly string[]
+          try { values = parseAdditionalTrustedNetworks(body.extraAllowedCidrs) }
+          catch { throw new HttpError(400, 'lan_trusted_networks_invalid') }
+          const write = trustedNetworksWrite.then(async () => {
+            if (adminClosing) throw new HttpError(503, 'unavailable')
+            await saveManagedTrustedNetworks(loaded.setupFile, values)
+            trustedNetworksRestartRequired = true
+          })
+          trustedNetworksWrite = write.catch(() => undefined)
+          await write
+          sendJson(response, 200, await trustedNetworksPayload(), false)
           return
         }
         if (request.method === 'GET' && target.decodedPathname === `${LOCAL_ADMIN_PREFIX}/diagnostics`) {
@@ -981,6 +1079,60 @@ export async function apply(ctx: Context, config: PluginConfig): Promise<void> {
           await remoteProviders.mutate(async () => {
             await remoteControllers.cloudflared.setEnabled(false)
             await cloudflaredComponent.purge()
+          })
+          sendJson(response, 200, remotePayload(), false)
+          return
+        }
+        if (request.method === 'POST' && target.decodedPathname === `${LOCAL_ADMIN_PREFIX}/remote/caddy/component/install`) {
+          const body = await readJsonObject(request, 4096)
+          if (body.confirm !== true) throw new HttpError(400, 'bad_request')
+          logger.info('caddy component install started')
+          try {
+            await remoteProviders.mutate(async () => caddyComponent.install())
+            logger.info('caddy component install completed')
+          } catch (error) {
+            logger.error('caddy component install failed: %s', error instanceof Error ? error.stack ?? error.message : String(error))
+            throw error
+          }
+          sendJson(response, 200, remotePayload(), false)
+          return
+        }
+        if (request.method === 'POST' && target.decodedPathname === `${LOCAL_ADMIN_PREFIX}/remote/caddy/settings`) {
+          const body = await readJsonObject(request, 8192)
+          if (body.connect !== undefined && typeof body.connect !== 'boolean') throw new HttpError(400, 'bad_request')
+          const configure = async (): Promise<void> => {
+            if (body.connect === true && !caddyComponent.status().installed) throw new HttpError(409, 'caddy_component_unavailable')
+            await caddyConfig.configure(body.settings, { secretId: body.secretId ?? '', secretKey: body.secretKey ?? '' })
+            if (body.connect === true) {
+              await originController.setEnabled(false)
+              await originController.selectMode('managed')
+              await originController.reconnect()
+            } else if (originController.mode() === 'managed' && originController.status().enabled) await originController.reconnect()
+          }
+          if (body.connect === true) await remoteProviders.mutateSelected('origin', configure)
+          else await remoteProviders.mutate(configure)
+          sendJson(response, 200, remotePayload(), false)
+          return
+        }
+        if (request.method === 'POST' && target.decodedPathname === `${LOCAL_ADMIN_PREFIX}/remote/origin/mode`) {
+          const body = await readJsonObject(request, 4096)
+          if (body.mode !== 'external' && body.mode !== 'managed') throw new HttpError(400, 'bad_request')
+          const mode = body.mode
+          if (mode === 'managed' && !caddyComponent.status().installed) throw new HttpError(409, 'caddy_component_unavailable')
+          await remoteProviders.mutate(async () => { await originController.selectMode(mode) })
+          sendJson(response, 200, remotePayload(), false)
+          return
+        }
+        if (request.method === 'POST' && target.decodedPathname === `${LOCAL_ADMIN_PREFIX}/remote/caddy/component/purge`) {
+          const body = await readJsonObject(request, 4096)
+          if (body.confirm !== true) throw new HttpError(400, 'bad_request')
+          await remoteProviders.mutate(async () => {
+            if (originController.mode() === 'managed') {
+              await originController.setEnabled(false)
+              await originController.selectMode('external')
+            }
+            await caddyComponent.purge()
+            await caddyConfig.purge()
           })
           sendJson(response, 200, remotePayload(), false)
           return
@@ -1222,6 +1374,7 @@ export async function apply(ctx: Context, config: PluginConfig): Promise<void> {
 
   await ctx.effect(async () => {
     const unregister = ctx.webServer.register(adminRoute)
+    const stopAdmin = (): void => { adminClosing = true; unregister() }
     const disposeMobileCommand = ctx.commands.register({
       name: 'mobile',
       description: '定制手机界面或添加电脑能力',
@@ -1289,7 +1442,8 @@ export async function apply(ctx: Context, config: PluginConfig): Promise<void> {
     } catch (error) {
       try {
         await settleCleanupSteps([
-          unregister,
+          stopAdmin,
+          () => trustedNetworksWrite,
           disposeMobileCommand,
           disposeTaskEvents,
           async () => {
@@ -1308,7 +1462,8 @@ export async function apply(ctx: Context, config: PluginConfig): Promise<void> {
     }
     return async () => {
       await settleCleanupSteps([
-        unregister,
+        stopAdmin,
+        () => trustedNetworksWrite,
         disposeMobileCommand,
         disposeTaskEvents,
         async () => {

@@ -43,9 +43,34 @@ internal data class PairedDeviceRecord(
 internal class PairedDeviceStore(context: Context) {
     private val preferences = context.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
 
-    /** Return all valid rows in stable last-used order. */
-    fun load(): List<PairedDeviceRecord> = decode(preferences.getString(PAYLOAD_KEY, null))
-        .sortedWith(compareByDescending<PairedDeviceRecord> { it.lastConnectedAt ?: Long.MIN_VALUE }.thenBy { it.key })
+    /**
+     * Return all valid rows in their stored order, which is the order the list displays.
+     *
+     * Connecting to a computer must not move its row; rows append when they are paired, and only
+     * [moveUp] and [moveToTop] rearrange them. Startup selection stays with
+     * `ConnectionRestorePolicy`, which prefers the saved key and otherwise the most recent
+     * connection, so "the computer I used last" remains the default.
+     */
+    fun load(): List<PairedDeviceRecord> {
+        val initial = PairedDeviceOrderPolicy.initialOrder(
+            decode(preferences.getString(PAYLOAD_KEY, null)),
+            preferences.getBoolean(DISPLAY_ORDER_MIGRATION_KEY, false),
+        )
+        when (initial.write) {
+            PairedDeviceOrderPolicy.MigrationWrite.NONE -> Unit
+            PairedDeviceOrderPolicy.MigrationWrite.EMPTY_MARKER ->
+                preferences.edit().putBoolean(DISPLAY_ORDER_MIGRATION_KEY, true).apply()
+            PairedDeviceOrderPolicy.MigrationWrite.SORTED_ROWS -> {
+                try {
+                    save(initial.rows)
+                } catch (error: Exception) {
+                    // A temporarily unavailable Keystore must not overwrite credentials or complete migration.
+                    // The sorted rows remain readable; a later load can retry persisting that display order.
+                }
+            }
+        }
+        return initial.rows
+    }
 
     /** Whether the store has completed the legacy-slot migration marker. */
     fun isMigrationComplete(): Boolean = preferences.getBoolean(MIGRATION_KEY, false)
@@ -53,9 +78,16 @@ internal class PairedDeviceStore(context: Context) {
     /** Write legacy rows once without touching their old stores. */
     fun migrateLegacy(rows: List<PairedDeviceRecord>): List<PairedDeviceRecord> {
         if (isMigrationComplete()) return load()
-        val normalized = rows.distinctBy { it.key }
-        save(normalized)
-        preferences.edit().putBoolean(MIGRATION_KEY, true).apply()
+        val normalized = PairedDeviceOrderPolicy.initialOrder(rows.distinctBy { it.key }, migrationComplete = false).rows
+        if (normalized.isEmpty()) {
+            preferences.edit().putBoolean(MIGRATION_KEY, true).apply {
+                if (preferences.getString(PAYLOAD_KEY, null).isNullOrBlank()) {
+                    putBoolean(DISPLAY_ORDER_MIGRATION_KEY, true)
+                }
+            }.apply()
+        } else {
+            save(normalized, completeLegacyMigration = true)
+        }
         return normalized
     }
 
@@ -91,6 +123,21 @@ internal class PairedDeviceStore(context: Context) {
         return true
     }
 
+    /** Move one row one position towards the front of the fixed display order. */
+    fun moveUp(key: String): Boolean = reorder { PairedDeviceOrderPolicy.moveUp(it, key) }
+
+    /** Move one row to the front of the fixed display order. */
+    fun moveToTop(key: String): Boolean = reorder { PairedDeviceOrderPolicy.moveToTop(it, key) }
+
+    /** Persist a new row order; a transform that leaves every key in place writes nothing. */
+    private fun reorder(transform: (List<PairedDeviceRecord>) -> List<PairedDeviceRecord>): Boolean {
+        val rows = load()
+        val reordered = transform(rows)
+        if (reordered.map { it.key } == rows.map { it.key }) return false
+        save(reordered)
+        return true
+    }
+
     /** Remove every local row and the encryption key. */
     fun clear() {
         preferences.edit().clear().apply()
@@ -99,7 +146,10 @@ internal class PairedDeviceStore(context: Context) {
         }
     }
 
-    private fun save(rows: List<PairedDeviceRecord>) {
+    private fun save(
+        rows: List<PairedDeviceRecord>,
+        completeLegacyMigration: Boolean = false,
+    ) {
         require(rows.size <= MAX_DEVICES)
         val json = JSONArray()
         rows.forEach { row ->
@@ -111,23 +161,28 @@ internal class PairedDeviceStore(context: Context) {
         preferences.edit()
             .putString(PAYLOAD_KEY, Base64.encodeToString(cipher.doFinal(json.toString().toByteArray()), Base64.NO_WRAP))
             .putString(IV_KEY, Base64.encodeToString(cipher.iv, Base64.NO_WRAP))
+            .putBoolean(DISPLAY_ORDER_MIGRATION_KEY, true)
+            .apply {
+                if (completeLegacyMigration) putBoolean(MIGRATION_KEY, true)
+            }
             .apply()
     }
 
-    private fun decode(payload: String?): List<PairedDeviceRecord> {
+    private fun decode(payload: String?): List<PairedDeviceRecord>? {
         if (payload.isNullOrBlank()) return emptyList()
-        val encrypted = runCatching { Base64.decode(payload, Base64.NO_WRAP) }.getOrNull() ?: return emptyList()
-        val iv = runCatching { Base64.decode(preferences.getString(IV_KEY, null), Base64.NO_WRAP) }.getOrNull() ?: return emptyList()
+        val encrypted = runCatching { Base64.decode(payload, Base64.NO_WRAP) }.getOrNull() ?: return null
+        val iv = runCatching { Base64.decode(preferences.getString(IV_KEY, null), Base64.NO_WRAP) }.getOrNull() ?: return null
         val text = runCatching {
             val cipher = Cipher.getInstance(TRANSFORMATION)
-            cipher.init(Cipher.DECRYPT_MODE, existingKey() ?: return emptyList(), GCMParameterSpec(128, iv))
+            cipher.init(Cipher.DECRYPT_MODE, existingKey() ?: return null, GCMParameterSpec(128, iv))
             String(cipher.doFinal(encrypted), Charsets.UTF_8)
-        }.getOrNull() ?: return emptyList()
-        val array = runCatching { JSONArray(text) }.getOrNull() ?: return emptyList()
+        }.getOrNull() ?: return null
+        val array = runCatching { JSONArray(text) }.getOrNull() ?: return null
         val rows = mutableListOf<PairedDeviceRecord>()
         for (index in 0 until array.length()) {
             parse(array.optJSONObject(index))?.let { rows += it }
         }
+        if (array.length() > 0 && rows.isEmpty()) return null
         return rows.distinctBy { it.key }.take(MAX_DEVICES)
     }
 
@@ -219,6 +274,7 @@ internal class PairedDeviceStore(context: Context) {
         const val PAYLOAD_KEY = "payload"
         const val IV_KEY = "iv"
         const val MIGRATION_KEY = "legacy_migrated"
+        const val DISPLAY_ORDER_MIGRATION_KEY = "display_order_migrated_v1"
         const val KEY_ALIAS = "dsh_mobile_devices_v1"
         const val TRANSFORMATION = "AES/GCM/NoPadding"
         const val PUBLIC_TLS = "-"

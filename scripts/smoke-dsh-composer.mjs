@@ -132,6 +132,15 @@ try {
   const editor = card.locator('[data-composer-input][contenteditable="true"]')
   await editor.waitFor({ state: 'visible', timeout: CLIENT_TIMEOUT_MS })
 
+  const ordinaryRow = await card.evaluate(node => {
+    const add = node.querySelector('[data-dsh-mobile-composer-tools] button')?.getBoundingClientRect()
+    const send = node.querySelector('button[class*="_primary"]')?.getBoundingClientRect()
+    if (add === undefined || send === undefined) throw new Error('Ordinary composer actions were not found')
+    return { addCenter: add.y + add.height / 2, sendCenter: send.y + send.height / 2 }
+  })
+  assert(Math.abs(ordinaryRow.addCenter - ordinaryRow.sendCenter) <= 4,
+    `Ordinary narrow DSH composer was forced into separate toolbar rows: ${JSON.stringify(ordinaryRow)}`)
+
   await editor.fill('Browser Enter acceptance')
   const initialBreaks = lineBreaks((await lexicalDraft(editor)).root)
   await phone.keyboard.press('Enter')
@@ -269,14 +278,17 @@ try {
   const expandedHeight = async () => scroll.evaluate(node => node.getBoundingClientRect().height)
 
   const geometry = []
-  for (const viewport of [{ width: 375, height: 812 }, { width: 844, height: 393 }]) {
-    for (const font of [16, 20]) {
+  for (const viewport of [{ width: 375, height: 812 }, { width: 360, height: 453 }, { width: 320, height: 375 }, { width: 844, height: 393 }]) {
+    for (const font of [16, 20, 32]) {
       await phone.setViewportSize(viewport)
       await setMobileFontSize(phone, font)
       await editor.focus()
       await frames(phone)
       const expanded = await expandedHeight()
-      assert(expanded > 72)
+      const shortViewport = viewport.width <= 720 && viewport.height <= 500
+      const scrollCap = viewport.height <= 400 ? 48 : 72
+      if (shortViewport) assert(expanded <= scrollCap + 0.1, 'Short focused viewport did not scroll the held draft')
+      else assert(expanded > 72)
       const model = card.locator('[data-dsh-mobile-composer-model-trigger]')
       const selectedModel = await model.textContent()
       await model.click()
@@ -292,7 +304,7 @@ try {
       assert.equal(await search.evaluate(node => node.closest('[data-composer-card]')), null, 'Search is not the actual body portal')
       assert.equal(await search.evaluate(node => getComputedStyle(node).fontSize), `${font}px`, 'Actual model search did not preserve the mobile editable font floor')
       const folded = await expandedHeight()
-      if (viewport.width <= 720) assert(folded <= 72.1, `Inactive real DSH composer remained ${folded}px`)
+      if (viewport.width <= 720) assert(folded <= (shortViewport ? scrollCap : 72) + 0.1, `Inactive real DSH composer remained ${folded}px`)
       else assert.equal(folded, expanded)
       await retained(phone, expected)
       await search.fill('Composer model 2')
@@ -321,11 +333,54 @@ try {
       if (viewport.width <= 720) {
         const bounds = await action.boundingBox()
         assert(bounds !== null && bounds.width >= 44 && bounds.height >= 44, 'Real primary action did not retain its 44px touch target')
+        assert(bounds.y >= 0 && bounds.y + bounds.height <= viewport.height + 0.5, 'Real primary action leaves the visible viewport vertically')
+        assert(await action.evaluate(node => {
+          const rect = node.getBoundingClientRect()
+          return node.contains(document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2))
+        }), 'Real primary action was covered by another surface')
       }
     }
   }
   assert.equal(prompts.length, 0, 'Composer acceptance attempted a model submission')
-  console.log(`Packed DSH composer acceptance passed: real browser Enter/empty draft, Lexical reference/image retention, panel button/native Back without autofocus, model body-portal/search/native Back, 375px/landscape and 16px/20px fonts (${geometry.length} layouts).`)
+  await phone.setViewportSize({ width: 375, height: 812 })
+  if (await drawer.getAttribute('data-open') !== 'true') await drawer.locator('button[data-dsh-mobile-toggle]').click()
+  await drawer.locator('button:has([data-slot="settings.trigger"])').click()
+  const moduleRow = phone.locator('.dsh-module-row')
+  await moduleRow.waitFor({ state: 'visible', timeout: CLIENT_TIMEOUT_MS })
+  const moduleCatalog = phone.waitForResponse(response => new URL(response.url()).pathname === '/mobile-access/client-modules' && response.request().method() === 'GET')
+  const timeOrigin = await phone.evaluate(() => performance.timeOrigin)
+  await moduleRow.getByRole('button', { name: 'Manage', exact: true }).click()
+  const catalog = await (await moduleCatalog).json()
+  const moduleDialog = phone.locator('.dsh-module-dialog')
+  await moduleDialog.getByRole('button', { name: 'Save for next open', exact: true }).waitFor({ state: 'visible' })
+  await phone.waitForFunction(() => !document.querySelector('.dsh-module-dialog .dsh-module-actions button')?.disabled)
+  const optional = catalog.entries.find(entry => !entry.required && !catalog.entries.some(other => other.dependencies.includes(entry.id)))
+  assert(optional !== undefined, 'Packed DSH profile had no optional leaf module to configure')
+  await moduleDialog.locator('label').filter({ hasText: optional.id }).getByRole('checkbox').uncheck()
+  const configured = phone.waitForResponse(response => new URL(response.url()).pathname === '/mobile-access/client-modules' && response.request().method() === 'POST')
+  await moduleDialog.getByRole('button', { name: 'Save for next open', exact: true }).click()
+  const saved = await (await configured).json()
+  assert.equal(saved.source, 'device')
+  assert(saved.excludedClientModules.includes(optional.id))
+  assert.equal(await phone.evaluate(() => performance.timeOrigin), timeOrigin, 'Saving a module selection reloaded the page')
+  await moduleDialog.getByText('Saved. This page is not reloaded automatically. Reopen DSH to apply.').waitFor()
+  phone.once('dialog', dialog => dialog.accept())
+  const reset = phone.waitForResponse(response => new URL(response.url()).pathname === '/mobile-access/client-modules' && response.request().method() === 'POST')
+  await moduleDialog.getByRole('button', { name: 'Restore defaults', exact: true }).click()
+  assert(!(await (await reset).json()).excludedClientModules.includes(optional.id))
+  assert.equal(await nativeBack(phone), true, 'Native Back did not close the module-selection dialog')
+  await moduleDialog.waitFor({ state: 'detached' })
+  assert.equal(await nativeBack(phone), true, 'Native Back did not return from General settings')
+  if (await drawer.getAttribute('data-open') === 'true') await drawer.locator('button[data-dsh-mobile-toggle]').click()
+  await editor.waitFor({ state: 'visible' })
+  const afterModules = await retained(phone)
+  assert.equal(afterModules.text, expected.text)
+  assert.deepEqual(afterModules.chips, expected.chips)
+  assert.deepEqual(afterModules.images.map(image => image.alt), expected.images.map(image => image.alt))
+  assert.equal(await phone.evaluate(() => performance.timeOrigin), timeOrigin)
+  assert.equal(prompts.length, 0)
+  console.log(`Packed DSH composer acceptance passed: ordinary single toolbar row, real browser Enter/empty draft, Lexical reference/image retention, panel button/native Back without autofocus, model body-portal/search/native Back, portrait/short-viewport/landscape and 16px/20px/32px fonts (${geometry.length} layouts).`)
+  console.log('Real DSH module settings: catalog, device-local save/reset, CSRF, Native Back and no automatic reload/draft loss passed.')
   console.log(JSON.stringify(panelGeometry))
   console.log(JSON.stringify(geometry))
 } catch (error) {

@@ -736,6 +736,7 @@ describe('mobile-control localization', () => {
     // available in CI, so the set the plugin may use is recorded here: adding a token is
     // then a deliberate edit rather than a silent typo.
     const allowed = new Set([
+      '--dsw-radius-panel', '--dsw-font-family',
       '--dsw-alias-bg-base', '--dsw-alias-bg-layer-1', '--dsw-alias-bg-layer-2', '--dsw-alias-bg-layer-3',
       '--dsw-alias-bg-module-platform',
       '--dsw-alias-border-l2', '--dsw-alias-border-l3', '--dsw-alias-border-l4',
@@ -795,7 +796,7 @@ describe('mobile-control localization', () => {
     expect(source).toContain('/api/mobile-access/remote/origin/configure')
     expect(source).toContain('/api/mobile-access/remote/origin/purge')
     expect(source).toContain('if (!originFormDirty && !originFormBusy)')
-    expect(source).toContain('if (remoteLoadInFlight || originFormBusy) return')
+    expect(source).toContain('if (remoteLoadInFlight || originFormBusy || caddyFormBusy) return')
     expect(source).toContain('if (epoch === remoteSnapshotEpoch) renderRemote(data)')
     expect(source).toContain("originSetup.setAttribute('aria-busy', String(originFormBusy))")
     expect(source).toContain("input?.setAttribute('aria-invalid', 'true')")

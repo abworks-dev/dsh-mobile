@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { activeSessionForSoftEnter, applyNativeMobileLanguageMarker, BROWSER_COMPOSER_EDITOR_QUERY, bindBrowserComposerSoftEnter, bindComposerSoftEnter, composerIsLandingHero, createDocumentCompositionGuard, createHeaderStripPanController, dispatchComposerImageDrop, drawerScrimVisible, installNativeMobileSurface, installStockMobileBack, isBrowserTouchEnterLineBreak, isComposerMediaOriginCurrent, isSoftKeyboardEnterLineBreak, markNativeMobileSettings, measureHeaderStripOverflow, nativeAppOwnsComposerEnter, NATIVE_MOBILE_OVERLAY_QUERY, NATIVE_MOBILE_STYLES, preflightComposerImageDrop, resolveBrowserComposerEditor, resolveComposerSessionOrigin, resolveNativeMobileFrame, resolveNativeMobileLanguage, shouldAutoLoadEarlier, stockMainPanelOpen } from '../src/native-mobile.js'
+import { activeSessionForSoftEnter, applyNativeMobileLanguageMarker, BROWSER_COMPOSER_EDITOR_QUERY, bindBrowserComposerSoftEnter, bindComposerSoftEnter, composerIsLandingHero, createDocumentCompositionGuard, createHeaderStripPanController, createSwitchComputerHold, dispatchComposerImageDrop, drawerScrimVisible, installNativeMobileSurface, installStockMobileBack, isBrowserTouchEnterLineBreak, isComposerMediaOriginCurrent, isSoftKeyboardEnterLineBreak, markNativeMobileSettings, measureHeaderStripOverflow, nativeAppOwnsComposerEnter, NATIVE_MOBILE_OVERLAY_QUERY, NATIVE_MOBILE_STYLES, NATIVE_MOBILE_TOGGLE_QUERY, preflightComposerImageDrop, resolveBrowserComposerEditor, resolveComposerSessionOrigin, resolveNativeMobileFrame, resolveNativeMobileLanguage, shouldAutoLoadEarlier, stockMainPanelOpen, SWITCH_COMPUTER_CLICK_SUPPRESSION_MS, SWITCH_COMPUTER_LONG_PRESS_MS, SWITCH_COMPUTER_MOVE_TOLERANCE_PX, SWITCH_COMPUTER_NATIVE_ACTION } from '../src/native-mobile.js'
 
 interface FakeElementOptions {
   readonly children?: readonly HTMLElement[]
@@ -200,10 +200,11 @@ describe('native mobile presentation', () => {
     expect(NATIVE_MOBILE_STYLES).toContain('.dsh-mobile-settings_selector')
     expect(NATIVE_MOBILE_STYLES).toContain('.dsh-mobile-settings_selector:focus-visible')
     expect(NATIVE_MOBILE_STYLES).toContain('min-height:48px !important')
-    expect(NATIVE_MOBILE_STYLES).toContain('[data-dsh-mobile-composer-row] { display:grid !important; grid-template-columns:minmax(0,1fr) !important')
-    expect(NATIVE_MOBILE_STYLES).toContain('[data-dsh-mobile-composer-tools]:not([hidden]) { display:flex !important; flex-wrap:wrap !important')
-    expect(NATIVE_MOBILE_STYLES).toContain('[data-dsh-mobile-composer-trailing] { display:flex !important; flex-wrap:nowrap !important; width:100% !important')
-    expect(NATIVE_MOBILE_STYLES).toContain('[data-dsh-mobile-composer-model] { flex:1 1 44px !important')
+    expect(NATIVE_MOBILE_STYLES).toContain('[data-dsh-mobile-composer-row] { display:flex !important; flex-wrap:wrap !important')
+    expect(NATIVE_MOBILE_STYLES).toContain('[data-dsh-mobile-composer-tools]:not([hidden]) { display:flex !important; flex:0 1 auto !important; flex-wrap:wrap !important; width:auto !important')
+    expect(NATIVE_MOBILE_STYLES).toContain('[data-dsh-mobile-composer-trailing] { display:flex !important; flex:1 0 100px !important; flex-wrap:nowrap !important; width:auto !important')
+    expect(NATIVE_MOBILE_STYLES).toContain('[data-dsh-mobile-composer-trailing]:has(> button[class*="_primary"] ~ button[class*="_primary"]) { flex-basis:144px !important; min-width:min(100%,144px) !important; }')
+    expect(NATIVE_MOBILE_STYLES).toContain('[data-dsh-mobile-composer-model] { flex:0 1 auto !important')
     expect(NATIVE_MOBILE_STYLES).toContain('[data-dsh-mobile-composer-model-label] { flex:1 1 auto !important; max-width:none !important')
     expect(NATIVE_MOBILE_STYLES).toContain('[data-dsh-mobile-history-loader] button:not(:disabled)')
     expect(NATIVE_MOBILE_STYLES).toContain('[data-dsh-mobile-history-loader] button:disabled')
@@ -212,6 +213,15 @@ describe('native mobile presentation', () => {
     expect(NATIVE_MOBILE_STYLES).toContain('[class*="_rowActions"] button { flex:none !important; width:auto !important; min-width:44px !important')
     expect(NATIVE_MOBILE_STYLES).toContain('white-space:nowrap !important; word-break:keep-all !important; writing-mode:horizontal-tb !important')
     expect(NATIVE_MOBILE_STYLES).toContain('[data-variant="think"]) { margin-bottom:12px !important; }')
+  })
+
+  it('caps only the draft scrollport when the narrow focused viewport is short', () => {
+    expect(NATIVE_MOBILE_STYLES).toContain('@media (max-width:720px) and (max-height:500px)')
+    expect(NATIVE_MOBILE_STYLES).toContain('[data-dsh-mobile-center] [data-composer-card] > [data-input-scroll] { max-height:72px !important; overflow-y:auto !important; }')
+    expect(NATIVE_MOBILE_STYLES).toContain('@media (max-width:720px) and (max-height:400px)')
+    expect(NATIVE_MOBILE_STYLES).toContain('[data-dsh-mobile-center] [data-composer-card] { gap:8px !important; }')
+    expect(NATIVE_MOBILE_STYLES).toContain('[data-dsh-mobile-center] [data-composer-card] > [data-input-scroll] { max-height:48px !important; }')
+    expect(NATIVE_MOBILE_STYLES).not.toContain('[data-dsh-mobile-composer-row] { display:grid')
   })
 
   it('spaces the message column through the shared flow gap so folded seats cost nothing', () => {
@@ -879,5 +889,225 @@ describe('header strip pan', () => {
     expect(source).not.toContain('onStripPointerMove')
     expect(source).toContain('document.addEventListener("focusin", onStripFocus, true)')
     expect(source.indexOf('document.addEventListener("click", onStripClickCapture, true)')).toBeLessThan(source.indexOf('document.addEventListener("click", onBranchClick, true)'))
+  })
+})
+
+function switchComputerHarness(overrides: {
+  readonly canSwitchComputer?: () => Promise<boolean> | boolean
+} = {}) {
+  let now = 1_000
+  let nextHandle = 1
+  let probes = 0
+  const timers = new Map<number, { readonly due: number; readonly callback: () => void }>()
+  const switches: number[] = []
+  const hold = createSwitchComputerHold({
+    now: () => now,
+    setTimer: (callback, delayMs) => {
+      const handle = nextHandle
+      nextHandle += 1
+      timers.set(handle, { due: now + delayMs, callback })
+      return handle
+    },
+    clearTimer: handle => { timers.delete(handle) },
+    canSwitchComputer: () => {
+      probes += 1
+      return overrides.canSwitchComputer === undefined ? true : overrides.canSwitchComputer()
+    },
+    switchComputer: () => { switches.push(now) },
+  })
+  /** Let the capability probe settle; the App adapter answers in a microtask. */
+  const settle = async (): Promise<void> => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve() }
+  /** Advance the clock and run only the timers that came due, like the platform timer queue. */
+  const elapse = (ms: number): void => {
+    now += ms
+    for (const [handle, timer] of [...timers]) {
+      if (timer.due > now) continue
+      timers.delete(handle)
+      timer.callback()
+    }
+  }
+  return {
+    hold,
+    settle,
+    elapse,
+    switches: () => switches,
+    pending: () => timers.size,
+    probes: () => probes,
+    setTime: (value: number) => { now = value },
+  }
+}
+
+describe('switch computer hold', () => {
+  it('switches only after a full hold and leaves shorter presses to the drawer', async () => {
+    const harness = switchComputerHarness()
+    harness.hold.start(20, 20)
+    await harness.settle()
+    harness.elapse(SWITCH_COMPUTER_LONG_PRESS_MS - 1)
+    expect(harness.switches()).toEqual([])
+    harness.hold.end()
+    harness.elapse(SWITCH_COMPUTER_LONG_PRESS_MS)
+    expect(harness.switches()).toEqual([])
+    harness.hold.start(20, 20)
+    await harness.settle()
+    harness.elapse(SWITCH_COMPUTER_LONG_PRESS_MS)
+    expect(harness.switches()).toHaveLength(1)
+  })
+
+  it('keeps the stock tap for a hold that is replaced by a second press', async () => {
+    const harness = switchComputerHarness()
+    harness.hold.start(20, 20)
+    await harness.settle()
+    harness.hold.start(20, 20)
+    expect(harness.pending()).toBe(1)
+    harness.elapse(SWITCH_COMPUTER_LONG_PRESS_MS)
+    expect(harness.switches()).toHaveLength(1)
+  })
+
+  it('cancels on travel beyond the tolerance and accepts travel inside it', async () => {
+    const harness = switchComputerHarness()
+    harness.hold.start(20, 20)
+    await harness.settle()
+    harness.hold.move(20 + SWITCH_COMPUTER_MOVE_TOLERANCE_PX + 1, 20)
+    harness.elapse(SWITCH_COMPUTER_LONG_PRESS_MS)
+    expect(harness.switches()).toEqual([])
+    harness.hold.start(20, 20)
+    await harness.settle()
+    harness.hold.move(20 + SWITCH_COMPUTER_MOVE_TOLERANCE_PX, 20 - SWITCH_COMPUTER_MOVE_TOLERANCE_PX)
+    harness.elapse(SWITCH_COMPUTER_LONG_PRESS_MS)
+    expect(harness.switches()).toHaveLength(1)
+  })
+
+  it('waits for an App that does not advertise the action, then accepts the next hold', async () => {
+    let supported = false
+    const harness = switchComputerHarness({ canSwitchComputer: () => supported })
+    harness.hold.start(20, 20)
+    await harness.settle()
+    harness.elapse(SWITCH_COMPUTER_LONG_PRESS_MS)
+    expect(harness.switches()).toEqual([])
+    supported = true
+    harness.hold.start(20, 20)
+    await harness.settle()
+    harness.elapse(SWITCH_COMPUTER_LONG_PRESS_MS)
+    expect(harness.switches()).toHaveLength(1)
+  })
+
+  it('probes the bridge until the App confirms the action and then stops asking', async () => {
+    const harness = switchComputerHarness()
+    harness.hold.start(20, 20)
+    await harness.settle()
+    expect(harness.probes()).toBe(1)
+    harness.hold.end()
+    harness.hold.start(20, 20)
+    await harness.settle()
+    expect(harness.probes()).toBe(1)
+  })
+
+  it('swallows exactly the click that follows a completed hold', async () => {
+    const harness = switchComputerHarness()
+    harness.hold.start(20, 20)
+    await harness.settle()
+    harness.elapse(SWITCH_COMPUTER_LONG_PRESS_MS)
+    harness.hold.end()
+    expect(harness.hold.consumeClickSuppression(1)).toBe(true)
+    expect(harness.hold.consumeClickSuppression(1)).toBe(false)
+  })
+
+  it('keeps the stock click when the press never completed or never armed', async () => {
+    const harness = switchComputerHarness()
+    expect(harness.hold.consumeClickSuppression(1)).toBe(false)
+    harness.hold.start(20, 20)
+    await harness.settle()
+    harness.elapse(SWITCH_COMPUTER_LONG_PRESS_MS - 1)
+    harness.hold.end()
+    expect(harness.hold.consumeClickSuppression(1)).toBe(false)
+    // A keyboard-activated click carries detail 0 and keeps DSH's own handling.
+    harness.hold.start(20, 20)
+    await harness.settle()
+    harness.elapse(SWITCH_COMPUTER_LONG_PRESS_MS)
+    harness.hold.end()
+    expect(harness.hold.consumeClickSuppression(0)).toBe(false)
+  })
+
+  it('expires the suppression so a later tap still opens the drawer', async () => {
+    const harness = switchComputerHarness()
+    harness.hold.start(20, 20)
+    await harness.settle()
+    harness.elapse(SWITCH_COMPUTER_LONG_PRESS_MS)
+    harness.hold.end()
+    harness.elapse(SWITCH_COMPUTER_CLICK_SUPPRESSION_MS + 1)
+    expect(harness.hold.consumeClickSuppression(1)).toBe(false)
+  })
+
+  it('arms the next press without the previous hold suppression', async () => {
+    const harness = switchComputerHarness()
+    harness.hold.start(20, 20)
+    await harness.settle()
+    harness.elapse(SWITCH_COMPUTER_LONG_PRESS_MS)
+    harness.hold.end()
+    harness.hold.start(20, 20)
+    expect(harness.hold.consumeClickSuppression(1)).toBe(false)
+  })
+
+  it('owns the long-press menu only around a completed hold', async () => {
+    const harness = switchComputerHarness()
+    expect(harness.hold.blocksContextMenu()).toBe(false)
+    harness.hold.start(20, 20)
+    await harness.settle()
+    harness.elapse(SWITCH_COMPUTER_LONG_PRESS_MS)
+    expect(harness.hold.blocksContextMenu()).toBe(true)
+    harness.elapse(SWITCH_COMPUTER_CLICK_SUPPRESSION_MS + 1)
+    expect(harness.hold.blocksContextMenu()).toBe(false)
+  })
+
+  it('stops a pending hold and its suppression on disposal', async () => {
+    const harness = switchComputerHarness()
+    harness.hold.start(20, 20)
+    await harness.settle()
+    harness.hold.dispose()
+    harness.elapse(SWITCH_COMPUTER_LONG_PRESS_MS)
+    expect(harness.switches()).toEqual([])
+    expect(harness.pending()).toBe(0)
+    harness.hold.start(20, 20)
+    await harness.settle()
+    harness.elapse(SWITCH_COMPUTER_LONG_PRESS_MS)
+    harness.hold.end()
+    expect(harness.hold.consumeClickSuppression(1)).toBe(false)
+    expect(harness.switches()).toEqual([])
+  })
+
+  it('ignores capability results that arrive after disposal', async () => {
+    let resolveSupport: ((supported: boolean) => void) | undefined
+    const harness = switchComputerHarness({ canSwitchComputer: () => new Promise<boolean>(resolve => { resolveSupport = resolve }) })
+    harness.hold.start(20, 20)
+    await harness.settle()
+    harness.hold.dispose()
+    resolveSupport?.(true)
+    await harness.settle()
+    harness.hold.start(20, 20)
+    harness.elapse(SWITCH_COMPUTER_LONG_PRESS_MS)
+    expect(harness.switches()).toEqual([])
+    expect(harness.pending()).toBe(0)
+  })
+
+  it('binds the hold to the App drawer toggle and releases it with the surface', () => {
+    const source = readFileSync(new URL('../src/native-mobile.ts', import.meta.url), 'utf8')
+    expect(SWITCH_COMPUTER_NATIVE_ACTION).toBe('mobile.switch-computer')
+    expect(NATIVE_MOBILE_TOGGLE_QUERY).toBe('[data-dsh-mobile-toggle]')
+    expect(source).toContain("capabilities()).includes(SWITCH_COMPUTER_NATIVE_ACTION)")
+    expect(source).toContain("bridge.invoke(SWITCH_COMPUTER_NATIVE_ACTION, {})")
+    expect(source).toContain("if (!event.isPrimary || event.button !== 0 || !isDrawerToggleTarget(event.target)) return")
+    expect(source).toContain("target instanceof Element && target.closest(NATIVE_MOBILE_TOGGLE_QUERY) !== null")
+    expect(source).toContain("document.addEventListener('pointerdown', onTogglePointerDown, true)")
+    expect(source).toContain("document.addEventListener('pointerup', onTogglePointerEnd, true)")
+    expect(source).toContain("document.addEventListener('pointercancel', onTogglePointerEnd, true)")
+    expect(source).toContain("document.addEventListener('click', onToggleClickCapture, true)")
+    expect(source).toContain("document.addEventListener('contextmenu', onToggleContextMenu, true)")
+    expect(source).toContain("document.removeEventListener('pointerdown', onTogglePointerDown, true)")
+    expect(source).toContain("document.removeEventListener('contextmenu', onToggleContextMenu, true)")
+    expect(source).toContain("window.removeEventListener('blur', onTogglePointerEnd)")
+    expect(source).toContain("document.removeEventListener('visibilitychange', onToggleVisibilityChange)")
+    expect(source).toContain('switchComputerHold.dispose()')
+    // The gesture never invents drawer chrome of its own.
+    expect(NATIVE_MOBILE_STYLES).not.toContain('dsh-mobile-switch-computer')
   })
 })

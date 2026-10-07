@@ -93,6 +93,18 @@ export class RemoteProviderCoordinator {
     return this.enqueue(() => operation(this.controller()))
   }
 
+  /** Apply one operation only while its intended provider remains selected.
+   * @param provider - Provider the caller explicitly chose.
+   * @param operation - Configuration and activation performed in the same queue item.
+   * @returns The operation result, or a rejection when another selection won the queue.
+   */
+  mutateSelected<T>(provider: RemoteProvider, operation: (controller: RemoteProviderController) => Promise<T>): Promise<T> {
+    return this.enqueue(async () => {
+      if (provider !== this.selectedValue) throw new Error('remote_provider_changed')
+      return operation(this.controller())
+    })
+  }
+
   /** Disable the previous provider, persist the new selection, and retain rollback on write failure. */
   select(provider: RemoteProvider): Promise<void> {
     return this.enqueue(async () => {

@@ -226,21 +226,30 @@ export const NATIVE_MOBILE_STYLES = `
   /* Stock Send/Queue/Steer and Stop keep their handlers and disabled state. */
   [data-dsh-mobile-composer-row] button { min-width:44px !important; min-height:44px !important; touch-action:manipulation; }
   [data-dsh-mobile-composer-row] button[class*="_primary"] { min-width:44px !important; flex-shrink:0 !important; }
-  /* A reserved trailing row keeps primary actions reachable when standard
-     extension slots add controls; no contribution is moved or reimplemented. */
-  [data-dsh-mobile-composer-row] { display:grid !important; grid-template-columns:minmax(0,1fr) !important; align-items:center !important; gap:4px 8px !important; min-width:0 !important; max-width:100% !important; }
-  [data-dsh-mobile-composer-tools]:not([hidden]) { display:flex !important; flex-wrap:wrap !important; width:100% !important; min-width:0 !important; max-width:100% !important; gap:6px !important; }
+  /* Keep ordinary controls on one row. The trailing group reserves room for
+     its model and primary buttons; extra tools wrap only when space is short. */
+  [data-dsh-mobile-composer-row] { display:flex !important; flex-wrap:wrap !important; align-items:center !important; gap:4px 8px !important; min-width:0 !important; max-width:100% !important; }
+  [data-dsh-mobile-composer-tools]:not([hidden]) { display:flex !important; flex:0 1 auto !important; flex-wrap:wrap !important; width:auto !important; min-width:0 !important; max-width:100% !important; gap:6px !important; }
   [data-dsh-mobile-composer-tools] > *,[data-dsh-mobile-composer-tools] > [data-slot] > * { min-width:0 !important; max-width:100% !important; }
   [data-dsh-mobile-composer-tools] button { white-space:normal !important; overflow-wrap:anywhere !important; }
-  [data-dsh-mobile-composer-trailing] { display:flex !important; flex-wrap:nowrap !important; width:100% !important; min-width:0 !important; max-width:100% !important; gap:6px !important; margin-left:0 !important; justify-content:flex-end !important; }
-  [data-dsh-mobile-composer-controls]:not([hidden]) { display:flex !important; flex:1 1 0 !important; flex-wrap:wrap !important; min-width:0 !important; max-width:100% !important; gap:6px !important; }
+  [data-dsh-mobile-composer-trailing] { display:flex !important; flex:1 0 100px !important; flex-wrap:nowrap !important; width:auto !important; min-width:min(100%,100px) !important; max-width:100% !important; gap:6px !important; margin-left:0 !important; justify-content:flex-end !important; }
+  [data-dsh-mobile-composer-trailing]:has(> button[class*="_primary"] ~ button[class*="_primary"]) { flex-basis:144px !important; min-width:min(100%,144px) !important; }
+  [data-dsh-mobile-composer-controls]:not([hidden]) { display:flex !important; flex:1 1 0 !important; flex-wrap:wrap !important; justify-content:flex-end !important; min-width:0 !important; max-width:100% !important; gap:6px !important; }
   [data-dsh-mobile-composer-controls] > *,[data-dsh-mobile-composer-controls] > [data-slot] > * { min-width:0 !important; max-width:100% !important; }
   [data-dsh-mobile-composer-controls] button { white-space:normal !important; overflow-wrap:anywhere !important; }
-  [data-dsh-mobile-composer-model] { flex:1 1 44px !important; width:auto !important; min-width:44px !important; max-width:100% !important; }
+  [data-dsh-mobile-composer-model] { flex:0 1 auto !important; width:auto !important; min-width:44px !important; max-width:100% !important; }
   [data-dsh-mobile-composer-model-trigger] { box-sizing:border-box !important; width:100% !important; max-width:100% !important; min-width:0 !important; padding-left:6px !important; padding-right:4px !important; }
   [data-dsh-mobile-composer-model-label] { flex:1 1 auto !important; max-width:none !important; min-width:0 !important; overflow:hidden !important; text-overflow:ellipsis !important; white-space:nowrap !important; }
   [data-dsh-mobile-center] [class*="_root"]:has(> [class*="_card"] textarea) { box-sizing:border-box !important; width:100% !important; padding:0 0 8px !important; }
   [data-dsh-mobile-center] [class*="_root"]:has(> [class*="_card"] textarea) > [class=""]:last-child { display:none !important; }
+}
+@media (max-width:720px) and (max-height:500px) {
+  /* An open software keyboard leaves less room for the focused draft. */
+  html.dsh-native-mobile-active [data-dsh-mobile-center] [data-composer-card] > [data-input-scroll] { max-height:72px !important; overflow-y:auto !important; }
+}
+@media (max-width:720px) and (max-height:400px) {
+  [data-dsh-mobile-center] [data-composer-card] { gap:8px !important; }
+  html.dsh-native-mobile-active [data-dsh-mobile-center] [data-composer-card] > [data-input-scroll] { max-height:48px !important; }
 }
 @keyframes dsh-mobile-fade-in { from { opacity:0; } }
 @keyframes dsh-mobile-panel-in { from { opacity:.72; transform:translateY(6px); } }
@@ -770,6 +779,113 @@ export function isComposerMediaOriginCurrent(
     && origin.sessionId === current.sessionId
 }
 
+/**
+ * The App action that leaves the page for its paired-computer list. Mirrors the literal the
+ * General-settings row invokes; the gesture below reads the same name from the bridge
+ * capability list, so an App that does not advertise it keeps the stock drawer behavior.
+ */
+export const SWITCH_COMPUTER_NATIVE_ACTION = 'mobile.switch-computer'
+/** The drawer toggle: the whale mark the collapsed header pins into its top-left corner. */
+export const NATIVE_MOBILE_TOGGLE_QUERY = '[data-dsh-mobile-toggle]'
+/** Hold on the drawer toggle that asks the App to list the paired computers. */
+export const SWITCH_COMPUTER_LONG_PRESS_MS = 500
+/** Pointer travel that turns the hold back into a scroll, drag, or drawer swipe. */
+export const SWITCH_COMPUTER_MOVE_TOLERANCE_PX = 14
+/** Keeps the drawer from following the finger Android lifts at the end of a completed hold. */
+export const SWITCH_COMPUTER_CLICK_SUPPRESSION_MS = 1200
+
+interface SwitchComputerHoldOptions {
+  readonly now: () => number
+  readonly setTimer: (callback: () => void, delayMs: number) => number
+  readonly clearTimer: (handle: number) => void
+  /** Whether this App build advertises the paired-computer list action. */
+  readonly canSwitchComputer: () => Promise<boolean> | boolean
+  /** Ask the App to open its paired-computer list. */
+  readonly switchComputer: () => void
+}
+
+export interface SwitchComputerHold {
+  /** Arm a hold; a new press replaces any earlier one. */
+  start(x: number, y: number): void
+  /** Pointer travel beyond the tolerance turns the hold into ordinary navigation. */
+  move(x: number, y: number): void
+  /** Release or cancel: stop the timer, and keep a fired hold's click suppression. */
+  end(): void
+  /** Consume the suppression window for the click Android synthesizes after a hold. */
+  consumeClickSuppression(detail: number): boolean
+  /** Whether a long-press menu belongs to this gesture instead of the toggle. */
+  blocksContextMenu(): boolean
+  dispose(): void
+}
+
+/**
+ * Hold policy for the collapsed header's drawer toggle. The App owns the paired-computer
+ * list, so a hold only acts once the bridge advertises the action; every other press keeps
+ * the stock toggle. DOM events stay in the installer so this policy stays testable.
+ */
+export function createSwitchComputerHold(options: SwitchComputerHoldOptions): SwitchComputerHold {
+  let hold: { readonly x: number; readonly y: number; timer: number; fired: boolean } | undefined
+  let supported = false
+  let probing = false
+  let disposed = false
+  let suppressClickUntil = 0
+  let firedAt = 0
+
+  const probeSupport = (): void => {
+    if (disposed || supported || probing) return
+    probing = true
+    void Promise.resolve().then(options.canSwitchComputer).then(value => {
+      probing = false
+      if (!disposed && value) supported = true
+    }, () => { probing = false })
+  }
+
+  const stopTimer = (): void => {
+    if (hold === undefined) return
+    options.clearTimer(hold.timer)
+    hold = undefined
+  }
+
+  const fire = (current: { timer: number; fired: boolean }): void => {
+    if (hold !== current || current.fired || !supported) return
+    current.fired = true
+    firedAt = options.now()
+    suppressClickUntil = firedAt + SWITCH_COMPUTER_CLICK_SUPPRESSION_MS
+    options.switchComputer()
+  }
+
+  return {
+    start: (x, y) => {
+      if (disposed) return
+      stopTimer()
+      suppressClickUntil = 0
+      firedAt = 0
+      probeSupport()
+      const current = { x, y, timer: 0, fired: false }
+      current.timer = options.setTimer(() => fire(current), SWITCH_COMPUTER_LONG_PRESS_MS)
+      hold = current
+    },
+    move: (x, y) => {
+      if (hold === undefined || hold.fired) return
+      if (Math.abs(x - hold.x) > SWITCH_COMPUTER_MOVE_TOLERANCE_PX
+        || Math.abs(y - hold.y) > SWITCH_COMPUTER_MOVE_TOLERANCE_PX) stopTimer()
+    },
+    end: stopTimer,
+    consumeClickSuppression: detail => {
+      if (detail === 0 || suppressClickUntil === 0 || options.now() > suppressClickUntil) return false
+      suppressClickUntil = 0
+      return true
+    },
+    blocksContextMenu: () => firedAt !== 0 && options.now() - firedAt <= SWITCH_COMPUTER_CLICK_SUPPRESSION_MS,
+    dispose: () => {
+      disposed = true
+      stopTimer()
+      suppressClickUntil = 0
+      firedAt = 0
+    },
+  }
+}
+
 /** Add mobile semantics without replacing feature trees. */
 export function installNativeMobileSurface(backServices: NativeMobileBackServices): () => void {
   document.documentElement.classList.add('dsh-native-mobile-active')
@@ -820,6 +936,54 @@ export function installNativeMobileSurface(backServices: NativeMobileBackService
   }
   document.addEventListener('pointerdown', onPointerDown, true)
   document.addEventListener('keydown', onKeyDown, true)
+  const switchComputerHold = createSwitchComputerHold({
+    now: () => window.performance.now(),
+    setTimer: (callback, delayMs) => window.setTimeout(callback, delayMs),
+    clearTimer: handle => { window.clearTimeout(handle) },
+    canSwitchComputer: async () => {
+      const bridge = window.__DSH_MOBILE_NATIVE__
+      if (bridge === undefined) return false
+      try {
+        return (await bridge.capabilities()).includes(SWITCH_COMPUTER_NATIVE_ACTION)
+      } catch {
+        return false
+      }
+    },
+    switchComputer: () => {
+      const bridge = window.__DSH_MOBILE_NATIVE__
+      if (bridge === undefined) return
+      void Promise.resolve().then(() => bridge.invoke(SWITCH_COMPUTER_NATIVE_ACTION, {})).catch(() => undefined)
+    },
+  })
+  const isDrawerToggleTarget = (target: EventTarget | null): boolean =>
+    target instanceof Element && target.closest(NATIVE_MOBILE_TOGGLE_QUERY) !== null
+  const onTogglePointerDown = (event: PointerEvent): void => {
+    if (!event.isPrimary || event.button !== 0 || !isDrawerToggleTarget(event.target)) return
+    switchComputerHold.start(event.clientX, event.clientY)
+  }
+  const onTogglePointerMove = (event: PointerEvent): void => {
+    switchComputerHold.move(event.clientX, event.clientY)
+  }
+  const onTogglePointerEnd = (): void => { switchComputerHold.end() }
+  const onToggleVisibilityChange = (): void => { if (document.hidden) switchComputerHold.end() }
+  const onToggleClickCapture = (event: MouseEvent): void => {
+    if (!isDrawerToggleTarget(event.target) || !switchComputerHold.consumeClickSuppression(event.detail)) return
+    event.preventDefault()
+    event.stopPropagation()
+  }
+  const onToggleContextMenu = (event: Event): void => {
+    if (!isDrawerToggleTarget(event.target) || !switchComputerHold.blocksContextMenu()) return
+    event.preventDefault()
+    event.stopPropagation()
+  }
+  document.addEventListener('pointerdown', onTogglePointerDown, true)
+  document.addEventListener('pointermove', onTogglePointerMove, true)
+  document.addEventListener('pointerup', onTogglePointerEnd, true)
+  document.addEventListener('pointercancel', onTogglePointerEnd, true)
+  document.addEventListener('click', onToggleClickCapture, true)
+  document.addEventListener('contextmenu', onToggleContextMenu, true)
+  window.addEventListener('blur', onTogglePointerEnd)
+  document.addEventListener('visibilitychange', onToggleVisibilityChange)
   // The scrim is drawer chrome: it belongs on screen only while the overlay
   // query matches. A resize crosses that breakpoint without touching the DOM
   // the observer below watches, so the query wakes the same sync pass itself.
@@ -1471,6 +1635,15 @@ export function installNativeMobileSurface(backServices: NativeMobileBackService
     historyScroller?.removeEventListener('scroll', onHistoryScroll)
     document.removeEventListener('pointerdown', onPointerDown, true)
     document.removeEventListener('keydown', onKeyDown, true)
+    document.removeEventListener('pointerdown', onTogglePointerDown, true)
+    document.removeEventListener('pointermove', onTogglePointerMove, true)
+    document.removeEventListener('pointerup', onTogglePointerEnd, true)
+    document.removeEventListener('pointercancel', onTogglePointerEnd, true)
+    document.removeEventListener('click', onToggleClickCapture, true)
+    document.removeEventListener('contextmenu', onToggleContextMenu, true)
+    window.removeEventListener('blur', onTogglePointerEnd)
+    document.removeEventListener('visibilitychange', onToggleVisibilityChange)
+    switchComputerHold.dispose()
     document.removeEventListener('click', animateNavigation)
     backdrop.remove()
     document.documentElement.classList.remove('dsh-native-mobile-active')

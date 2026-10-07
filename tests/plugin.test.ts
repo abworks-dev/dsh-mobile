@@ -349,6 +349,15 @@ describe('stock DSH lifecycle', () => {
     expect(inject).toEqual(['webServer', 'commands', 'connection'])
   })
 
+  it('rejects late admin reads and writes after the plugin generation closes', async () => {
+    const mounted = await mount()
+    await mounted.context.fiber.dispose()
+    const status = await invoke(mounted.route, 'GET', '/api/mobile-access/lan/control')
+    expect(status.status).toBe(503)
+    const saved = await invoke(mounted.route, 'POST', '/api/mobile-access/lan/trusted-networks', JSON.stringify({ extraAllowedCidrs: ['10.80.0.0/24'] }))
+    expect(saved.status).toBe(503)
+  })
+
   it('continues ordered teardown after failures and aggregates them', async () => {
     const completed: string[] = []
     let failure: unknown

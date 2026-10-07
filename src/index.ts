@@ -14,6 +14,8 @@ export type {
   SessionEndReason,
 } from './access.js'
 export { Config, parseControlFile, parseGatewayConfig } from './config.js'
+export { ClientModulePreferenceStore } from './client-module-preferences.js'
+export type { ClientModuleEntry, ClientModulePreferenceView, ClientModulePreferenceSelection } from './client-module-preferences.js'
 export type {
   DisabledTlsConfig,
   PluginConfig,
@@ -31,7 +33,7 @@ export type {
   MobileAccessControlStore,
   MobileAccessRuntime,
 } from './control.js'
-export { MobileAccessGateway, rewriteMobileIndex } from './gateway.js'
+export { ClientModuleConflictError, MobileAccessGateway, rewriteMobileIndex } from './gateway.js'
 export {
   EXTENSION_LIMITS,
   MobileAccessService,

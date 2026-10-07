@@ -2,13 +2,15 @@ import {
   X509Certificate,
   createPrivateKey,
   createPublicKey,
+  randomBytes,
 } from 'node:crypto'
 import { execFileText as execFile } from './exec-file.js'
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { networkInterfaces, type NetworkInterfaceInfo } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 import { generate } from 'selfsigned'
 import { restrictPrivateFile } from './private-file.js'
+import { parseCidr } from './network.js'
 
 /** One active private IPv4 address tied to a stable operating-system interface name. */
 export interface LanNetwork {
@@ -24,6 +26,8 @@ export interface ManagedSetup {
   readonly listenPort: number
   /** Legacy setup snapshot retained for file compatibility; the active WebServer port wins at runtime. */
   readonly upstreamOrigin: string
+  /** Additional admin-selected source networks; the active LAN subnet remains trusted. */
+  readonly extraAllowedCidrs?: readonly string[]
   readonly tls: {
     readonly mode: 'managed'
     readonly caCertFile: string
@@ -56,7 +60,7 @@ export function parseManagedSetup(value: unknown): ManagedSetup {
   }
   const record = value as Record<string, unknown>
   if (record.version !== 2 || Reflect.ownKeys(record)
-    .some(key => typeof key !== 'string' || !['version', 'networkInterface', 'listenPort', 'upstreamOrigin', 'tls'].includes(key))) {
+    .some(key => typeof key !== 'string' || !['version', 'networkInterface', 'listenPort', 'upstreamOrigin', 'tls', 'extraAllowedCidrs'].includes(key))) {
     throw new Error('mobile setup file has an unsupported format')
   }
   if (!Number.isSafeInteger(record.listenPort) || (record.listenPort as number) < 1024
@@ -76,6 +80,7 @@ export function parseManagedSetup(value: unknown): ManagedSetup {
     networkInterface: requiredString(record.networkInterface, 'mobile setup networkInterface'),
     listenPort: record.listenPort as number,
     upstreamOrigin: requiredString(record.upstreamOrigin, 'mobile setup upstreamOrigin'),
+    ...(record.extraAllowedCidrs === undefined ? {} : { extraAllowedCidrs: parseAdditionalTrustedNetworks(record.extraAllowedCidrs) }),
     tls: Object.freeze({
       mode: 'managed',
       caCertFile: requiredString(tls.caCertFile, 'mobile setup tls.caCertFile'),
@@ -84,6 +89,44 @@ export function parseManagedSetup(value: unknown): ManagedSetup {
       keyFile: requiredString(tls.keyFile, 'mobile setup tls.keyFile'),
     }),
   })
+}
+
+/** Validate explicitly trusted networks without adding implicit VPN or private ranges.
+ * @param value - CIDR strings submitted by the computer administrator.
+ * @returns Deduplicated validated CIDRs in input order.
+ */
+export function parseAdditionalTrustedNetworks(value: unknown): readonly string[] {
+  if (!Array.isArray(value)) {
+    throw new Error('extraAllowedCidrs must be an array of CIDR strings')
+  }
+  const sources = value.map((entry: unknown): string => {
+    if (typeof entry !== 'string' || entry.trim() === '') throw new Error('extraAllowedCidrs must be an array of CIDR strings')
+    return entry.trim()
+  })
+  const entries: string[] = []
+  const seen = new Set<string>()
+  for (const cidr of sources) {
+    const parsed = parseCidr(cidr)
+    const key = `${parsed.bits}:${parsed.network}:${parsed.prefix}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    entries.push(cidr)
+  }
+  return Object.freeze(entries)
+}
+
+/** Save extra trusted networks without replacing the interface or pairing identity.
+ * @param setupFile - Existing managed setup file.
+ * @param values - Explicitly selected additional networks.
+ * @returns The saved managed setup.
+ */
+export async function saveManagedTrustedNetworks(setupFile: string, values: unknown): Promise<ManagedSetup> {
+  const extraAllowedCidrs = parseAdditionalTrustedNetworks(values)
+  const setup = parseManagedSetup(JSON.parse(await readFile(setupFile, 'utf8')))
+  const next = Object.freeze({ ...setup, extraAllowedCidrs })
+  await atomicWrite(setupFile, `${JSON.stringify(next, null, 2)}\n`)
+  await restrictPrivateFile(setupFile)
+  return next
 }
 
 function privateIpv4(value: string): boolean {
@@ -241,10 +284,13 @@ export async function readManagedCa(setup: ManagedSetup['tls']): Promise<X509Cer
 async function atomicWrite(file: string, contents: string | Uint8Array): Promise<void> {
   const directory = dirname(file)
   await mkdir(directory, { recursive: true, mode: 0o700 })
-  const temporary = join(directory, `.${basename(file)}.${process.pid}.tmp`)
-  await writeFile(temporary, contents, { mode: 0o600 })
-  await rename(temporary, file)
-  await restrictPrivateFile(file)
+  const temporary = join(directory, `.${basename(file)}.${randomBytes(12).toString('hex')}.tmp`)
+  try {
+    await writeFile(temporary, contents, { mode: 0o600, flag: 'wx' })
+    await restrictPrivateFile(temporary)
+    await rename(temporary, file)
+    await restrictPrivateFile(file)
+  } finally { await rm(temporary, { force: true }) }
 }
 
 /** Create a long-lived CA or migrate the legacy self-signed server certificate as that CA. */
@@ -385,7 +431,7 @@ export async function materializeManagedSetup(
   return {
     publicOrigin: `https://${network.address}:${String(setup.listenPort)}`,
     listenHost: network.address,
-    allowedCidrs: [network.cidr],
+    allowedCidrs: parseAdditionalTrustedNetworks([network.cidr, ...(setup.extraAllowedCidrs ?? [])]),
     instanceId: ca.fingerprint256.replaceAll(':', '').toLowerCase(),
     pairingCaFile: setup.tls.caCertFile,
     tls: {

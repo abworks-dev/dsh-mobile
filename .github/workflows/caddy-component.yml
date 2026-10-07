@@ -1,0 +1,52 @@
+name: Optional Caddy component build
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'scripts/build-caddy-component.mjs'
+      - '.github/workflows/caddy-component.yml'
+      - 'src/caddy*.ts'
+      - 'src/managed-origin.ts'
+      - 'tests/caddy*.test.ts'
+
+permissions:
+  contents: read
+
+jobs:
+  caddy-review-artifact:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.26.6'
+          cache: false
+      - name: Build pinned core and DNS module, verify metadata, collect licenses
+        run: node scripts/build-caddy-component.mjs --output-dir "${{ runner.temp }}/caddy-component"
+      - name: Install test dependencies
+        run: npm ci
+      - name: Verify TLS, authenticated Gateway, API bytes and WebSockets through built Caddy
+        env:
+          DSH_CADDY_TEST_EXECUTABLE: ${{ runner.temp }}/caddy-component/${{ runner.os == 'Windows' && 'caddy.exe' || 'caddy' }}
+        run: npx vitest run tests/caddy.test.ts tests/caddy-controller.test.ts tests/caddy-mode.test.ts tests/caddy-live.test.ts
+      - uses: actions/upload-artifact@v7
+        with:
+          name: managed-caddy-review-${{ runner.os }}
+          path: |
+            ${{ runner.temp }}/caddy-component/caddy*
+            ${{ runner.temp }}/caddy-component/manifest.json
+            ${{ runner.temp }}/caddy-component/version.txt
+            ${{ runner.temp }}/caddy-component/modules.txt
+            ${{ runner.temp }}/caddy-component/go-build.json
+            ${{ runner.temp }}/caddy-component/THIRD_PARTY_LICENSES.txt
+          if-no-files-found: error
+          retention-days: 14

@@ -53,6 +53,12 @@ jobs:
       - run: npm run smoke:voice-session
       - run: npm run smoke:composer-keyboard
       - run: npm run smoke:composer-overflow
+      - name: Verify module settings, trusted network and remote form lifetimes
+        if: matrix.dsh == '0.2.0-rc.2'
+        run: npm run smoke:control-state
+      - name: Verify authenticated recovery from changed module dependencies
+        if: matrix.dsh == '0.2.0-rc.2'
+        run: npm run smoke:module-recovery
       - name: Verify early browser compatibility semantics
         if: matrix.dsh == '0.2.0-rc.2'
         run: npm run smoke:mobile-compat

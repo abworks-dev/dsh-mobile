@@ -6,6 +6,7 @@ import android.app.Activity
 import android.app.AlertDialog
 import android.content.ActivityNotFoundException
 import android.content.ClipData
+import android.content.ComponentName
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.ColorStateList
@@ -481,8 +482,8 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER_VERTICAL
         }
         heading.addView(textView(R.string.paired_devices_title, 30f, Typeface.BOLD), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        heading.addView(toolbarIconButton(R.drawable.ic_settings, R.string.launch_settings).apply {
-            setOnClickListener { showLaunchSettings() }
+        heading.addView(toolbarIconButton(R.drawable.ic_settings, R.string.device_list_settings).apply {
+            setOnClickListener { showDeviceListSettings() }
         }, LinearLayout.LayoutParams(dp(48), dp(48)))
         card.addView(heading)
         card.addView(spacer(8))
@@ -668,25 +669,39 @@ class MainActivity : Activity() {
     }
 
     private fun showDeviceActions(snapshot: PairedDeviceRecord) {
-        val device = pairedDeviceStore.load().firstOrNull { it.key == snapshot.key } ?: return
+        val devices = pairedDeviceStore.load()
+        val device = devices.firstOrNull { it.key == snapshot.key } ?: return
         val needsRepair = device.status == PairedDeviceStatus.REVOKED
             || device.status == PairedDeviceStatus.EXPIRED
             || device.status == PairedDeviceStatus.ADDRESS_CHANGED
+        // The list keeps a fixed order, so these two actions are the only way to arrange it. They
+        // appear only where they change something: the first row can neither move up nor go to the
+        // top, and the second row has nothing left to jump over.
+        val actions = mutableListOf<Pair<String, () -> Unit>>()
+        actions.add(getString(if (needsRepair) R.string.device_action_repair else R.string.device_action_connect) to {
+            if (needsRepair) repairPairedDevice(device) else connectPairedDevice(device)
+        })
+        actions.add(getString(R.string.device_action_edit) to { editDeviceName(device) })
+        actions.add(getString(R.string.device_action_check) to {
+            pairedDeviceStore.update(device.key, PairedDeviceStatusPolicy::beginCheck)
+            showDeviceList()
+        })
+        if (PairedDeviceOrderPolicy.canMoveUp(devices, device.key)) {
+            actions.add(getString(R.string.device_action_move_up) to {
+                pairedDeviceStore.moveUp(device.key)
+                showDeviceList()
+            })
+        }
+        if (PairedDeviceOrderPolicy.canMoveToTop(devices, device.key)) {
+            actions.add(getString(R.string.device_action_move_top) to {
+                pairedDeviceStore.moveToTop(device.key)
+                showDeviceList()
+            })
+        }
+        actions.add(getString(R.string.device_action_delete) to { confirmDeleteDevice(device) })
         AlertDialog.Builder(this)
             .setTitle(device.displayName)
-            .setItems(arrayOf(
-                getString(if (needsRepair) R.string.device_action_repair else R.string.device_action_connect),
-                getString(R.string.device_action_edit),
-                getString(R.string.device_action_check),
-                getString(R.string.device_action_delete),
-            )) { _, which ->
-                when (which) {
-                    0 -> if (needsRepair) repairPairedDevice(device) else connectPairedDevice(device)
-                    1 -> editDeviceName(device)
-                    2 -> { pairedDeviceStore.update(device.key, PairedDeviceStatusPolicy::beginCheck); showDeviceList() }
-                    3 -> confirmDeleteDevice(device)
-                }
-            }
+            .setItems(actions.map { it.first }.toTypedArray()) { _, which -> actions[which].second() }
             .setNegativeButton(R.string.cancel, null)
             .show()
     }
@@ -812,6 +827,16 @@ class MainActivity : Activity() {
         deviceUndoPopup = null
     }
 
+    private fun showDeviceListSettings() {
+        AlertDialog.Builder(this)
+            .setTitle(R.string.device_list_settings)
+            .setItems(arrayOf(getString(R.string.launch_settings), getString(R.string.icon_settings))) { _, which ->
+                if (which == 0) showLaunchSettings() else showIconSettings()
+            }
+            .setNegativeButton(R.string.cancel, null)
+            .show()
+    }
+
     private fun showLaunchSettings() {
         val values = arrayOf(getString(R.string.launch_direct_dsh), getString(R.string.launch_device_list))
         val selected = if (launchBehavior() == LaunchBehavior.DEVICE_LIST) 1 else 0
@@ -826,6 +851,63 @@ class MainActivity : Activity() {
             .show()
     }
 
+    /** Flip the launcher icon between the DSH whale mascot and the official whale marks. */
+    private fun iconComponent(icon: LauncherIconPolicy.Icon): ComponentName = ComponentName(
+        packageName,
+        LauncherIconPolicy.aliasClassName(MainActivity::class.java.name.substringBeforeLast('.'), icon),
+    )
+
+    private fun currentAppIcon(): String = LauncherIconPolicy.selectedKey(
+        preferences.getString(PREFERENCE_APP_ICON, null),
+    ) { packageManager.getComponentEnabledSetting(iconComponent(it)) }
+
+    private fun applyAppIcon(icon: String) {
+        val pm = packageManager
+        try {
+            LauncherIconPolicy.switchIcon(
+                key = icon,
+                atomic = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU,
+                readState = { pm.getComponentEnabledSetting(iconComponent(it)) },
+            ) { changes ->
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    pm.setComponentEnabledSettings(changes.map {
+                        PackageManager.ComponentEnabledSetting(iconComponent(it.icon), it.state, PackageManager.DONT_KILL_APP)
+                    })
+                } else {
+                    changes.forEach {
+                        pm.setComponentEnabledSetting(iconComponent(it.icon), it.state, PackageManager.DONT_KILL_APP)
+                    }
+                }
+            }
+            preferences.edit().putString(PREFERENCE_APP_ICON, icon).apply()
+            deviceListStatus?.setText(R.string.icon_settings_saved)
+        } catch (error: Exception) {
+            // Package-manager failure is reported without persisting an unconfirmed selection.
+            Toast.makeText(this, R.string.icon_settings_failed, Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun showIconSettings() {
+        val keys = LauncherIconPolicy.icons.map { it.key }
+        val labels = arrayOf(
+            getString(R.string.icon_choice_whale_girl),
+            getString(R.string.icon_choice_official_whale),
+            getString(R.string.icon_choice_official_whale_dark),
+            getString(R.string.icon_choice_official_whale_teal),
+            getString(R.string.icon_choice_official_whale_mono),
+            getString(R.string.icon_choice_official_whale_black),
+            getString(R.string.icon_choice_official_whale_white),
+        )
+        val selected = keys.indexOf(currentAppIcon()).coerceAtLeast(0)
+        AlertDialog.Builder(this)
+            .setTitle(R.string.icon_settings)
+            .setSingleChoiceItems(labels, selected) { dialog, which ->
+                dialog.dismiss()
+                applyAppIcon(keys[which])
+            }
+            .setNegativeButton(R.string.cancel, null)
+            .show()
+    }
     private fun connectPairedDevice(snapshot: PairedDeviceRecord) {
         val device = pairedDeviceStore.load().firstOrNull { it.key == snapshot.key } ?: return
         if (device.status == PairedDeviceStatus.REVOKED
@@ -2694,6 +2776,7 @@ class MainActivity : Activity() {
         const val PREFERENCE_NEARBY_PERMISSION_LIMITED = "nearby_permission_limited"
         const val PREFERENCE_NOTIFICATION_PERMISSION_REQUESTED = "notification_permission_requested"
         const val PREFERENCE_WEB_CHROME_COLOR = "web_chrome_color"
+        const val PREFERENCE_APP_ICON = "app_icon"
         const val STATE_SHOWING_SETUP = "showing_setup"
         const val STATE_ACCESS_MODE = "access_mode"
         const val STATE_NATIVE_BRIDGE = "native_bridge"

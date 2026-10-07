@@ -31,14 +31,14 @@
 
 > DSH Mobile is a DeepSeek Harness community plugin; the native app supports Android only.
 >
-> **Current stable release: 0.5.5**. Improve the phone composer and model-search input sizes, fix Android model-menu Back, rotation attachment loss and revocation status, and add macOS cloudflared support. [Release notes](CHANGELOG.md#055---2026-10-04).
+> **Current stable release: 0.6.0**. Add mobile page module management, app icon choices and device ordering; improve scanning, mobile layout, remote loading and older WebView compatibility. [Release notes](CHANGELOG.md#060---2026-10-07).
 >
-> **Upgrade reminder**: update the plugin and Android app together to 0.5.5 for all fixes. Older official apps with the same signer can be upgraded in place while keeping pairings. [Compatibility notes](#compatibility).
+> **Upgrade reminder**: update the plugin and Android app together to 0.6.0 for all features and fixes. Older official apps with the same signer can be upgraded in place while keeping pairings. [Compatibility notes](#compatibility).
 
 <p align="center">
-  <a href="https://github.com/saya-ch/dsh-mobile/releases/download/v0.5.5/dsh-mobile-android-v0.5.5.apk"><img src="assets/brand/app-icon-rounded.svg" alt="DSH Mobile Android app icon" width="72" height="72"></a><br>
-  <a href="https://github.com/saya-ch/dsh-mobile/releases/download/v0.5.5/dsh-mobile-android-v0.5.5.apk"><strong>Download Android app 0.5.5</strong></a><br>
-  <sub><a href="https://github.com/saya-ch/dsh-mobile/releases/tag/v0.5.5">Release notes and checksums</a></sub>
+  <a href="https://github.com/saya-ch/dsh-mobile/releases/download/v0.6.0/dsh-mobile-android-v0.6.0.apk"><img src="https://raw.githubusercontent.com/saya-ch/dsh-mobile/main/assets/brand/app-icon-rounded.svg" alt="DSH Mobile Android app icon" width="72" height="72"></a><br>
+  <a href="https://github.com/saya-ch/dsh-mobile/releases/download/v0.6.0/dsh-mobile-android-v0.6.0.apk"><strong>Download Android app 0.6.0</strong></a><br>
+  <sub><a href="https://github.com/saya-ch/dsh-mobile/releases/tag/v0.6.0">Release notes and checksums</a></sub>
 </p>
 
 DSH Mobile is a DeepSeek Harness plugin that lets a mobile browser or the Android app connect over a protected LAN or an optional Tailscale Funnel, cpolar, cloudflared, self-hosted FRP, or own reverse-proxy remote path. Both routes reach the same sessions, Workspaces, messages, and tools. The computer manages their switches and pairing authorizations separately; the Android app lists paired computers together. The plugin does not modify DeepSeek Harness source.
@@ -62,25 +62,40 @@ A paired device can operate DSH on the computer and must be treated as fully tru
 
 ## Mobile improvements in 0.5.5
 
+<details>
+<summary>Released composer, Back and rotation improvements</summary>
+
 At widths up to 720px, an inactive composer retains a scrollable 72px draft preview, leaving more room for the conversation; editor or toolbar focus restores the expanded view. Text, references, and attachments remain intact, and Send, Queue, Steer, and Stop controls have touch targets of at least 44px. Existing DSH and app mechanisms retain submission and IME behavior.
 
 Model-search and pairing-page input sizes are corrected, and Android Back navigates the model menu one level at a time. Rotation and window resizing retain the page, references and unsent images; a known **Removed on computer** status survives later checks. Update both the plugin and app. Unsent attachments may still be lost after app-process termination.
 
-## 0.5.6 update (unreleased)
+</details>
 
-These changes are in the development branch. The stable npm release and Android download above remain 0.5.5; no official 0.5.6 package is available yet.
+## 0.6.0 update
 
-In touch-primary mobile browsers, plain Enter inserts a newline in the main conversation composer and does nothing with an empty draft. DSH retains IME composition, open-menu handling, and modified-key shortcuts. Selecting a sidebar main panel such as Plugins or Schedules closes the narrow drawer and leaves a **Back to conversation** row above the panel.
+This update focuses on module management, app personalization and mobile access. See the complete [changelog](CHANGELOG.md#060---2026-10-07).
 
-Narrow composer tool groups can wrap onto separate rows, keeping Send, Stop, and controls in standard plugin slots reachable without replacing their actions. The new **Mobile font size** setting defaults to 16px and allows 12–32px. It is saved locally for the current address in the browser or app WebView, independently from the computer's font size. Computer settings are unaffected; the color theme still follows DSH. Editable fields retain a 16px minimum to prevent focus-triggered zoom.
+- **Connections and loading**: retry transient static-resource failures, and separate long-running DSH API waits from ordinary transport timeouts. API and write requests are not replayed. [Slow-link guide](docs/SLOW_CONNECTIONS.en.md)
+- **Mobile layout**: a compact composer with reachable controls while the keyboard is open or text is enlarged; independent mobile font size, touch-browser Enter for newlines, and narrow-panel Back to conversation.
+- **Android experience**: choose the mascot or six whale-mark colors; improved scanner preview, focus and zoom. Fixed device order with Move up / Move to top and a drawer-toggle hold shortcut; startup still prefers the last-used computer.
+- **Module management**: separate computer defaults and device choices with boot/dependency checks. No plugin uninstall or automatic conversation reload; an explicit recovery action handles outdated selections. [User guide](docs/CLIENT_MODULES.en.md)
+- **Networks and compatibility**: explicit extra trusted source networks for managed LAN; selected missing WebView API fallbacks and improved extension deadlines/cancellation. [Trusted networks](docs/TRUSTED_NETWORKS.en.md) · [WebView notes](#app-or-mobile-browser)
 
-Before DSH boots, the dedicated mobile page supplies missing `Promise.withResolvers` and `AbortSignal.any` APIs used by startup, Workspace navigation, and reconnection. See [App and mobile browser](#app-and-mobile-browser) for the compatibility scope and earlier Android injection; this does not imply support for every old engine or community plugin.
-
-Long-running authenticated DSH API requests use a separate `upstreamApiTimeoutMs`, defaulting to `0` (no response-wait timeout), rather than the ordinary 30-second transport budget. An explicit timeout returns `504 upstream_timeout`. Extension actions and route handlers retain a default 30-second deadline, with a per-operation `timeoutMs` override; the gateway releases the request slot when its caller leaves. See the [slow-link and reconnection guide](docs/SLOW_CONNECTIONS.en.md) for the separate budgets and error codes.
+> **Managed Caddy installation is not available yet.** Source integration and isolated TLS checks are complete, but trusted pinned binaries have not been distributed. Existing external proxies and other channels are unaffected. [Status and requirements](docs/CADDY_MANAGED.en.md)
 
 ## Quick start
 
-With an installed `dsh` command:
+Install the plugin on the computer, then pair the Android app or a mobile browser. Choose the installation path for your DSH host.
+
+### Official DSH Desktop
+
+Install and enable `dsh-mobile` from the app's **Plugins** page, then open **Mobile Access** to configure LAN or a remote channel. The app manages its Desktop profile; the `--profile web` commands below do not apply to it.
+
+After installing or updating, quit Desktop from the application menu and reopen it. If it reports `dsh-mobile-question-fixes: failed to import`, complete this restart so Desktop reads the bundled component again. You do not need to clear sessions or pairing data.
+
+### DSH Web
+
+With an installed `dsh` command, run:
 
 ```powershell
 dsh plugin --profile web add dsh-mobile@latest
@@ -88,16 +103,17 @@ dsh plugin --profile web exec dsh-mobile setup
 dsh --profile web
 ```
 
-From a DeepSeek Harness source checkout:
+<details>
+<summary>DeepSeek Harness source checkout or community plugin market</summary>
+
+From the DeepSeek Harness source directory, run:
 
 ```powershell
-corepack enable; pnpm install
+pnpm install
 pnpm dsh plugin --profile web add dsh-mobile@latest
 pnpm dsh plugin --profile web exec dsh-mobile setup
 pnpm dsh --profile web
 ```
-
-In official DSH Desktop, install and enable `dsh-mobile` from the app's **Plugins** page. Then open **Mobile Access** to configure LAN access or choose a remote channel. The app manages its Desktop profile; the `--profile web` commands above do not apply to it.
 
 Or via the plugin market (optional):
 
@@ -107,9 +123,13 @@ dsh plugin --profile web add dshmarket
 
 Restart DSH, then search for **dsh-mobile** under **Settings → Plugin Market** and install it. On first opening Mobile access, the Local network page lists this computer's current networks; confirm one to create private certificates and LAN configuration, then restart DSH once as prompted. No terminal `setup` command is required for this path.
 
+</details>
+
 `setup` automatically selects and remembers the current LAN; Wi-Fi, hotspot, and IP changes normally recover without re-pairing. Use `--address 192.168.x.x` only when automatic selection fails. Settings, certificates, devices, and customization files live under `$DSH_HOME/mobile-access/`.
 
-After installation, start DSH and use the connection guide below to choose LAN or remote access.
+### Install the phone app
+
+Download the official Android APK using the link above, or open the computer's pairing link in a mobile browser. Then choose LAN or remote access in the [connection guide](#connection-guide); the phone needs no separate tunnel client.
 
 Registry-installed plugins check for updates when the desktop UI loads and show “Update plugin” beside the access-panel title when a newer release is available. Restart DSH after installation. The app download entry shows the latest version; local development packages are not overwritten, and Android does not check for or push app-version updates.
 
@@ -132,7 +152,14 @@ Use this when the phone and computer share Wi-Fi, Ethernet, or a phone hotspot. 
 
 Port note: `dsh web --port` changes the DSH Web upstream port (3080 by default), which the plugin follows automatically. `dsh-mobile setup --port` changes the Mobile HTTPS listener (3443 by default), and the pairing QR code includes the selected port.
 
+<details>
+<summary>Headless hosts, private proxies and additional source networks</summary>
+
 Headless Linux hosts, and browsers that open DSH Web through a LAN IP or reverse proxy, can use the same **Mobile access** control in the lower-left corner. The admin API still requires a loopback TCP peer (for example a local `socat` or reverse proxy to `127.0.0.1`) so the plugin itself is not LAN-exposed. The browser Host may be `localhost`, RFC1918, or an IPv4 link-local address; public IPs and arbitrary DNS names still return 403. The reverse proxy must be limited to trusted local or LAN callers and must not publicly forward `/api/mobile-access`. The dedicated Mobile HTTPS listener (3443 by default) remains the phone surface and does not become the desktop admin panel.
+
+For a routed network such as WireGuard, 0.6.0 offers [additional trusted networks](docs/TRUSTED_NETWORKS.en.md). It adds explicit source CIDRs only, without creating a VPN or routes or changing Windows firewall rules.
+
+</details>
 
 The app is optional: select **Copy pairing link** and open it in a mobile browser. LAN uses a private certificate, which the browser may warn about on first visit; continue only after confirming that this is your DSH gateway. A public-certificate remote origin should not show a certificate warning. If it does, check the channel and certificate instead of bypassing the warning.
 
@@ -146,20 +173,39 @@ Remote providers may impose bandwidth and connection limits: the [cpolar Free pl
 
 If the page opens but stays on “Reconnecting,” distinguish WebSocket upgrade failures, slow synchronization, and heartbeat deadlines using the [slow-link and reconnection guide](docs/SLOW_CONNECTIONS.en.md). Version 0.5.4 also offers opt-in WebSocket compression per exact path, disabled by default; for long Sessions or metered links, follow the guide and compare actual transfer volume.
 
+| Channel | Prerequisites | Address and limitation |
+| --- | --- | --- |
+| cpolar | Account and Authtoken | An option to try on mainland networks; free temporary URLs may change |
+| cloudflared quick tunnel | No account or domain | Random temporary URL; no SSE, with [notification limits](docs/CLOUDFLARE_TUNNEL.en.md#quick-tunnel-feature-limits) |
+| cloudflared named tunnel | Cloudflare account and domain | Fixed hostname; [setup guide](docs/CLOUDFLARE_TUNNEL.en.md) |
+| Tailscale Funnel | Sign-in and Funnel authorization | May be unreliable on mainland-China networks |
+| Self-hosted FRP | VPS and domain or real public IPv4 | Server maintenance required; [deploy](docs/SELF_HOSTED_FRP.en.md) or [attach to existing frps](docs/ATTACH_EXISTING_FRPS.en.md) |
+| Own reverse proxy | Existing public HTTPS proxy | The plugin provides only its private authenticated backend; [guide](docs/SELF_HOSTED_ORIGIN.en.md) |
+
 <p align="center">
   <img src="https://raw.githubusercontent.com/saya-ch/dsh-mobile/main/assets/screenshots/remote-access-en.png" width="82%" alt="DSH Mobile remote access and provider selection">
 </p>
 
-1. Open **Mobile Access → Remote** in the lower-left corner of DeepSeek Harness and choose a provider:
+1. Open **Mobile Access → Remote** in the lower-left corner of DeepSeek Harness, choose a channel and complete its sign-in or configuration.
+2. Once ready, select **Create remote pairing QR code**. Own reverse proxy reports only **Backend listening**, so verify public HTTPS and WebSocket access as well.
+3. Select **Remote access** in the Android app and scan the current QR code. A publicly trusted certificate also permits pairing from a mobile browser.
+4. Later launches reconnect using the saved address and credential. If a temporary address changes, scan the current computer QR code to verify it. Do not clear app data; the stored device token never goes to a new Origin.
+
+<details>
+<summary>Installation and sign-in for each channel</summary>
+
+After selecting the channel in the panel:
    - **Tailscale Funnel**: select **Enable remote access**, complete the one-time Tailscale sign-in on the official page, follow the panel prompt to allow Funnel, then return to DSH and wait until the connection is ready.
    - **cpolar**: select **Install official component**, sign in to the cpolar dashboard and obtain an Authtoken, paste it, then select **Save and connect**. The component is downloaded into the plugin's private directory only after confirmation; free temporary addresses may change after DSH or cpolar restarts.
    - **Self-hosted FRP (advanced)**: if you have a VPS, expand **Self-hosted connection** and enter its frps details and a public HTTPS domain or real public IPv4 address. Apply the restricted frps + Caddy template manually, or deploy with an SSH key on Ubuntu/Debian with systemd. Password login is unsupported, and the plugin does not overwrite Caddy configuration it does not manage. Verify the VPS host keys against its console before deployment or cleanup. The local `frpc` is downloaded and verified on demand; VPS cleanup is separate. Android app 0.3.3 or later is required. The [self-hosted FRP guide](docs/SELF_HOSTED_FRP.en.md) covers certificates, ports, and the complete procedure.
    - **Own reverse proxy**: open **Self-hosted connection → Own reverse proxy**, enter the public HTTPS origin (custom ports supported), private listen IPv4, separate HTTP backend port (default 3444), and allowed proxy source CIDRs, then select **Save and start backend**. This uses your existing Lucky/Nginx/Caddy without a tunnel component and requires Android app 0.4.0 or later. See the [own reverse proxy guide](docs/SELF_HOSTED_ORIGIN.en.md).
    - **cloudflared quick tunnel**: select **Install official component**. After you confirm, the plugin downloads a pinned build from the official release page into its private directory and requests a temporary public address (a quick tunnel) with **no sign-up or sign-in**. Choose this when you would rather not create an account. The quick-tunnel hostname changes on every reconnect, and Cloudflare positions quick tunnels for testing: they are rate-limited and carry no uptime guarantee, so do not rely on one for production access that must stay reachable; it suits temporary or verification use.
    - **cloudflared named tunnel**: with a Cloudflare account and domain, switch **Tunnel type** to **Named**, then supply a connector token, a public hostname and a local forward port to get an address that survives restarts. The token is stored only in the private directory and reaches cloudflared through the environment rather than the command line; see [Cloudflare named tunnel](docs/CLOUDFLARE_TUNNEL.en.md).
-2. When the panel reports that remote access is ready, select **Create remote pairing QR code**. Own reverse proxy reports only **Backend listening**: public HTTPS, its certificate and WebSocket still require verification from your phone.
-3. In the Android app, open **Remote access** and scan the QR code to create its separate pairing.
-4. The app saves the current address and device credential for automatic reconnection. If a free cpolar address changes, scan the computer's current remote QR code to verify the connection again; clearing app data is unnecessary. A stored device token is sent only to its exact saved Origin, never to a new QR-code domain.
+
+</details>
+
+<details>
+<summary>Remote notifications, server maintenance and security limits</summary>
 
 > **Remote notifications**: browser `Notification` permission is granted per Origin, and a web-page system toast appears only on the device running that page. Android task reminders are a separate 0.4.0 feature: enable them under DSH **Settings → General** in the app, and keep the WebView page alive; they are not a general background push service. For reliable background delivery, use a server-side webhook or bot channel you have configured.
 
@@ -169,7 +215,9 @@ Managed self-hosted FRP uses an HTTP vhost to the DSH loopback gateway. Its plai
 
 The own-proxy HTTP backend must remain on a trusted private network: **never port-forward it publicly or bypass it by proxying to DSH or the existing LAN 3443 gateway**. CIDRs match the proxy's direct TCP peer, not forwarded headers. Preserve the external Host (including port), Origin, cookies and WebSocket. Clearing proxy settings keeps paired remote devices.
 
-The public remote origin still requires DSH device pairing. The bundled Funnel and managed cpolar and cloudflared components support Windows x64 and Linux x64/arm64; cloudflared also supports on-demand installation for macOS x64/arm64. FRP 0.70.1 supports Windows, Linux, and macOS on x64 and arm64. See [Compatibility](#compatibility) for the per-channel OS matrix.
+See [Compatibility](#compatibility) for the supported components and platforms. Locally managed programs, credentials and settings can be removed from the panel; VPS files require separate cleanup through the corresponding guide.
+
+</details>
 
 ## Extend and customize
 
@@ -206,14 +254,15 @@ The examples above, applied:
 
 ## Device management
 
-The Android app shows multiple computers at once in one **Paired computers** list: LAN, cpolar, cloudflared, Tailscale Funnel, and self-hosted FRP pairings together. The first upgrade migrates the legacy LAN and remote credentials without requiring another pairing; an address change merges into a record with the same `instanceId` and keeps its custom name. Self-signed FRP uses its own CA fingerprint as identity, so its first pairing may appear as a separate row from LAN for the same computer. Android Keystore encrypts device tokens and LAN CAs; the 0.4.6 app also encrypts that self-signed entry's pinned remote CA. These values never appear in the list or QR code.
+The Android app lists computers and their LAN/remote records under **Paired computers**. The two authorization types remain separate, so one computer can have two rows. Upgrades migrate old credentials without re-pairing; after a changed address is verified, matching identities merge and keep their names. Self-signed FRP uses a separate CA fingerprint and may create another row. Android Keystore encrypts tokens and pinned CAs. A pairing QR code contains temporary pairing information, never a long-lived device token or CA private key.
 
 Each row shows its custom name, transport, Origin, periodically refreshed reachability, and last connection time. A green dot means **Reachable**; a gray dot means **Checking**, **Temporarily unreachable**, **Pairing expired**, or **Removed on computer**. The check validates the DSH Gateway over HTTPS instead of using ICMP, so a temporary network outage is not mistaken for computer-side revocation.
 
 - **Startup behavior → Open DSH directly** (default): one device connects directly; with multiple devices, the app tries the last-used device first, then the still-valid device with the most recent connection. A bounded connection budget returns to the list instead of spinning forever.
-- **Startup behavior → Show device list**: choose a computer on every launch, which is useful when switching between several machines. The option is in the list's top-right settings button and is saved immediately.
+- **Startup behavior → Show device list**: choose a computer on every launch, which is useful when switching between several machines. Open the list's top-right **Settings → Startup behavior**; changes are saved immediately.
 - Tap a row to connect. The overflow button and long press open the same action sheet for rename, check now, pair again, or delete the local record. Deletion has a second confirmation and a short undo window; undo restores only the local row and never restores a computer-side revocation.
-- Open DSH **Settings → General** in the WebView and select **Switch computer** to return to the paired-device list; this action appears only in the Android app. When an online device receives the computer's revocation notification, the app keeps its row as **Removed on computer**, stops automatic reconnection, and offers **Pair again** or **Delete device**.
+- Open DSH **Settings → General → Switch computer** in the WebView to return to the list. An online computer-side revocation keeps the row as **Removed on computer**, stops reconnection and offers re-pairing or local deletion.
+- **Added in 0.6.0**: fixed order, new computers appended, and migration of the previously visible order. **Move up / Move to top** save the arrangement independently from startup selection. Inside the app, hold the top-left drawer toggle to return to the list; a normal tap still toggles the drawer. Browsers have no such native action.
 
 Revoking a device permanently deletes its durable record and token digest instead of retaining a `revokedAt` tombstone. Startup also removes legacy revoked rows. A deleted token receives `401 authentication_failed`, just like an unknown token. Existing apps checking a device that was revoked while offline may therefore show **Pairing expired** and require pairing again; online Sessions still receive the revocation notification and disconnect immediately.
 
@@ -234,23 +283,26 @@ Revoking a device permanently deletes its durable record and token digest instea
 
 Version 0.5.3 includes the independently switchable `dsh-mobile-question-fixes` component, enabled by default. Disable it in DSH's plugin component list to restore the stock card immediately. Long questions, options, and footer actions share one bounded scroll area, and collapsed titles show up to two lines. Touch Enter retains its newline in phone browsers; the Android app applies this behavior only when its software keyboard is open and no hardware keyboard is connected. DSH continues to own answer drafts, with no additional copy in browser localStorage.
 
-In development for the next release: in touch-primary browsers, plain Enter inserts a newline in the main conversation composer when a draft exists; an empty draft remains a no-op. DSH continues to handle IME composition, open menus and modified shortcuts such as Cmd/Ctrl+Enter. Non-touch desktop behavior is unchanged, but an external keyboard on a touch-primary device also uses plain Enter for newlines.
+DSH Mobile keeps the Workspace, task-management, terminal and file-panel entry points; DSH still loads third-party plugins. The mobile layer adapts layout and access without changing DSH source. A particular plugin's usability on a small screen still depends on its own layout and interactions.
 
-The mobile adaptation keeps DSH's existing Workspace, task-management, terminal, and file-panel entry points instead of isolating third-party plugin content in a separate page. The wide-layout screenshot below shows the Android app in a wide viewport. The app adapts to the available width: phones use drawers and overlays, while wide screens use side-by-side panels; both layouts expose the same features and connection methods. DSH still loads third-party plugins itself—the mobile layer only adapts layout and access, without modifying DeepSeek Harness source.
+A third-party plugin must work in DSH Web and use reachable HTTP/WebSocket interfaces. The mobile layer cannot guarantee a phone layout for every plugin or replace a desktop-native window required by that plugin.
 
-In development for the next release: selecting a panel such as Plugins or Schedules closes the narrow-screen sidebar drawer. A reserved navigation row above the panel provides “Back to conversation” without covering Save or other actions or opening the software keyboard.
+### WebSocket approval
 
-Compatibility and WebSocket rules:
-
-Proxied pages allow HTTP frames for compatibility with some community plugins; those pages are unencrypted and can be altered, and browsers may still block them as mixed content. Use HTTPS for sensitive work. The same warning appears at the top of the remote panel when it is opened over HTTPS.
-
-- Version 0.5.2 no longer blocks installation merely because a DSH version is absent from the peer range; source-contract, isolated pairing, page boot, and Workspace checks have covered `0.2.0-rc.2`. Future releases still require verification. The Mobile administration surface in official DSH Desktop continues to require an authenticated DSH session and does not loosen ordinary Web administration requests.
-- Version 0.5.1 continued contract and boot checks against DSH `0.1.7-alpha.2`, `0.1.7-rc.1`, and `0.1.7-rc.2`, and supported `0.2.0-rc.1`. Official DSH Desktop `0.1.7-rc.2` uses a `dsh-app://app/` page.
 - The gateway allows first-party DSH WebSocket paths by default, including `/sidebar/ws/terminal`. Other paths used by community sidebar plugins are blocked by default and appear in Diagnostics; the `/sidebar/ws/agent-opens` and `/sidebar/ws/agent-terminals` paths in the image are examples that must be reviewed for the actual plugin.
 - In **Connection diagnostics → Third-party WebSocket paths**, select **Allow** only for an exact path you have verified. Query strings and fuzzy prefixes are rejected; **Allow all** is not recommended. Approved paths can be removed at any time, and the same policy applies to LAN and remote connections.
 - Approval only lets that path pass through the authenticated, same-origin DSH Mobile gateway. It does not open arbitrary TCP/UDP ports or bypass device pairing. If a community plugin still fails, check the path recorded by Diagnostics and approve one path at a time.
 
 If another remote-access plugin shows its own “not paired” page inside DSH Mobile, the two authorization systems are separate. Temporarily turn off the other plugin's remote access on the computer to check whether the Mobile path recovers; do not enter a DSH Mobile pairing key on that page. Excluding its client module below does not necessarily remove a request-rewriting script injected before client boot. See [#111](https://github.com/saya-ch/dsh-mobile/issues/111).
+
+Allowing HTTP frames in the gateway does not make every client load them: the content is unencrypted, Android still blocks HTTP mixed content inside HTTPS pages, and browsers may block it too. Prefer HTTPS. The remote panel shows this risk when opened through an HTTPS administration entry.
+
+### Optional modules and advanced configuration
+
+Version 0.6.0 adds [mobile page module settings](docs/CLIENT_MODULES.en.md) for computer defaults and device choices without uninstalling plugins. Changes apply on the next manual open, not an automatic conversation reload; an outdated saved selection offers an explicit recovery action.
+
+<details>
+<summary>Configure excludedClientModules in the profile</summary>
 
 Advanced users can reduce mobile startup traffic by adding exact package ids to `excludedClientModules` in the current profile's `mobile-access` plugin configuration, then restarting DSH. This changes only the dedicated mobile page served through the gateway; desktop and `?frontend=stock` pages are unaffected. If both packages are present in the current boot graph, this example removes document preview and its dependent “Open In…” feature:
 
@@ -261,6 +313,10 @@ excludedClientModules:
 ```
 
 There is no default exclusion list. The plugin rejects unknown or boot-critical modules and modules still referenced through `inject` or `external` by retained entries. If a DSH or community-plugin update invalidates the selection, the mobile page returns `409 excluded_client_modules_invalid` with the conflicting module; the computer also warns so you can adjust or remove the option. Bundle sizes and dependencies change between DSH installations and versions; another user's savings are not a prediction for yours.
+
+Selection priority is device choice → computer defaults → plugin configuration. See the [module guide](docs/CLIENT_MODULES.en.md) for application and recovery rules.
+
+</details>
 
 <table>
   <tr>
@@ -286,7 +342,7 @@ The Android app is a thin Kotlin WebView shell and contains no frontend copy; mo
 
 In 0.5.5, the dedicated mobile page synchronously loads the authenticated, same-origin `/mobile-access/compat.js` before the first DSH boot script. This bundled core-js compatibility layer supplies `Iterator` / Iterator helpers to WebViews that lack them, preventing the startup error `Iterator is not defined`. It uses feature detection to preserve or repair native helpers, needs no CDN, and does not weaken CSP. The desktop and `?frontend=stock` pages do not load this gateway script.
 
-Version 0.5.6 (unreleased) adds feature-detected `Promise.withResolvers` and `AbortSignal.any` implementations to the same pre-boot script. On WebViews that support document-start injection, the Android app also supplies `Promise.withResolvers` early for the paired exact Origin. This covers identified missing APIs, not every old engine; the frontend still targets ES2022, and this version has not been verified on the reported physical Huawei WebView 114 device. If other compatibility errors remain and the device allows updates, update Android System WebView / Chrome first. If the system component cannot be updated, retain the full error, engine version, and entry mode for diagnosis.
+Version 0.6.0 adds feature-detected `Promise.withResolvers` and `AbortSignal.any` implementations to the same pre-boot script. On WebViews that support document-start injection, the Android app also supplies `Promise.withResolvers` early for the paired exact Origin. This covers identified missing APIs, not every old engine; the frontend still targets ES2022, and this version has not been verified on the reported physical Huawei WebView 114 device. If other compatibility errors remain and the device allows updates, update Android System WebView / Chrome first. If the system component cannot be updated, retain the full error, engine version, and entry mode for diagnosis.
 
 > **Community client (unofficial)**: [WeChat Mini-Program client](https://github.com/StrawberryAO/dsh-mobile-minapp)
 > A native WeChat Mini-Program that reuses the Mobile Access pairing and Remote stream protocol (requires dsh-mobile ≥ 0.3.8).
@@ -351,6 +407,13 @@ On macOS, local network, cloudflared, self-hosted FRP and the own reverse proxy 
 | DSH Mobile plugin | Verified DeepSeek Harness version |
 | --- | --- |
 | `0.5.5` | `0.1.7-alpha.2`, `0.1.7-rc.1`, `0.1.7-rc.2`, `0.2.0-rc.1`, and `0.2.0-rc.2` (npm installation, isolated pairing, mobile-page boot, and WebSocket Workspace baseline) |
+| `0.6.0` | `0.1.7-alpha.2`, `0.1.7-rc.1`, `0.1.7-rc.2`, `0.2.0-rc.1` and `0.2.0-rc.2` (packed installation, pairing, mobile-page boot and WebSocket Workspace reads); additional checks cover the mobile composer, module settings and component loading after a normal official Desktop restart |
+
+<details>
+<summary>Historical version checks</summary>
+
+| DSH Mobile plugin | Verified DeepSeek Harness version |
+| --- | --- |
 | `0.5.4` | `0.1.7-alpha.2`, `0.1.7-rc.1`, `0.1.7-rc.2`, `0.2.0-rc.1`, and `0.2.0-rc.2` (npm installation, isolated pairing, mobile-page boot, and WebSocket Workspace baseline) |
 | `0.5.3` | `0.1.7-alpha.2`, `0.1.7-rc.1`, `0.1.7-rc.2`, `0.2.0-rc.1`, and `0.2.0-rc.2` (source contract, npm installation, isolated pairing, mobile-page boot, and WebSocket Workspace baseline) |
 | `0.5.2` | `0.1.7-alpha.2`, `0.1.7-rc.1`, `0.1.7-rc.2`, and `0.2.0-rc.1` (carried forward from earlier verification); `0.2.0-rc.2` (source contract, isolated pairing, mobile-page boot, and WebSocket Workspace baseline) |
@@ -371,9 +434,11 @@ On macOS, local network, cloudflared, self-hosted FRP and the own reverse proxy 
 | `0.3.0`-`0.3.3` | `0.1.2-alpha.1` |
 | `0.1.4`, `0.2.x` | `0.1.1-rc.2` |
 
+</details>
+
 Existing apps (0.3.3 and later) do not need re-pairing. cpolar users should use app 0.3.15 or later because earlier apps may time out before a slow first load over the free route finishes; earlier apps also use a different status-bar strategy. The 0.4.0 app adds the multi-device list, startup behavior, and computer-side revocation status; older apps continue to connect to their saved single device. App 0.1.3 or earlier requires reinstalling and pairing again.
 
-Version 0.5.5 keeps the native pairing and renewal protocol compatible, so normally working older apps can continue connecting. Update to app 0.5.5 (build 75) for rotation state preservation, model-menu Back and revocation-status fixes, while retaining the authentication Cookie corrections from 0.5.4.
+Version 0.6.0 keeps the native pairing and renewal protocol compatible, so normally working older apps can continue connecting. Update to app 0.6.0 (build 76) for icon choices, scanning improvements, device ordering and the switching shortcut, while retaining earlier connection, rotation and authentication fixes.
 
 GitHub Release APKs use a stable signing certificate, so an older official APK with the same signer can be upgraded in place while retaining pairings. A locally built Debug APK with a different signer cannot be overwritten by the official APK; plan to pair again when switching between them.
 
@@ -407,16 +472,6 @@ npm ci
 npm run verify
 ```
 
-After building question-card or mobile-layout changes, run `npx playwright install chromium --only-shell`, `npm run smoke:question-fixes`, and `npm run smoke:native-layout` to check scrolling, keyboard behavior, and geometry using the built client.
+Use `npm run check:docs` for quick documentation checks. [CONTRIBUTING.md](CONTRIBUTING.md) covers behavior-specific browser tests, isolated packed DSH acceptance, captures and release steps; the [Android manual](apps/mobile/README.md#build) covers app builds. Do not substitute real user profiles or official app data for test fixtures.
 
-The real browser-startup smoke uses a temporary DSH home, OS-assigned loopback ports, and Chromium pairing. It neither reads an existing user profile nor sends a model request. Development-branch CI tests DSH `0.1.7-alpha.2`, `0.1.7-rc.1`, `0.1.7-rc.2`, `0.2.0-rc.1`, and `0.2.0-rc.2`; install DSH `0.2.0-rc.2` in a separate directory so it does not replace the plugin's development dependencies:
-
-```powershell
-$dshMobileTestRuntime = Join-Path $env:TEMP 'dsh-mobile-test-runtime'
-npm install --prefix $dshMobileTestRuntime --no-save --package-lock=false @deepseek-ai/dsh@0.2.0-rc.2
-$env:DSH_BOOT_SMOKE_BIN = Join-Path $dshMobileTestRuntime 'node_modules/@deepseek-ai/dsh/lib/bin.js'
-npx playwright install chromium --only-shell
-npm run smoke:dsh-boot
-```
-
-See the [Android guide](https://github.com/saya-ch/dsh-mobile/blob/main/apps/mobile/README.md). Licensed under [Apache-2.0](LICENSE).
+Licensed under [Apache-2.0](LICENSE).
