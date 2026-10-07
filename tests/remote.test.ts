@@ -56,8 +56,9 @@ describe('remote provider selection', () => {
     expect(configuredRemoteProvider({ DSH_MOBILE_REMOTE_PROVIDER: 'frp' })).toBe('frp')
     expect(configuredRemoteProvider({ DSH_MOBILE_REMOTE_PROVIDER: 'cloudflared' })).toBe('cloudflared')
     expect(configuredRemoteProvider({ DSH_MOBILE_REMOTE_PROVIDER: 'origin' })).toBe('origin')
+    expect(configuredRemoteProvider({ DSH_MOBILE_REMOTE_PROVIDER: 'caddy' })).toBe('caddy')
     expect(() => configuredRemoteProvider({ DSH_MOBILE_REMOTE_PROVIDER: 'invalid' }))
-      .toThrow('must be tailscale, cpolar, cloudflared, frp, or origin')
+      .toThrow('must be tailscale, cpolar, cloudflared, frp, origin, or caddy')
 
     const directory = await mkdtemp(join(tmpdir(), 'dsh-mobile-remote-provider-'))
     temporaryDirectories.push(directory)
@@ -75,6 +76,7 @@ describe('remote provider selection', () => {
       cloudflared: new FakeRemoteController(),
       frp: new FakeRemoteController(),
       origin: new FakeRemoteController(),
+      caddy: new FakeRemoteController(),
     }
     const saved: string[] = []
     const coordinator = new RemoteProviderCoordinator('tailscale', controllers, {
@@ -109,6 +111,7 @@ describe('remote provider selection', () => {
       cloudflared: new FakeRemoteController(),
       frp: new FakeRemoteController(),
       origin: new FakeRemoteController(),
+      caddy: new FakeRemoteController(),
     }
     controllers.cpolar.enabled = true
     controllers.origin.enabled = true
