@@ -770,6 +770,110 @@ export function isComposerMediaOriginCurrent(
     && origin.sessionId === current.sessionId
 }
 
+/**
+ * The App action that leaves the page for its paired-computer list. Mirrors the literal the
+ * General-settings row invokes; the gesture below reads the same name from the bridge
+ * capability list, so an App that does not advertise it keeps the stock drawer behavior.
+ */
+export const SWITCH_COMPUTER_NATIVE_ACTION = 'mobile.switch-computer'
+/** The drawer toggle: the whale mark the collapsed header pins into its top-left corner. */
+export const NATIVE_MOBILE_TOGGLE_QUERY = '[data-dsh-mobile-toggle]'
+/** Hold on the drawer toggle that asks the App to list the paired computers. */
+export const SWITCH_COMPUTER_LONG_PRESS_MS = 500
+/** Pointer travel that turns the hold back into a scroll, drag, or drawer swipe. */
+export const SWITCH_COMPUTER_MOVE_TOLERANCE_PX = 14
+/** Keeps the drawer from following the finger Android lifts at the end of a completed hold. */
+export const SWITCH_COMPUTER_CLICK_SUPPRESSION_MS = 1200
+
+interface SwitchComputerHoldOptions {
+  readonly now: () => number
+  readonly setTimer: (callback: () => void, delayMs: number) => number
+  readonly clearTimer: (handle: number) => void
+  /** Whether this App build advertises the paired-computer list action. */
+  readonly canSwitchComputer: () => Promise<boolean> | boolean
+  /** Ask the App to open its paired-computer list. */
+  readonly switchComputer: () => void
+}
+
+export interface SwitchComputerHold {
+  /** Arm a hold; a new press replaces any earlier one. */
+  start(x: number, y: number): void
+  /** Pointer travel beyond the tolerance turns the hold into ordinary navigation. */
+  move(x: number, y: number): void
+  /** Release or cancel: stop the timer, and keep a fired hold's click suppression. */
+  end(): void
+  /** Consume the suppression window for the click Android synthesizes after a hold. */
+  consumeClickSuppression(detail: number): boolean
+  /** Whether a long-press menu belongs to this gesture instead of the toggle. */
+  blocksContextMenu(): boolean
+  dispose(): void
+}
+
+/**
+ * Hold policy for the collapsed header's drawer toggle. The App owns the paired-computer
+ * list, so a hold only acts once the bridge advertises the action; every other press keeps
+ * the stock toggle. DOM events stay in the installer so this policy stays testable.
+ */
+export function createSwitchComputerHold(options: SwitchComputerHoldOptions): SwitchComputerHold {
+  let hold: { readonly x: number; readonly y: number; timer: number; fired: boolean } | undefined
+  let supported = false
+  let probing = false
+  let suppressClickUntil = 0
+  let firedAt = 0
+
+  const probeSupport = (): void => {
+    if (supported || probing) return
+    probing = true
+    void Promise.resolve().then(options.canSwitchComputer).then(value => {
+      probing = false
+      if (value) supported = true
+    }, () => { probing = false })
+  }
+
+  const stopTimer = (): void => {
+    if (hold === undefined) return
+    options.clearTimer(hold.timer)
+    hold = undefined
+  }
+
+  const fire = (current: { timer: number; fired: boolean }): void => {
+    if (hold !== current || current.fired || !supported) return
+    current.fired = true
+    firedAt = options.now()
+    suppressClickUntil = firedAt + SWITCH_COMPUTER_CLICK_SUPPRESSION_MS
+    options.switchComputer()
+  }
+
+  return {
+    start: (x, y) => {
+      stopTimer()
+      suppressClickUntil = 0
+      firedAt = 0
+      probeSupport()
+      const current = { x, y, timer: 0, fired: false }
+      current.timer = options.setTimer(() => fire(current), SWITCH_COMPUTER_LONG_PRESS_MS)
+      hold = current
+    },
+    move: (x, y) => {
+      if (hold === undefined || hold.fired) return
+      if (Math.abs(x - hold.x) > SWITCH_COMPUTER_MOVE_TOLERANCE_PX
+        || Math.abs(y - hold.y) > SWITCH_COMPUTER_MOVE_TOLERANCE_PX) stopTimer()
+    },
+    end: stopTimer,
+    consumeClickSuppression: detail => {
+      if (detail === 0 || suppressClickUntil === 0 || options.now() > suppressClickUntil) return false
+      suppressClickUntil = 0
+      return true
+    },
+    blocksContextMenu: () => firedAt !== 0 && options.now() - firedAt <= SWITCH_COMPUTER_CLICK_SUPPRESSION_MS,
+    dispose: () => {
+      stopTimer()
+      suppressClickUntil = 0
+      firedAt = 0
+    },
+  }
+}
+
 /** Add mobile semantics without replacing feature trees. */
 export function installNativeMobileSurface(backServices: NativeMobileBackServices): () => void {
   document.documentElement.classList.add('dsh-native-mobile-active')
@@ -820,6 +924,51 @@ export function installNativeMobileSurface(backServices: NativeMobileBackService
   }
   document.addEventListener('pointerdown', onPointerDown, true)
   document.addEventListener('keydown', onKeyDown, true)
+  const switchComputerHold = createSwitchComputerHold({
+    now: () => window.performance.now(),
+    setTimer: (callback, delayMs) => window.setTimeout(callback, delayMs),
+    clearTimer: handle => { window.clearTimeout(handle) },
+    canSwitchComputer: async () => {
+      const bridge = window.__DSH_MOBILE_NATIVE__
+      if (bridge === undefined) return false
+      try {
+        return (await bridge.capabilities()).includes(SWITCH_COMPUTER_NATIVE_ACTION)
+      } catch {
+        return false
+      }
+    },
+    switchComputer: () => {
+      const bridge = window.__DSH_MOBILE_NATIVE__
+      if (bridge === undefined) return
+      void Promise.resolve().then(() => bridge.invoke(SWITCH_COMPUTER_NATIVE_ACTION, {})).catch(() => undefined)
+    },
+  })
+  const isDrawerToggleTarget = (target: EventTarget | null): boolean =>
+    target instanceof Element && target.closest(NATIVE_MOBILE_TOGGLE_QUERY) !== null
+  const onTogglePointerDown = (event: PointerEvent): void => {
+    if (!event.isPrimary || !isDrawerToggleTarget(event.target)) return
+    switchComputerHold.start(event.clientX, event.clientY)
+  }
+  const onTogglePointerMove = (event: PointerEvent): void => {
+    switchComputerHold.move(event.clientX, event.clientY)
+  }
+  const onTogglePointerEnd = (): void => { switchComputerHold.end() }
+  const onToggleClickCapture = (event: MouseEvent): void => {
+    if (!isDrawerToggleTarget(event.target) || !switchComputerHold.consumeClickSuppression(event.detail)) return
+    event.preventDefault()
+    event.stopPropagation()
+  }
+  const onToggleContextMenu = (event: Event): void => {
+    if (!isDrawerToggleTarget(event.target) || !switchComputerHold.blocksContextMenu()) return
+    event.preventDefault()
+    event.stopPropagation()
+  }
+  document.addEventListener('pointerdown', onTogglePointerDown, true)
+  document.addEventListener('pointermove', onTogglePointerMove, true)
+  document.addEventListener('pointerup', onTogglePointerEnd, true)
+  document.addEventListener('pointercancel', onTogglePointerEnd, true)
+  document.addEventListener('click', onToggleClickCapture, true)
+  document.addEventListener('contextmenu', onToggleContextMenu, true)
   // The scrim is drawer chrome: it belongs on screen only while the overlay
   // query matches. A resize crosses that breakpoint without touching the DOM
   // the observer below watches, so the query wakes the same sync pass itself.
@@ -1471,6 +1620,13 @@ export function installNativeMobileSurface(backServices: NativeMobileBackService
     historyScroller?.removeEventListener('scroll', onHistoryScroll)
     document.removeEventListener('pointerdown', onPointerDown, true)
     document.removeEventListener('keydown', onKeyDown, true)
+    document.removeEventListener('pointerdown', onTogglePointerDown, true)
+    document.removeEventListener('pointermove', onTogglePointerMove, true)
+    document.removeEventListener('pointerup', onTogglePointerEnd, true)
+    document.removeEventListener('pointercancel', onTogglePointerEnd, true)
+    document.removeEventListener('click', onToggleClickCapture, true)
+    document.removeEventListener('contextmenu', onToggleContextMenu, true)
+    switchComputerHold.dispose()
     document.removeEventListener('click', animateNavigation)
     backdrop.remove()
     document.documentElement.classList.remove('dsh-native-mobile-active')
