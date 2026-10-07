@@ -43,9 +43,15 @@ internal data class PairedDeviceRecord(
 internal class PairedDeviceStore(context: Context) {
     private val preferences = context.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
 
-    /** Return all valid rows in stable last-used order. */
-    fun load(): List<PairedDeviceRecord> = decode(preferences.getString(PAYLOAD_KEY, null))
-        .sortedWith(compareByDescending<PairedDeviceRecord> { it.lastConnectedAt ?: Long.MIN_VALUE }.thenBy { it.key })
+    /**
+     * Return all valid rows in their stored order, which is the order the list displays.
+     *
+     * Connecting to a computer must not move its row; rows append when they are paired, and only
+     * [moveUp] and [moveToTop] rearrange them. Startup selection stays with
+     * `ConnectionRestorePolicy`, which prefers the saved key and otherwise the most recent
+     * connection, so "the computer I used last" remains the default.
+     */
+    fun load(): List<PairedDeviceRecord> = PairedDeviceOrderPolicy.displayOrder(decode(preferences.getString(PAYLOAD_KEY, null)))
 
     /** Whether the store has completed the legacy-slot migration marker. */
     fun isMigrationComplete(): Boolean = preferences.getBoolean(MIGRATION_KEY, false)
@@ -88,6 +94,21 @@ internal class PairedDeviceStore(context: Context) {
         val removed = rows.removeIf { it.key == key }
         if (!removed) return false
         save(rows)
+        return true
+    }
+
+    /** Move one row one position towards the front of the fixed display order. */
+    fun moveUp(key: String): Boolean = reorder { PairedDeviceOrderPolicy.moveUp(it, key) }
+
+    /** Move one row to the front of the fixed display order. */
+    fun moveToTop(key: String): Boolean = reorder { PairedDeviceOrderPolicy.moveToTop(it, key) }
+
+    /** Persist a new row order; a transform that leaves every key in place writes nothing. */
+    private fun reorder(transform: (List<PairedDeviceRecord>) -> List<PairedDeviceRecord>): Boolean {
+        val rows = load()
+        val reordered = transform(rows)
+        if (reordered.map { it.key } == rows.map { it.key }) return false
+        save(reordered)
         return true
     }
 
