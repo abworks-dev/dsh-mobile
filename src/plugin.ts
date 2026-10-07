@@ -70,6 +70,9 @@ import { createFrpAttachTemplate } from './frp-attach.js'
 import { createFrpAttachPlan } from './frp-attach-plan.js'
 import { defaultProbeDiscovery, FrpController } from './frp.js'
 import { ensureFrpIngressCertificate, frpIngressPaths, frpIngressSelfCheck, purgeFrpIngressCertificates, type FrpIngressCertificate } from './frp-ingress.js'
+import { CaddyComponentManager, type CaddyComponentStatus } from './caddy-component.js'
+import { CaddyConfigStore, caddyCredentialEnvironment } from './caddy-config.js'
+import { CaddyController } from './caddy.js'
 import { OriginConfigStore, parseOriginSettings, validateOriginListenPort, type OriginConfigurationStatus, type OriginSettings } from './origin-proxy-config.js'
 import { OriginController } from './origin-proxy.js'
 import { PluginReleaseManager, releaseProfileDirectory } from './release-update.js'
@@ -418,6 +421,7 @@ function remoteControlPayload(
   frpComponent: FrpComponentStatus,
   frpConfiguration: FrpConfigurationStatus,
   originConfiguration: OriginConfigurationStatus,
+  caddyComponentStatus: CaddyComponentStatus,
 ): Record<string, unknown> {
   return {
     provider,
@@ -456,6 +460,7 @@ function remoteControlPayload(
         running: providerStatuses.origin.enabled,
         state: providerStatuses.origin.state,
         configuration: originConfiguration,
+        component: caddyComponentStatus,
       },
     },
   }
@@ -506,6 +511,10 @@ export async function apply(ctx: Context, config: PluginConfig): Promise<void> {
   await frpConfig.initialize()
   const originConfig = new OriginConfigStore(join(remoteDirectory, 'origin', 'config'))
   await originConfig.initialize()
+  const caddyComponent = new CaddyComponentManager({ stateDirectory })
+  await caddyComponent.initialize()
+  const caddyConfig = new CaddyConfigStore(stateDirectory)
+  await caddyConfig.initialize()
   const cloudflaredTunnel = new CloudflaredTunnelStore(join(remoteDirectory, 'cloudflared'))
   await cloudflaredTunnel.initialize()
   const unregisterBuiltin = mobileAccess.registerExtension({
@@ -671,11 +680,22 @@ export async function apply(ctx: Context, config: PluginConfig): Promise<void> {
     }
     return candidate
   }
+  const createOriginGatewayWithPort = (publicOrigin: string, listenPort: number): Promise<MobileAccessGateway> => {
+    const settings = originConfig.settings()
+    if (settings === undefined) throw new Error('origin_settings_missing')
+    const resolved = originGatewayConfig(template, { ...settings, publicOrigin }, remoteDeviceFile, instanceId, listenPort)
+    const candidate = new MobileAccessGateway(
+      resolved, new JsonDeviceStore(resolved.stateFile, resolved.maxDevices), mobileAccess,
+      upstreamLoginUrl, webSocketPaths, blockedUpgradePaths,
+    )
+    return candidate.start().then(() => candidate, error => { void candidate.close(); throw error })
+  }
   const tailscaleStore = new JsonMobileAccessControlStore(join(remoteDirectory, 'control.json'), false)
   const cpolarStore = new JsonMobileAccessControlStore(join(remoteDirectory, 'cpolar', 'control.json'), false)
   const cloudflaredStore = new JsonMobileAccessControlStore(join(remoteDirectory, 'cloudflared', 'control.json'), false)
   const frpStore = new JsonMobileAccessControlStore(join(remoteDirectory, 'frp', 'control.json'), false)
   const originStore = new JsonMobileAccessControlStore(join(remoteDirectory, 'origin', 'control.json'), false)
+const caddyStore = new JsonMobileAccessControlStore(join(remoteDirectory, 'caddy', 'control.json'), false)
   const remoteControllers: Record<RemoteProvider, RemoteProviderController> = {
     tailscale: new FunnelController({
       store: tailscaleStore,
@@ -715,6 +735,18 @@ export async function apply(ctx: Context, config: PluginConfig): Promise<void> {
       },
     }),
     origin: new OriginController({ store: originStore, config: originConfig, createGateway: createOriginGateway }),
+    caddy: new CaddyController({
+      store: caddyStore,
+      executable: caddyComponent.executable,
+      caddyfile: caddyConfig.caddyfile,
+      publicOrigin: () => caddyConfig.settings()?.publicOrigin,
+      credentialEnvironment: () => {
+        const settings = caddyConfig.settings()
+        const credentials = caddyConfig.credentials()
+        return settings === undefined || credentials === undefined ? {} : caddyCredentialEnvironment(settings.dnsProvider, credentials)
+      },
+      createGateway: (publicOrigin, listenPort) => createOriginGatewayWithPort(publicOrigin, listenPort),
+    }),
   }
   const remoteProviders = new RemoteProviderCoordinator(initialRemoteProvider, remoteControllers, remoteProviderStore)
   const remoteController = () => remoteProviders.controller()
@@ -734,6 +766,7 @@ export async function apply(ctx: Context, config: PluginConfig): Promise<void> {
       cloudflared: remoteControllers.cloudflared.status(),
       frp: remoteControllers.frp.status(),
       origin: remoteControllers.origin.status(),
+      caddy: remoteControllers.caddy.status(),
     },
     cpolarComponent.status(),
     cloudflaredComponent.status(),
@@ -741,6 +774,7 @@ export async function apply(ctx: Context, config: PluginConfig): Promise<void> {
     frpComponent.status(),
     frpConfig.status(),
     originConfig.status(),
+    caddyComponent.status(),
   )
   const lanPayload = (): Record<string, unknown> => ({
     ...(loaded.kind === 'unconfigured' ? {
@@ -981,6 +1015,43 @@ export async function apply(ctx: Context, config: PluginConfig): Promise<void> {
           await remoteProviders.mutate(async () => {
             await remoteControllers.cloudflared.setEnabled(false)
             await cloudflaredComponent.purge()
+          })
+          sendJson(response, 200, remotePayload(), false)
+          return
+        }
+        if (request.method === 'POST' && target.decodedPathname === `${LOCAL_ADMIN_PREFIX}/remote/caddy/component/install`) {
+          const body = await readJsonObject(request, 4096)
+          if (body.confirm !== true) throw new HttpError(400, 'bad_request')
+          logger.info('caddy component install started')
+          try {
+            await remoteProviders.mutate(async () => caddyComponent.install())
+            logger.info('caddy component install completed')
+          } catch (error) {
+            logger.error('caddy component install failed: %s', error instanceof Error ? error.stack ?? error.message : String(error))
+            throw error
+          }
+          sendJson(response, 200, remotePayload(), false)
+          return
+        }
+        if (request.method === 'POST' && target.decodedPathname === `${LOCAL_ADMIN_PREFIX}/remote/caddy/settings`) {
+          const body = await readJsonObject(request, 8192)
+          await remoteProviders.mutate(async () => {
+            await caddyConfig.configure(body.settings, stateDirectory)
+            if (body.secretId !== undefined && body.secretKey !== undefined) {
+              await caddyConfig.configureCredentials({ secretId: body.secretId, secretKey: body.secretKey })
+            }
+            await remoteControllers.caddy.reconnect()
+          })
+          sendJson(response, 200, remotePayload(), false)
+          return
+        }
+        if (request.method === 'POST' && target.decodedPathname === `${LOCAL_ADMIN_PREFIX}/remote/caddy/component/purge`) {
+          const body = await readJsonObject(request, 4096)
+          if (body.confirm !== true) throw new HttpError(400, 'bad_request')
+          await remoteProviders.mutate(async () => {
+            await remoteControllers.caddy.setEnabled(false)
+            await caddyComponent.purge()
+            await caddyConfig.purge()
           })
           sendJson(response, 200, remotePayload(), false)
           return
@@ -1266,6 +1337,7 @@ export async function apply(ctx: Context, config: PluginConfig): Promise<void> {
         cloudflared: cloudflaredStore,
         frp: frpStore,
         origin: originStore,
+        caddy: caddyStore,
       }
       await Promise.all((Object.keys(stores) as RemoteProvider[])
         .filter(provider => provider !== remoteProviders.selected)

@@ -1177,6 +1177,38 @@ function installControl(): { remove: () => void; toggle: () => void; isOpen: () 
   const originCopyBackend = element('button', 'dsh-mobile-control__secondary'); originCopyBackend.type = 'button'; originCopyBackend.textContent = t('originCopyBackend')
   originBackend.append(originBackendLabel, originBackendAddress, originCopyBackend)
   originSetup.append(originSetupTitle, originHelp, originWarning, originFields, originFeedback, originFormActions, originBackend)
+  originBackend.append(originBackendLabel, originBackendAddress, originCopyBackend)
+  const caddyModeRow = element('div', 'dsh-mobile-control__origin-fields')
+  const caddyModeManagedLabel = element('label', 'dsh-mobile-control__field')
+  const caddyModeManaged = element('input'); caddyModeManaged.type = 'radio'; caddyModeManaged.name = 'caddy-mode'; caddyModeManaged.value = 'managed'
+  const caddyModeExternalLabel = element('label', 'dsh-mobile-control__field')
+  const caddyModeExternal = element('input'); caddyModeExternal.type = 'radio'; caddyModeExternal.name = 'caddy-mode'; caddyModeExternal.value = 'external'
+  caddyModeManagedLabel.append(caddyModeManaged, document.createTextNode(t('caddyModeManaged')))
+  caddyModeExternalLabel.append(caddyModeExternal, document.createTextNode(t('caddyModeExternal')))
+  caddyModeRow.append(caddyModeManagedLabel, caddyModeExternalLabel)
+  const caddyForm = element('div', 'dsh-mobile-control__origin-fields'); caddyForm.hidden = true
+  const caddyDomainLabel = element('label', 'dsh-mobile-control__field'); caddyDomainLabel.textContent = t('caddyDomain')
+  const caddyDomain = element('input'); caddyDomain.type = 'url'; caddyDomain.placeholder = 'https://phone.example.com:8443'; caddyDomain.maxLength = 512; caddyDomain.autocomplete = 'off'; caddyDomain.spellcheck = false
+  const caddyProviderLabel = element('label', 'dsh-mobile-control__field'); caddyProviderLabel.textContent = t('caddyDnsProvider')
+  const caddyProvider = element('select')
+  const caddyProviderOption = document.createElement('option'); caddyProviderOption.value = 'tencentcloud'; caddyProviderOption.textContent = 'Tencent Cloud DNSPod'
+  caddyProvider.append(caddyProviderOption)
+  const caddySecretIdLabel = element('label', 'dsh-mobile-control__field'); caddySecretIdLabel.textContent = t('caddySecretId')
+  const caddySecretId = element('input'); caddySecretId.type = 'password'; caddySecretId.autocomplete = 'off'; caddySecretId.spellcheck = false
+  const caddySecretKeyLabel = element('label', 'dsh-mobile-control__field'); caddySecretKeyLabel.textContent = t('caddySecretKey')
+  const caddySecretKey = element('input'); caddySecretKey.type = 'password'; caddySecretKey.autocomplete = 'off'; caddySecretKey.spellcheck = false
+  const caddyPortLabel = element('label', 'dsh-mobile-control__field'); caddyPortLabel.textContent = t('caddyListenPort')
+  const caddyPort = element('input'); caddyPort.type = 'number'; caddyPort.inputMode = 'numeric'; caddyPort.min = '1024'; caddyPort.max = '65535'; caddyPort.step = '1'; caddyPort.value = '8443'
+  caddyDomainLabel.append(caddyDomain); caddyProviderLabel.append(caddyProvider); caddySecretIdLabel.append(caddySecretId); caddySecretKeyLabel.append(caddySecretKey); caddyPortLabel.append(caddyPort)
+  caddyForm.append(caddyDomainLabel, caddyProviderLabel, caddySecretIdLabel, caddySecretKeyLabel, caddyPortLabel)
+  const caddyInstall = element('button', 'dsh-mobile-control__primary'); caddyInstall.type = 'button'; caddyInstall.textContent = t('caddyInstall')
+  const caddyInstallNote = element('p', 'dsh-mobile-control__component-note'); caddyInstallNote.textContent = t('caddyInstallNote')
+  const caddyStatus = element('p', 'dsh-mobile-control__component-status'); caddyStatus.hidden = true
+  const caddySave = element('button', 'dsh-mobile-control__primary'); caddySave.type = 'button'; caddySave.textContent = t('caddySaveConnect'); caddySave.hidden = true
+  const caddyPurgeButton = element('button', 'dsh-mobile-control__danger'); caddyPurgeButton.type = 'button'; caddyPurgeButton.textContent = t('caddyPurge'); caddyPurgeButton.hidden = true
+  const caddyFeedback = element('p', 'dsh-mobile-control__origin-feedback'); caddyFeedback.setAttribute('role', 'status'); caddyFeedback.setAttribute('aria-live', 'polite'); caddyFeedback.hidden = true
+  caddyForm.append(caddyInstallNote, caddyInstall, caddyStatus, caddySave, caddyPurgeButton, caddyFeedback)
+  originSetup.append(caddyModeRow, caddyForm)
   const tailscaleInfo = element('details', 'dsh-mobile-control__details')
   const tailscaleInfoSummary = element('summary'); tailscaleInfoSummary.textContent = t('tailscaleHelp')
   const tailscaleInfoBody = element('div', 'dsh-mobile-control__details-body')
@@ -1424,6 +1456,22 @@ function installControl(): { remove: () => void; toggle: () => void; isOpen: () 
   let originConfigured = false
   let originFormDirty = false
   let originFormBusy = false
+  let caddyFormBusy = false
+  let caddyModeManagedSelected = false
+  const showCaddyFeedback = (message: string, isError = false): void => {
+    caddyFeedback.textContent = message
+    caddyFeedback.classList.toggle('is-error', isError)
+    caddyFeedback.hidden = false
+  }
+  const setCaddyFormBusy = (busy: boolean): void => {
+    caddyFormBusy = busy
+    caddyInstall.setAttribute('aria-busy', String(busy))
+    caddySave.setAttribute('aria-busy', String(busy))
+    for (const input of [caddyDomain, caddySecretId, caddySecretKey, caddyPort]) input.disabled = busy || remoteProviderBusy
+    caddyInstall.disabled = busy || remoteProviderBusy
+    caddySave.disabled = busy || remoteProviderBusy
+    caddyPurgeButton.disabled = busy || remoteProviderBusy
+  }
   let remoteSnapshotEpoch = 0
   let latestRemoteState: Record<string, unknown> = {}
   let frpInstalled = false
@@ -1940,6 +1988,24 @@ function installControl(): { remove: () => void; toggle: () => void; isOpen: () 
     originBackendLabel.textContent = originListening ? t('originBackendListening') : t('originBackendSaved')
     originBackendAddress.textContent = backendOrigin
     originCopyBackend.disabled = remoteProviderBusy || backendOrigin === ''
+    const caddyComponentInfo = originProvider.component as Record<string, unknown> | undefined
+    const caddyInstalled = caddyComponentInfo !== undefined && caddyComponentInfo.installed === true
+    const caddySupported = caddyComponentInfo !== undefined && caddyComponentInfo.supported === true
+    caddyModeRow.hidden = !origin
+    caddyForm.hidden = !(origin && caddyModeManagedSelected)
+    caddyInstall.hidden = caddyInstalled
+    caddySave.hidden = !caddyInstalled
+    caddyPurgeButton.hidden = !caddyInstalled
+    caddyStatus.hidden = !(origin && caddyInstalled)
+    if (caddyInstalled && origin) caddyStatus.textContent = t('caddyReady')
+    caddyModeManaged.checked = caddyModeManagedSelected
+    caddyModeExternal.checked = !caddyModeManagedSelected
+    if (!caddyFormBusy) {
+      caddyDomain.value = typeof originConfiguration.publicOrigin === 'string' ? originConfiguration.publicOrigin : ''
+      caddyPort.value = '8443'
+    }
+    caddyInstall.disabled = remoteProviderBusy || !caddySupported || caddyInstalled
+    for (const input of [caddyDomain, caddyProvider, caddySecretId, caddySecretKey, caddyPort]) input.disabled = remoteProviderBusy
     selfHostedBadge.textContent = origin
       ? originListening ? t('originBackendReady') : t('advanced')
       : frpConfigured && frpInstalled ? t('ready') : t('advanced')
@@ -2748,7 +2814,52 @@ function installControl(): { remove: () => void; toggle: () => void; isOpen: () 
       originFeedback.hidden = true
     })
   }
-  originConfigure.addEventListener('click', () => {
+  const syncCaddyModeVisibility = (): void => {
+    caddyModeManagedSelected = caddyModeManaged.checked
+    caddyForm.hidden = !(originChoice.getAttribute('aria-pressed') === 'true' && caddyModeManagedSelected)
+  }
+  caddyModeManaged.addEventListener('change', syncCaddyModeVisibility)
+  caddyModeExternal.addEventListener('change', syncCaddyModeVisibility)
+  caddyInstall.addEventListener('click', () => {
+    if (remoteProviderBusy) return
+    setCaddyFormBusy(true)
+    showCaddyFeedback(t('checkingComponent'))
+    void controlRequestJson('/api/mobile-access/remote/caddy/component/install', { method: 'POST', body: JSON.stringify({ confirm: true }) })
+      .then(data => { renderRemote(data); showCaddyFeedback(t('caddyReady')) }, error => showCaddyFeedback(error instanceof Error ? error.message : String(error), true))
+      .finally(() => { setCaddyFormBusy(false); loadRemote() })
+  })
+  caddySave.addEventListener('click', () => {
+    if (remoteProviderBusy) return
+    clearOriginValidation()
+    for (const input of [caddyDomain, caddySecretId, caddySecretKey, caddyPort]) {
+      if (!input.reportValidity()) return
+    }
+    const body = {
+      settings: {
+        version: 1,
+        publicOrigin: caddyDomain.value.trim(),
+        dnsProvider: caddyProvider.value,
+        listenPort: Number(caddyPort.value),
+      },
+      secretId: caddySecretId.value.trim(),
+      secretKey: caddySecretKey.value.trim(),
+    }
+    setCaddyFormBusy(true)
+    showCaddyFeedback(t('saving'))
+    void controlRequestJson('/api/mobile-access/remote/caddy/settings', { method: 'POST', body: JSON.stringify(body) })
+      .then(() => controlRequestJson('/api/mobile-access/remote/control', { method: 'POST', body: JSON.stringify({ running: true }) }))
+      .then(data => { renderRemote(data); if (data.state === 'error') showCaddyFeedback(String(data.errorCode ?? 'caddy_error'), true) }, error => showCaddyFeedback(error instanceof Error ? error.message : String(error), true))
+      .finally(() => { setCaddyFormBusy(false); loadRemote() })
+  })
+  caddyPurgeButton.addEventListener('click', () => {
+    if (remoteProviderBusy) return
+    setCaddyFormBusy(true)
+    void controlRequestJson('/api/mobile-access/remote/caddy/component/purge', { method: 'POST', body: JSON.stringify({ confirm: true }) })
+      .then(data => { renderRemote(data) }, error => showCaddyFeedback(error instanceof Error ? error.message : String(error), true))
+      .finally(() => { setCaddyFormBusy(false); loadRemote() })
+  })
+
+  originConfigure.addEventListener('click', () => {
     if (remoteProviderBusy || remoteProvider !== 'origin') return
     clearOriginValidation()
     for (const input of [originPublic, originHost, originPort, originCidrs]) {
