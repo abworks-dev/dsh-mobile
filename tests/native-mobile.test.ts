@@ -200,10 +200,11 @@ describe('native mobile presentation', () => {
     expect(NATIVE_MOBILE_STYLES).toContain('.dsh-mobile-settings_selector')
     expect(NATIVE_MOBILE_STYLES).toContain('.dsh-mobile-settings_selector:focus-visible')
     expect(NATIVE_MOBILE_STYLES).toContain('min-height:48px !important')
-    expect(NATIVE_MOBILE_STYLES).toContain('[data-dsh-mobile-composer-row] { display:grid !important; grid-template-columns:minmax(0,1fr) !important')
-    expect(NATIVE_MOBILE_STYLES).toContain('[data-dsh-mobile-composer-tools]:not([hidden]) { display:flex !important; flex-wrap:wrap !important')
-    expect(NATIVE_MOBILE_STYLES).toContain('[data-dsh-mobile-composer-trailing] { display:flex !important; flex-wrap:nowrap !important; width:100% !important')
-    expect(NATIVE_MOBILE_STYLES).toContain('[data-dsh-mobile-composer-model] { flex:1 1 44px !important')
+    expect(NATIVE_MOBILE_STYLES).toContain('[data-dsh-mobile-composer-row] { display:flex !important; flex-wrap:wrap !important')
+    expect(NATIVE_MOBILE_STYLES).toContain('[data-dsh-mobile-composer-tools]:not([hidden]) { display:flex !important; flex:0 1 auto !important; flex-wrap:wrap !important; width:auto !important')
+    expect(NATIVE_MOBILE_STYLES).toContain('[data-dsh-mobile-composer-trailing] { display:flex !important; flex:1 0 100px !important; flex-wrap:nowrap !important; width:auto !important')
+    expect(NATIVE_MOBILE_STYLES).toContain('[data-dsh-mobile-composer-trailing]:has(> button[class*="_primary"] ~ button[class*="_primary"]) { flex-basis:144px !important; min-width:min(100%,144px) !important; }')
+    expect(NATIVE_MOBILE_STYLES).toContain('[data-dsh-mobile-composer-model] { flex:0 1 auto !important')
     expect(NATIVE_MOBILE_STYLES).toContain('[data-dsh-mobile-composer-model-label] { flex:1 1 auto !important; max-width:none !important')
     expect(NATIVE_MOBILE_STYLES).toContain('[data-dsh-mobile-history-loader] button:not(:disabled)')
     expect(NATIVE_MOBILE_STYLES).toContain('[data-dsh-mobile-history-loader] button:disabled')
@@ -212,6 +213,15 @@ describe('native mobile presentation', () => {
     expect(NATIVE_MOBILE_STYLES).toContain('[class*="_rowActions"] button { flex:none !important; width:auto !important; min-width:44px !important')
     expect(NATIVE_MOBILE_STYLES).toContain('white-space:nowrap !important; word-break:keep-all !important; writing-mode:horizontal-tb !important')
     expect(NATIVE_MOBILE_STYLES).toContain('[data-variant="think"]) { margin-bottom:12px !important; }')
+  })
+
+  it('caps only the draft scrollport when the narrow focused viewport is short', () => {
+    expect(NATIVE_MOBILE_STYLES).toContain('@media (max-width:720px) and (max-height:500px)')
+    expect(NATIVE_MOBILE_STYLES).toContain('[data-dsh-mobile-center] [data-composer-card] > [data-input-scroll] { max-height:72px !important; overflow-y:auto !important; }')
+    expect(NATIVE_MOBILE_STYLES).toContain('@media (max-width:720px) and (max-height:400px)')
+    expect(NATIVE_MOBILE_STYLES).toContain('[data-dsh-mobile-center] [data-composer-card] { gap:8px !important; }')
+    expect(NATIVE_MOBILE_STYLES).toContain('[data-dsh-mobile-center] [data-composer-card] > [data-input-scroll] { max-height:48px !important; }')
+    expect(NATIVE_MOBILE_STYLES).not.toContain('[data-dsh-mobile-composer-row] { display:grid')
   })
 
   it('spaces the message column through the shared flow gap so folded seats cost nothing', () => {

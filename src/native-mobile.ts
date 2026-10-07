@@ -226,21 +226,30 @@ export const NATIVE_MOBILE_STYLES = `
   /* Stock Send/Queue/Steer and Stop keep their handlers and disabled state. */
   [data-dsh-mobile-composer-row] button { min-width:44px !important; min-height:44px !important; touch-action:manipulation; }
   [data-dsh-mobile-composer-row] button[class*="_primary"] { min-width:44px !important; flex-shrink:0 !important; }
-  /* A reserved trailing row keeps primary actions reachable when standard
-     extension slots add controls; no contribution is moved or reimplemented. */
-  [data-dsh-mobile-composer-row] { display:grid !important; grid-template-columns:minmax(0,1fr) !important; align-items:center !important; gap:4px 8px !important; min-width:0 !important; max-width:100% !important; }
-  [data-dsh-mobile-composer-tools]:not([hidden]) { display:flex !important; flex-wrap:wrap !important; width:100% !important; min-width:0 !important; max-width:100% !important; gap:6px !important; }
+  /* Keep ordinary controls on one row. The trailing group reserves room for
+     its model and primary buttons; extra tools wrap only when space is short. */
+  [data-dsh-mobile-composer-row] { display:flex !important; flex-wrap:wrap !important; align-items:center !important; gap:4px 8px !important; min-width:0 !important; max-width:100% !important; }
+  [data-dsh-mobile-composer-tools]:not([hidden]) { display:flex !important; flex:0 1 auto !important; flex-wrap:wrap !important; width:auto !important; min-width:0 !important; max-width:100% !important; gap:6px !important; }
   [data-dsh-mobile-composer-tools] > *,[data-dsh-mobile-composer-tools] > [data-slot] > * { min-width:0 !important; max-width:100% !important; }
   [data-dsh-mobile-composer-tools] button { white-space:normal !important; overflow-wrap:anywhere !important; }
-  [data-dsh-mobile-composer-trailing] { display:flex !important; flex-wrap:nowrap !important; width:100% !important; min-width:0 !important; max-width:100% !important; gap:6px !important; margin-left:0 !important; justify-content:flex-end !important; }
-  [data-dsh-mobile-composer-controls]:not([hidden]) { display:flex !important; flex:1 1 0 !important; flex-wrap:wrap !important; min-width:0 !important; max-width:100% !important; gap:6px !important; }
+  [data-dsh-mobile-composer-trailing] { display:flex !important; flex:1 0 100px !important; flex-wrap:nowrap !important; width:auto !important; min-width:min(100%,100px) !important; max-width:100% !important; gap:6px !important; margin-left:0 !important; justify-content:flex-end !important; }
+  [data-dsh-mobile-composer-trailing]:has(> button[class*="_primary"] ~ button[class*="_primary"]) { flex-basis:144px !important; min-width:min(100%,144px) !important; }
+  [data-dsh-mobile-composer-controls]:not([hidden]) { display:flex !important; flex:1 1 0 !important; flex-wrap:wrap !important; justify-content:flex-end !important; min-width:0 !important; max-width:100% !important; gap:6px !important; }
   [data-dsh-mobile-composer-controls] > *,[data-dsh-mobile-composer-controls] > [data-slot] > * { min-width:0 !important; max-width:100% !important; }
   [data-dsh-mobile-composer-controls] button { white-space:normal !important; overflow-wrap:anywhere !important; }
-  [data-dsh-mobile-composer-model] { flex:1 1 44px !important; width:auto !important; min-width:44px !important; max-width:100% !important; }
+  [data-dsh-mobile-composer-model] { flex:0 1 auto !important; width:auto !important; min-width:44px !important; max-width:100% !important; }
   [data-dsh-mobile-composer-model-trigger] { box-sizing:border-box !important; width:100% !important; max-width:100% !important; min-width:0 !important; padding-left:6px !important; padding-right:4px !important; }
   [data-dsh-mobile-composer-model-label] { flex:1 1 auto !important; max-width:none !important; min-width:0 !important; overflow:hidden !important; text-overflow:ellipsis !important; white-space:nowrap !important; }
   [data-dsh-mobile-center] [class*="_root"]:has(> [class*="_card"] textarea) { box-sizing:border-box !important; width:100% !important; padding:0 0 8px !important; }
   [data-dsh-mobile-center] [class*="_root"]:has(> [class*="_card"] textarea) > [class=""]:last-child { display:none !important; }
+}
+@media (max-width:720px) and (max-height:500px) {
+  /* An open software keyboard leaves less room for the focused draft. */
+  html.dsh-native-mobile-active [data-dsh-mobile-center] [data-composer-card] > [data-input-scroll] { max-height:72px !important; overflow-y:auto !important; }
+}
+@media (max-width:720px) and (max-height:400px) {
+  [data-dsh-mobile-center] [data-composer-card] { gap:8px !important; }
+  html.dsh-native-mobile-active [data-dsh-mobile-center] [data-composer-card] > [data-input-scroll] { max-height:48px !important; }
 }
 @keyframes dsh-mobile-fade-in { from { opacity:0; } }
 @keyframes dsh-mobile-panel-in { from { opacity:.72; transform:translateY(6px); } }
