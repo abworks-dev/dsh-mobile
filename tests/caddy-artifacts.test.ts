@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { execFileText } from '../src/exec-file.js'
+import { CADDY_COMPONENT_RELEASES } from '../src/caddy-component.js'
 import { afterEach, describe, expect, it } from 'vitest'
 
 const inputHelpers = await import(new URL('../scripts/caddy-component-build-inputs.mjs', import.meta.url).href)
@@ -13,7 +14,7 @@ const roots: string[] = []
 afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }) })
 
 function fixture(platform = 'win32') {
-  const binary = Buffer.from('pinned-test-bytes')
+  const binary = Buffer.from('pinned-test-byte')
   const deps = ['caddy', 'tencentcloud'].map(name => ({ Path: lock.sources[name].path, Version: lock.sources[name].version, Sum: lock.sources[name].sum }))
   const build = { GoVersion: lock.toolchain, Main: { Path: 'caddy' }, Deps: deps,
     Settings: Object.entries({ '-buildmode': 'exe', '-compiler': 'gc', '-trimpath': 'true', CGO_ENABLED: '0',
@@ -145,6 +146,11 @@ describe('review component artifact binding', () => {
     const index = JSON.parse(await readFile(join(output, 'COMPONENT-RELEASE.json'), 'utf8'))
     expect(Object.keys(index.binaryAssets).sort()).toEqual(['linux-x64', 'win32-x64'])
     expect(index.productionCatalogEnabled).toBe(false)
+    const verifyArgs = ['--directory', output, '--repository', 'abworks-dev/dsh-mobile',
+      '--tag', 'caddy-component-2.11.6-tencentcloud-0.4.3-review.1', '--commit', 'c'.repeat(40),
+      '--run-id', '123', '--run-attempt', '1', '--candidate-output', join(wrapper, 'candidate.json')]
+    // Must reject mismatched provenance BEFORE any GitHub lookup or public asset request.
+    await expect(cli('verify-caddy-release.mjs', verifyArgs)).rejects.toThrow('Downloaded release identity mismatch')
     const original = await readFile(join(output, 'SHA256SUMS'))
     await expect(cli('prepare-caddy-release.mjs', args)).rejects.toThrow()
     expect(await readFile(join(output, 'SHA256SUMS'))).toEqual(original)
@@ -159,6 +165,115 @@ describe('review component artifact binding', () => {
     await mkdir(join(input, 'foreign-target'))
     await expect(cli('prepare-caddy-release.mjs', args)).rejects.toThrow('both native platform')
   })
+  it('executes the published verifier offline against all 16 assets and adversarial API/public bytes', async () => {
+    const wrapper = await mkdtemp(join(tmpdir(), 'caddy-verifier-execution-')); roots.push(wrapper)
+    const input = join(wrapper, 'input'); await mkdir(input)
+    for (const platform of ['linux', 'win32']) {
+      const proved = await provedFixture(platform)
+      expect(proved.data.binary.length).toBe(16) // Never execute these synthetic bytes.
+      await cp(proved.root, join(input, 'managed-caddy-review-' + platform + '-x64'), { recursive: true })
+    }
+    const directory = join(wrapper, 'prepared')
+    const repository = 'abworks-dev/dsh-mobile'
+    const tag = 'caddy-component-2.11.6-tencentcloud-0.4.3-review.1'
+    const commit = 'b'.repeat(40)
+    await cli('prepare-caddy-release.mjs', ['--input-dir', input, '--output-dir', directory,
+      '--repository', repository, '--tag', tag, '--commit', commit, '--run-id', '123', '--run-attempt', '1'])
+    const index = JSON.parse(await readFile(join(directory, 'COMPONENT-RELEASE.json'), 'utf8'))
+    const names = [...Object.keys(index.assets), 'COMPONENT-RELEASE.json', 'SHA256SUMS'].sort()
+    expect(names).toHaveLength(16)
+    const assets: Record<string, { base64: string; size: number; sha256: string }> = {}
+    for (const name of names) {
+      const bytes = await readFile(join(directory, name))
+      assets[name] = { base64: bytes.toString('base64'), size: bytes.length, sha256: sha256(bytes) }
+    }
+    const token = 'synthetic-caddy-review-token-not-a-secret'
+    const apiUrls = [`https://api.github.com/repos/${repository}/releases/tags/${encodeURIComponent(tag)}`,
+      `https://api.github.com/repos/${repository}/commits/${encodeURIComponent(tag)}`]
+    const publicUrl = (name: string) => `https://github.com/${repository}/releases/download/${tag}/${name}`
+    const redirectUrl = (name: string) => `https://release-assets.githubusercontent.com/test/${name}?signed=synthetic`
+    const productionBefore = await readFile(fileURLToPath(new URL('../src/caddy-component.ts', import.meta.url)))
+    const cases: [string, string | undefined][] = [
+      ['valid', undefined], ['preexisting-output', 'EEXIST'],
+      ...['wrong-commit', 'moved-commit', 'draft', 'non-prerelease', 'wrong-tag', 'missing-asset', 'extra-asset', 'duplicate-asset']
+        .map(mode => [mode, 'Published prerelease identity mismatch'] as [string, string]),
+      ...['bad-binary-digest', 'bad-binary-size', 'bad-binary-url', 'tampered-sidecar-digest']
+        .map(mode => [mode, 'GitHub published asset metadata mismatch'] as [string, string]),
+      ['corrupt-public-binary', 'Published HTTPS download hash mismatch'],
+      ['corrupt-public-sidecar', 'Published HTTPS download hash mismatch'],
+      ['untrusted-redirect', 'caddy_download_redirect_rejected'],
+      ...['release', 'commit'].flatMap(endpoint => ['401', '403', '500', 'network'].map(status =>
+        [`api-${endpoint}-${status}`, status === 'network' ? 'synthetic API network failure' : `GitHub release identity lookup failed: ${status}`] as [string, string])),
+    ]
+    for (const [mode, failure] of cases) {
+      const candidate = join(wrapper, `candidate-${mode}.json`)
+      const config = join(wrapper, `fetch-${mode}.json`)
+      const trace = join(wrapper, `trace-${mode}.jsonl`)
+      await writeFile(trace, '')
+      await writeFile(config, JSON.stringify({ repository, tag, commit, assets, mode, trace }))
+      if (mode === 'preexisting-output') await writeFile(candidate, 'do-not-overwrite\n')
+      // Explicit allowlist: no inherited GH_TOKEN, NODE_OPTIONS, profile, or API override.
+      const env: NodeJS.ProcessEnv = { GH_TOKEN: token, CADDY_TEST_FETCH_INPUT: config }
+      for (const key of ['SystemRoot', 'WINDIR', 'PATH', 'TEMP', 'TMP']) if (process.env[key]) env[key] = process.env[key]
+      let stdout = ''; let stderr = ''; let rejection: Error | undefined
+      try {
+        ({ stdout, stderr } = await execFileText(process.execPath, [
+          '--import', new URL('./helpers/caddy-release-fetch-preload.mjs', import.meta.url).href,
+          fileURLToPath(new URL('../scripts/verify-caddy-release.mjs', import.meta.url)),
+          '--directory', directory, '--repository', repository, '--tag', tag, '--commit', commit,
+          '--run-id', '123', '--run-attempt', '1', '--candidate-output', candidate,
+        ], { env, timeout: 5_000, maxBuffer: 256 * 1024 }))
+      } catch (error) {
+        rejection = error as Error
+        const streams = error as { stdout?: string; stderr?: string }
+        stdout = streams.stdout ?? ''; stderr = streams.stderr ?? ''
+      }
+      expect(stdout + stderr + (rejection?.message ?? ''), mode).not.toContain(token)
+      const requests: { url: string; redirect: string; authorization: boolean }[] =
+        (await readFile(trace, 'utf8')).trim().split('\n').filter(Boolean).map(line => JSON.parse(line))
+      expect(requests.length, mode).toBeGreaterThan(0)
+      for (const request of requests) {
+        const api = apiUrls.includes(request.url)
+        expect(request.authorization, mode).toBe(api)
+        expect(request.redirect, mode).toBe(api || request.url.startsWith('https://release-assets.') ? 'error' : 'manual')
+      }
+      if (failure) {
+        expect(rejection, mode).toBeDefined()
+        expect(stderr + rejection?.message, mode).toContain(failure)
+        expect(stdout, mode).not.toContain('verifiedPublishedPrerelease')
+        if (mode === 'preexisting-output') expect(await readFile(candidate, 'utf8')).toBe('do-not-overwrite\n')
+        else await expect(readFile(candidate), mode).rejects.toMatchObject({ code: 'ENOENT' })
+        // Consistent API metadata with corrupted bytes must reach the actual public downloader/hash verdict.
+        if (mode.startsWith('corrupt-public-')) {
+          const name = names.find(name => mode.endsWith('binary') ? name.endsWith('-linux-x64') : name.endsWith('.modules.txt'))!
+          expect(requests.map(request => request.url), mode).toContain(redirectUrl(name))
+        }
+      } else {
+        expect(rejection, mode).toBeUndefined()
+        expect(JSON.parse(stdout)).toEqual({ verifiedPublishedPrerelease: true, targets: ['linux-x64', 'win32-x64'], productionCatalogEnabled: false })
+        const result = JSON.parse(await readFile(candidate, 'utf8'))
+        expect(result).toMatchObject({ schemaVersion: 1, kind: 'review-candidate-not-production', repository, tag, sourceCommit: commit,
+          runId: '123', runAttempt: '1', productionCatalogEnabled: false })
+        expect(Object.keys(result.artifacts).sort()).toEqual(['linux-x64', 'win32-x64'])
+        for (const target of ['linux-x64', 'win32-x64']) {
+          const entry = index.binaryAssets[target]
+          expect(result.artifacts[target]).toEqual({ version: entry.version, dnsPluginVersion: entry.dnsPluginVersion,
+            platform: entry.platform, arch: entry.arch, executableName: entry.executableName, downloadUrl: publicUrl(entry.name),
+            downloadBytes: assets[entry.name]!.size, executableBytes: assets[entry.name]!.size,
+            downloadSha256: assets[entry.name]!.sha256, executableSha256: assets[entry.name]!.sha256 })
+        }
+      }
+      if (mode === 'valid' || mode === 'preexisting-output') {
+        expect(requests).toEqual([
+          ...apiUrls.map(url => ({ url, redirect: 'error', authorization: true })),
+          ...names.flatMap(name => [{ url: publicUrl(name), redirect: 'manual', authorization: false },
+            { url: redirectUrl(name), redirect: 'error', authorization: false }]),
+        ])
+      }
+    }
+    expect(CADDY_COMPONENT_RELEASES).toEqual({})
+    expect(await readFile(fileURLToPath(new URL('../src/caddy-component.ts', import.meta.url)))).toEqual(productionBefore)
+  }, 30_000)
   it.runIf(process.platform !== 'win32')('refuses symlinked metadata rather than reading its target', async () => {
     const { root } = await diskFixture()
     const outside = join(root, 'outside.json')

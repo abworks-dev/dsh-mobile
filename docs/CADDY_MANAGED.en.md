@@ -34,6 +34,26 @@ Stopping access or changing provider waits for Caddy and Gateway termination, re
 
 ## Maintainer build and validation
 
-`scripts/build-caddy-component.mjs` fixes Go 1.26.6, xcaddy v0.4.7, Caddy v2.11.6, and the Tencent Cloud DNS module v0.4.3. It generates the executable, exact size and SHA-256, version/module records, and licenses for embedded dependencies. `caddy-component.yml` produces review artifacts only: no Release creation, production pin changes, or automatic publication.
+The [builder](<../scripts/build-caddy-component.mjs>) fixes Go 1.26.6, xcaddy v0.4.7, Caddy v2.11.6 and Tencent Cloud DNS v0.4.3. The [input lock](<../scripts/caddy-component-lock.json>) freezes source revisions and compiled dependency versions/checksums. Each build uses fresh private compiler AND module caches, normal Go checksum verification, source-origin checks and retained-module verification. Unknown dependencies, replacements, wrong native settings or compiler versions fail closed before executing the generated Caddy.
 
-The public custom-download endpoint returned v2.11.7 when v2.11.6 was requested; a dynamic latest endpoint cannot serve as a fixed-version artifact. Before enabling production installation, publish reviewed builds at immutable versioned URLs and populate the production verification table. All platforms remain disabled until then. Isolated tests use ephemeral loopback listeners and a test CA that is not installed in the system trust store to verify TLS, pairing authentication, raw API bytes, and WebSockets. They do not establish real DNS-01 issuance or public-route readiness.
+Use the exact Go compiler (optionally through `GO_BINARY`); output directories must be new and absolute:
+
+```sh
+node scripts/build-caddy-component.mjs --output-dir /absolute/new/first
+node scripts/build-caddy-component.mjs --output-dir /absolute/new/second
+node scripts/compare-caddy-builds.mjs --first /absolute/new/first --second /absolute/new/second --target linux-x64
+```
+
+Windows uses native absolute paths and `--target win32-x64`. Reproducibility means identical executable bytes/size/SHA-256, not identical OS images or every rendered metadata/license file. The [workflow](<../.github/workflows/caddy-component.yml>) natively builds twice on Windows/Linux x64, validates complete evidence and tests the actually installed binary with an independent manifest. Tests cover real default inspection/promotion, no-redownload restart, corrupt-download rollback, TLS/pairing/API/WSS, durable device credentials and stopped-process owned cleanup while neighboring/pairing data survives. Other targets remain unreviewed.
+
+PR and normal dispatch runs are read-only review-artifact builds. Only an explicit manual opt-in on an existing `caddy-component-2.11.6-tencentcloud-0.4.3-review.N` tag in the authorized `abworks-dev/dsh-mobile` fork can publish a **TEST prerelease**, after both native jobs pass:
+
+```sh
+gh workflow run caddy-component.yml --repo abworks-dev/dsh-mobile --ref caddy-component-2.11.6-tencentcloud-0.4.3-review.1 -f publish_review_prerelease=true
+```
+
+Component tags never start with `v`, avoiding the plugin release trigger. The separate write-permission job refuses occupied releases, creates a non-latest draft prerelease without asset clobbering, verifies an authenticated download of every draft asset against prepared bytes, then publishes. Assets include platform-distinct raw executables, manifests, build/module/version/license records, double-build proof, source-commit/run identity and SHA256SUMS. The [verifier](<../scripts/verify-caddy-release.mjs>) checks **every published asset** through GitHub metadata and the actual installer's HTTPS/validated-redirect downloader before emitting a review-only catalog. A failed post-publication check leaves the labelled prerelease public, fails the job and emits no catalog; it does not silently delete or roll back a release. Artifact retention is 14 days; release assets are separate.
+
+The public custom-download endpoint returned v2.11.7 when v2.11.6 was requested; dynamic latest downloads are not a trust source. Versioned GitHub URLs can still be replaced by repository owners: exact reviewed byte/hash pins, not URL spelling or a remotely supplied checksum alone, define the content boundary. A fork catalog is only a review candidate; it never automatically populates the [production table](<../src/caddy-component.ts>). Official production installation stays disabled until maintainers publish and review their own distribution.
+
+Isolated tests use ephemeral loopback listeners and a private internal CA with `skip_install_trust`; no system trust, production DNS or existing proxy is changed. They **do not establish public DNS-01/ACME issuance or public-route readiness**. Those need a separately authorized dedicated test hostname, least-privilege DNS credentials and actual reachable ingress.

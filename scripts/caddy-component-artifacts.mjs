@@ -93,6 +93,17 @@ export async function readArtifact(directory, target, requireReproducibility = f
   if (JSON.stringify(actualNames) !== JSON.stringify([...names].sort())) throw new Error('Unexpected Caddy artifact files')
   const files = new Map()
   for (const name of names) files.set(name, await regularBytes(directory, name, name === binaryName ? 128 * 1024 * 1024 : 8 * 1024 * 1024))
+  return verifyArtifactFiles(files, target, requireReproducibility)
+}
+
+/** Validate the same complete evidence after platform-prefixed release assets are mapped to local names. */
+export function verifyArtifactFiles(files, target, requireReproducibility = false) {
+  if (!TARGETS.includes(target)) throw new Error('Unreviewed Caddy artifact target')
+  const binaryName = target === 'win32-x64' ? 'caddy.exe' : 'caddy'
+  const names = [...METADATA, binaryName, ...(requireReproducibility ? ['reproducibility.json'] : [])]
+  if (JSON.stringify([...files.keys()].sort()) !== JSON.stringify(names.sort()) || [...files.values()].some(value => !Buffer.isBuffer(value))) {
+    throw new Error('Unexpected Caddy artifact files')
+  }
   const manifest = JSON.parse(files.get('manifest.json').toString('utf8'))
   const build = JSON.parse(files.get('go-build.json').toString('utf8'))
   verifyArtifact(manifest, build, files.get(binaryName), target)
