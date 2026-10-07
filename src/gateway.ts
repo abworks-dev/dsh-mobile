@@ -2518,8 +2518,9 @@ export class MobileAccessGateway {
 
   /**
    * Proxy one request upstream. Pass-through client bundles (`GET /plugins`)
-   * receive bounded transient retries — the upstream resets a fraction of fresh
-   * connections — matching the resilience the merged-batch assembly already has.
+   * and static assets (`GET /assets`) receive bounded transient retries — the
+   * upstream resets a fraction of fresh connections — matching the resilience
+   * the merged-batch assembly already has.
    * A request is only retried before any byte reached the client.
    */
   private async proxyHttp(
@@ -2528,7 +2529,8 @@ export class MobileAccessGateway {
     authorization: SessionAuthorization,
   ): Promise<void> {
     const retryable = request.method === 'GET'
-      && request.url?.split('?', 1)[0]?.startsWith('/plugins/') === true
+      && (request.url?.split('?', 1)[0]?.startsWith('/plugins/') === true
+        || request.url?.split('?', 1)[0]?.startsWith('/assets/') === true)
     if (!retryable) {
       try {
         await this.proxyHttpOnce(request, response, authorization)

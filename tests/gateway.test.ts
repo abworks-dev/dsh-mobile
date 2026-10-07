@@ -1361,6 +1361,41 @@ describe('HTTP gateway', () => {
     expect(passthroughObservations).toEqual(['GET', 'GET'])
   })
 
+  it('retries a transient upstream reset when proxying a hashed asset', async () => {
+    let resetNext = true
+    const assetObservations: string[] = []
+    const inner = createServer((incoming, response) => {
+      if (incoming.url === '/assets/index-5SrrfWpU.js' && incoming.method === 'GET') {
+        assetObservations.push('GET')
+        if (resetNext) {
+          resetNext = false
+          incoming.socket.destroy()
+          return
+        }
+        const body = 'globalThis.__loadedAsset = true;\n'
+        response.writeHead(200, { 'content-type': 'text/javascript', 'content-length': Buffer.byteLength(body) })
+        response.end(body)
+        return
+      }
+      response.writeHead(404)
+      response.end()
+    })
+    const port = await listen(inner)
+    cleanups.push(() => closeServer(inner))
+    const instance = await gateway(port)
+    const paired = await pair(instance)
+    const headers = {
+      ...browserHeaders(instance),
+      accept: '*/*',
+      cookie: `${SESSION_COOKIE}=${paired.session}`,
+    }
+
+    const asset = await request(instance.address().port, '/assets/index-5SrrfWpU.js', { headers })
+    expect(asset.status).toBe(200)
+    expect(asset.body).toContain('__loadedAsset = true')
+    expect(assetObservations).toEqual(['GET', 'GET'])
+  })
+
   it('keeps the DSH 0.1.2 browser-auth cookie inside the authenticated mobile gateway', async () => {
     const inner = await upstream('batched', true)
     const authenticatedUrl = `http://127.0.0.1:${String(inner.port)}/?token=${UPSTREAM_LAUNCH_TOKEN}`
