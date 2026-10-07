@@ -7,6 +7,7 @@ import android.graphics.drawable.GradientDrawable
 import android.hardware.Camera
 import android.os.Bundle
 import android.view.Gravity
+import android.view.ScaleGestureDetector
 import android.view.SurfaceHolder
 import android.view.SurfaceView
 import android.view.View
@@ -14,11 +15,15 @@ import android.widget.FrameLayout
 import android.widget.ImageButton
 import android.widget.TextView
 import android.widget.Toast
+import kotlin.math.abs
 
 /**
  * Full-screen QR scanner for the low-friction pairing path. Uses the legacy
  * android.hardware.Camera API plus ZXing so the shell stays free of AndroidX
  * dependencies; the CAMERA permission is requested by MainActivity before launch.
+ *
+ * The preview is laid out aspect-fill (uniform scale, center crop) so it never looks
+ * squeezed on tall screens, and supports pinch zoom plus double-tap to toggle 1x/2x.
  */
 class ScanActivity : Activity(), SurfaceHolder.Callback {
     private var camera: Camera? = null
@@ -29,10 +34,17 @@ class ScanActivity : Activity(), SurfaceHolder.Callback {
     private var finished = false
     private lateinit var preview: SurfaceView
 
+    // Zoom state: maxRatio comes from the device's own zoom table when it publishes one.
+    private var maxZoomIndex = 0
+    private var maxZoomRatio = PreviewLayoutPolicy.DEFAULT_MAX_ZOOM_RATIO
+    private var zoomRatios: List<Int>? = null
+    private var zoomRatio = 1f
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(buildInterface())
         preview.holder.addCallback(this)
+        installGestures()
     }
 
     override fun onResume() {
@@ -50,11 +62,67 @@ class ScanActivity : Activity(), SurfaceHolder.Callback {
         openCamera()
     }
 
-    override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) = Unit
+    override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
+        // Reapply the aspect-fill frame on size changes (rotation, folding, resize).
+        applyPreviewFrame(width, height)
+    }
 
     override fun surfaceDestroyed(holder: SurfaceHolder) {
         previewReady = false
         releaseCamera()
+    }
+
+    private fun installGestures() {
+        val scaleDetector = ScaleGestureDetector(
+            this,
+            object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
+                override fun onScale(detector: ScaleGestureDetector): Boolean {
+                    applyZoom(zoomRatio * detector.scaleFactor)
+                    return true
+                }
+            },
+        )
+        preview.setOnTouchListener { _, event ->
+            scaleDetector.onTouchEvent(event)
+            if (!scaleDetector.isInProgress) detectorDoubleTap(event) else false
+        }
+    }
+
+    private var lastTapTime = 0L
+    private var lastTapX = 0f
+    private var lastTapY = 0f
+
+    private fun detectorDoubleTap(event: android.view.MotionEvent): Boolean {
+        if (event.actionMasked != android.view.MotionEvent.ACTION_UP) return false
+        val now = event.eventTime
+        val quick = now - lastTapTime < TAP_TIMEOUT_MS
+        val near = abs(event.x - lastTapX) < DOUBLE_TAP_SLOP_PX &&
+            abs(event.y - lastTapY) < DOUBLE_TAP_SLOP_PX
+        if (quick && near) {
+            lastTapTime = 0L
+            applyZoom(if (zoomRatio > 1.5f) 1f else 2f)
+            return true
+        }
+        lastTapTime = now
+        lastTapX = event.x
+        lastTapY = event.y
+        return false
+    }
+
+    /** Applies a zoom ratio within device limits via the legacy camera zoom parameter. */
+    private fun applyZoom(desired: Float) {
+        val cam = camera ?: return
+        val clamped = PreviewLayoutPolicy.clampZoomRatio(desired, maxZoomRatio)
+        if (abs(clamped - zoomRatio) < ZOOM_EPSILON) return
+        val params = cam.parameters ?: return
+        val index = PreviewLayoutPolicy.zoomIndexFor(clamped, maxZoomIndex, zoomRatios)
+        if (params.isZoomSupported && index != params.zoom) {
+            params.zoom = index
+            runCatching {
+                cam.parameters = params
+                zoomRatio = clamped
+            }
+        }
     }
 
     private fun buildInterface(): View {
@@ -128,26 +196,50 @@ class ScanActivity : Activity(), SurfaceHolder.Callback {
             } else if (supported != null && supported.contains(Camera.Parameters.FOCUS_MODE_AUTO)) {
                 params.focusMode = Camera.Parameters.FOCUS_MODE_AUTO
             }
-            // Explicitly pick a preview size close to 720p; unset previewSize can be null.
+            // Choose the preview size whose aspect matches this screen so aspect-fill
+            // crops the least; the previous fixed 720p choice squeezed the picture.
             val sizes = params.supportedPreviewSizes
-            val size = if (sizes != null && sizes.isNotEmpty()) {
-                sizes.minByOrNull { kotlin.math.abs(it.width - 1280) + kotlin.math.abs(it.height - 720) } ?: sizes[0]
-            } else {
-                null
-            }
-            if (size == null) throw IllegalStateException("camera has no preview size")
+                ?.map { PreviewLayoutPolicy.Size(it.width, it.height) }
+                .orEmpty()
+            val size = PreviewLayoutPolicy.choosePreviewSize(sizes, preview.width.coerceAtLeast(1), preview.height.coerceAtLeast(1))
+                ?: params.previewSize?.let { PreviewLayoutPolicy.Size(it.width, it.height) }
+                ?: throw IllegalStateException("camera has no preview size")
             params.setPreviewSize(size.width, size.height)
+
+            // Remember the device's zoom capabilities for double-tap and pinch zoom.
+            maxZoomIndex = if (params.isZoomSupported) params.maxZoom else 0
+            zoomRatios = params.zoomRatios?.toList()
+            maxZoomRatio = PreviewLayoutPolicy.maxZoomRatio(zoomRatios)
+            zoomRatio = 1f
+
             cam.parameters = params
             previewWidth = size.width
             previewHeight = size.height
             cam.setDisplayOrientation(90)
             cam.setPreviewDisplay(preview.holder)
+            applyPreviewFrame(preview.width, preview.height)
             cam.setPreviewCallback { data, _ -> onPreviewFrame(data) }
             cam.startPreview()
         } catch (error: Exception) {
             releaseCamera()
             runOnUiThread { Toast.makeText(this, R.string.camera_unavailable, Toast.LENGTH_LONG).show() }
             finish()
+        }
+    }
+
+    /** Lays the surface-frame-independent preview out as center-crop aspect fill. */
+    private fun applyPreviewFrame(surfaceWidth: Int, surfaceHeight: Int) {
+        if (previewWidth <= 0 || previewHeight <= 0) return
+        val frame = PreviewLayoutPolicy.previewFrame(surfaceWidth, surfaceHeight, previewWidth, previewHeight)
+        val lp = preview.layoutParams as? FrameLayout.LayoutParams ?: return
+        if (lp.leftMargin != frame[0] || lp.topMargin != frame[1] ||
+            lp.width != frame[2] || lp.height != frame[3]
+        ) {
+            lp.leftMargin = frame[0]
+            lp.topMargin = frame[1]
+            lp.width = frame[2]
+            lp.height = frame[3]
+            preview.layoutParams = lp
         }
     }
 
@@ -176,5 +268,8 @@ class ScanActivity : Activity(), SurfaceHolder.Callback {
 
     companion object {
         const val EXTRA_QR_RESULT = "qr_result"
+        private const val TAP_TIMEOUT_MS = 300L
+        private const val DOUBLE_TAP_SLOP_PX = 100
+        private const val ZOOM_EPSILON = 0.01f
     }
 }
