@@ -135,6 +135,8 @@
     <string name="device_action_repair">重新配对</string>
     <string name="device_action_edit">编辑名称</string>
     <string name="device_action_check">立即检测</string>
+    <string name="device_action_move_up">上移</string>
+    <string name="device_action_move_top">置顶</string>
     <string name="device_action_delete">删除设备</string>
     <string name="edit_device_name">编辑设备名称</string>
     <string name="device_name_hint">例如：工作电脑</string>

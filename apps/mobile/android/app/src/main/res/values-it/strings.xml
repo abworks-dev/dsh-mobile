@@ -137,6 +137,8 @@
     <string name="device_action_repair">Abbina di nuovo</string>
     <string name="device_action_edit">Modifica nome</string>
     <string name="device_action_check">Controlla ora</string>
+    <string name="device_action_move_up">Sposta su</string>
+    <string name="device_action_move_top">Sposta in cima</string>
     <string name="device_action_delete">Rimuovi dispositivo</string>
     <string name="edit_device_name">Modifica nome dispositivo</string>
     <string name="device_name_hint">Ad esempio: Computer di lavoro</string>

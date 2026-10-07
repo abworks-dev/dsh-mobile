@@ -669,25 +669,39 @@ class MainActivity : Activity() {
     }
 
     private fun showDeviceActions(snapshot: PairedDeviceRecord) {
-        val device = pairedDeviceStore.load().firstOrNull { it.key == snapshot.key } ?: return
+        val devices = pairedDeviceStore.load()
+        val device = devices.firstOrNull { it.key == snapshot.key } ?: return
         val needsRepair = device.status == PairedDeviceStatus.REVOKED
             || device.status == PairedDeviceStatus.EXPIRED
             || device.status == PairedDeviceStatus.ADDRESS_CHANGED
+        // The list keeps a fixed order, so these two actions are the only way to arrange it. They
+        // appear only where they change something: the first row can neither move up nor go to the
+        // top, and the second row has nothing left to jump over.
+        val actions = mutableListOf<Pair<String, () -> Unit>>()
+        actions.add(getString(if (needsRepair) R.string.device_action_repair else R.string.device_action_connect) to {
+            if (needsRepair) repairPairedDevice(device) else connectPairedDevice(device)
+        })
+        actions.add(getString(R.string.device_action_edit) to { editDeviceName(device) })
+        actions.add(getString(R.string.device_action_check) to {
+            pairedDeviceStore.update(device.key, PairedDeviceStatusPolicy::beginCheck)
+            showDeviceList()
+        })
+        if (PairedDeviceOrderPolicy.canMoveUp(devices, device.key)) {
+            actions.add(getString(R.string.device_action_move_up) to {
+                pairedDeviceStore.moveUp(device.key)
+                showDeviceList()
+            })
+        }
+        if (PairedDeviceOrderPolicy.canMoveToTop(devices, device.key)) {
+            actions.add(getString(R.string.device_action_move_top) to {
+                pairedDeviceStore.moveToTop(device.key)
+                showDeviceList()
+            })
+        }
+        actions.add(getString(R.string.device_action_delete) to { confirmDeleteDevice(device) })
         AlertDialog.Builder(this)
             .setTitle(device.displayName)
-            .setItems(arrayOf(
-                getString(if (needsRepair) R.string.device_action_repair else R.string.device_action_connect),
-                getString(R.string.device_action_edit),
-                getString(R.string.device_action_check),
-                getString(R.string.device_action_delete),
-            )) { _, which ->
-                when (which) {
-                    0 -> if (needsRepair) repairPairedDevice(device) else connectPairedDevice(device)
-                    1 -> editDeviceName(device)
-                    2 -> { pairedDeviceStore.update(device.key, PairedDeviceStatusPolicy::beginCheck); showDeviceList() }
-                    3 -> confirmDeleteDevice(device)
-                }
-            }
+            .setItems(actions.map { it.first }.toTypedArray()) { _, which -> actions[which].second() }
             .setNegativeButton(R.string.cancel, null)
             .show()
     }

@@ -136,6 +136,8 @@
     <string name="device_action_repair">Pair again</string>
     <string name="device_action_edit">Edit name</string>
     <string name="device_action_check">Check now</string>
+    <string name="device_action_move_up">Move up</string>
+    <string name="device_action_move_top">Move to top</string>
     <string name="device_action_delete">Delete device</string>
     <string name="edit_device_name">Edit device name</string>
     <string name="device_name_hint">For example, Work computer</string>
