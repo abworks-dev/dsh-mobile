@@ -173,10 +173,20 @@
     <string name="icon_settings">App icon</string>
     <string name="icon_settings_saved">App icon updated. Some launchers may take a moment to refresh.</string>
     <string name="icon_choice_whale_girl">DSH whale mascot</string>
-    <string name="icon_choice_official_whale">Official whale (blue)</string>
-    <string name="icon_choice_official_whale_dark">Official whale (navy)</string>
-    <string name="icon_choice_official_whale_teal">Official whale (teal)</string>
-    <string name="icon_choice_official_whale_mono">Official whale (grey)</string>
-    <string name="icon_choice_official_whale_black">Official whale (black)</string>
-    <string name="icon_choice_official_whale_white">Official whale (white)</string>
+    <string name="icon_choice_official_whale">DeepSeek whale (blue)</string>
+    <string name="icon_choice_official_whale_dark">DeepSeek whale (navy)</string>
+    <string name="icon_choice_official_whale_teal">DeepSeek whale (teal)</string>
+    <string name="icon_choice_official_whale_mono">DeepSeek whale (grey)</string>
+    <string name="icon_choice_official_whale_black">DeepSeek whale (black)</string>
+    <string name="icon_choice_official_whale_white">DeepSeek whale (white)</string>
+    <string name="device_list_settings">Settings</string>
+    <string name="icon_settings_failed">Could not change the app icon. Please try again.</string>
+    <string name="scan_zoom_in">Zoom in</string>
+    <string name="scan_zoom_out">Zoom out</string>
+    <string name="scan_zoom_plus" translatable="false">+</string>
+    <string name="scan_zoom_minus" translatable="false">−</string>
+    <string name="scan_zoom_ratio">%1$.1f×</string>
+    <string name="scan_zoom_current">Zoom: %1$.1f times</string>
+    <string name="scan_zoom_unavailable">Camera zoom is unavailable. You can still scan without zoom.</string>
+    <string name="scan_close">Close scanner</string>
 </resources>

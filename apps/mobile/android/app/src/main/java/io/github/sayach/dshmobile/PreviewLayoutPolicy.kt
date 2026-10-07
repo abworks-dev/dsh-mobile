@@ -15,20 +15,24 @@ object PreviewLayoutPolicy {
     private const val TARGET_AREA = 1280.0 * 720.0
 
     /**
-     * Picks the preview size whose aspect best matches the (portrait) surface so the
-     * aspect-fill layout crops as little as possible. The legacy camera buffer is landscape,
-     * so its on-screen aspect after the 90 degree display rotation is width/height.
+     * Picks the supported preview size with the least aspect mismatch for the current
+     * display rotation; resolution close to 720p breaks equal-aspect ties.
      */
-    fun choosePreviewSize(sizes: List<Size>, surfaceWidth: Int, surfaceHeight: Int): Size? {
+    fun choosePreviewSize(sizes: List<Size>, surfaceWidth: Int, surfaceHeight: Int, rotated90: Boolean = true): Size? {
         if (sizes.isEmpty() || surfaceWidth <= 0 || surfaceHeight <= 0) return null
-        val surfaceAspect = surfaceHeight.coerceAtLeast(1).toDouble() / surfaceWidth.coerceAtLeast(1)
-        return sizes.minByOrNull { size ->
-            val aspect = size.width.toDouble() / size.height.coerceAtLeast(1)
-            val aspectDiff = abs(aspect - surfaceAspect)
-            val areaDiff = abs(size.width * size.height - TARGET_AREA) / TARGET_AREA
-            aspectDiff + areaDiff * 0.05
-        }
+        val surfaceAspect = surfaceWidth.toDouble() / surfaceHeight
+        return sizes.filter { it.width > 0 && it.height > 0 }.minWithOrNull(
+            compareBy<Size> {
+                val aspect = if (rotated90) it.height.toDouble() / it.width else it.width.toDouble() / it.height
+                abs(aspect - surfaceAspect)
+            }.thenBy { abs(it.width.toDouble() * it.height - TARGET_AREA) },
+        )
     }
+
+    /** Legacy Camera display orientation, including front-camera mirror compensation. */
+    fun displayOrientation(sensorDegrees: Int, displayDegrees: Int, frontFacing: Boolean): Int =
+        if (frontFacing) (360 - (sensorDegrees + displayDegrees) % 360) % 360
+        else (sensorDegrees - displayDegrees + 360) % 360
 
     /**
      * Center-crop ("aspect fill") frame for the preview surface: scales the preview uniformly
@@ -42,10 +46,11 @@ object PreviewLayoutPolicy {
         previewHeight: Int,
         rotated90: Boolean = true,
     ): IntArray {
-        val sw = surfaceWidth.coerceAtLeast(1)
-        val sh = surfaceHeight.coerceAtLeast(1)
-        val pw = previewWidth.coerceAtLeast(1)
-        val ph = previewHeight.coerceAtLeast(1)
+        require(surfaceWidth > 0 && surfaceHeight > 0 && previewWidth > 0 && previewHeight > 0)
+        val sw = surfaceWidth
+        val sh = surfaceHeight
+        val pw = previewWidth
+        val ph = previewHeight
         val naturalWidth = if (rotated90) ph else pw
         val naturalHeight = if (rotated90) pw else ph
         val scale = maxOf(sw.toDouble() / naturalWidth, sh.toDouble() / naturalHeight)
@@ -84,9 +89,19 @@ object PreviewLayoutPolicy {
         ratio.coerceIn(1f, maxRatio.coerceAtLeast(1f))
 
     /** Best-supported zoom ratio from a device's ratio table, or a conservative default. */
-    fun maxZoomRatio(zoomRatios: List<Int>?): Float {
+    fun maxZoomRatio(zoomRatios: List<Int>?, maxZoom: Int = zoomRatios?.takeIf { it.isNotEmpty() }?.lastIndex ?: 1): Float {
+        if (maxZoom <= 0) return 1f
         val ratios = zoomRatios?.takeIf { it.isNotEmpty() } ?: return DEFAULT_MAX_ZOOM_RATIO
-        return (ratios.last() / 100f).coerceAtLeast(1f)
+        return (ratios[minOf(maxZoom, ratios.lastIndex)] / 100f).coerceAtLeast(1f)
+    }
+
+    /** Actual ratio of a valid hardware zoom index, or the matching conservative fallback. */
+    fun ratioForZoom(index: Int, maxZoom: Int, zoomRatios: List<Int>?): Float {
+        if (maxZoom <= 0) return 1f
+        val clamped = index.coerceIn(0, maxZoom)
+        val ratios = zoomRatios?.takeIf { it.isNotEmpty() }
+        return if (ratios != null) (ratios[minOf(clamped, ratios.lastIndex)] / 100f).coerceAtLeast(1f)
+        else 1f + clamped.toFloat() / maxZoom * (DEFAULT_MAX_ZOOM_RATIO - 1f)
     }
 
     internal const val DEFAULT_MAX_ZOOM_RATIO = 4f

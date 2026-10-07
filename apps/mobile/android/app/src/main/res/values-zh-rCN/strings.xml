@@ -172,10 +172,20 @@
     <string name="icon_settings">应用图标</string>
     <string name="icon_settings_saved">应用图标已更新。部分桌面启动器可能需要片刻刷新。</string>
     <string name="icon_choice_whale_girl">DSH 鲸鱼娘</string>
-    <string name="icon_choice_official_whale">官方鲸鱼（品牌蓝）</string>
-    <string name="icon_choice_official_whale_dark">官方鲸鱼（深蓝）</string>
-    <string name="icon_choice_official_whale_teal">官方鲸鱼（青绿）</string>
-    <string name="icon_choice_official_whale_mono">官方鲸鱼（灰色）</string>
-    <string name="icon_choice_official_whale_black">官方鲸鱼（黑色）</string>
-    <string name="icon_choice_official_whale_white">官方鲸鱼（白色）</string>
+    <string name="icon_choice_official_whale">DeepSeek 鲸鱼（品牌蓝）</string>
+    <string name="icon_choice_official_whale_dark">DeepSeek 鲸鱼（深蓝）</string>
+    <string name="icon_choice_official_whale_teal">DeepSeek 鲸鱼（青绿）</string>
+    <string name="icon_choice_official_whale_mono">DeepSeek 鲸鱼（灰色）</string>
+    <string name="icon_choice_official_whale_black">DeepSeek 鲸鱼（黑色）</string>
+    <string name="icon_choice_official_whale_white">DeepSeek 鲸鱼（白色）</string>
+    <string name="device_list_settings">设置</string>
+    <string name="icon_settings_failed">图标切换失败，请重试。</string>
+    <string name="scan_zoom_in">放大</string>
+    <string name="scan_zoom_out">缩小</string>
+    <string name="scan_zoom_plus" translatable="false">+</string>
+    <string name="scan_zoom_minus" translatable="false">−</string>
+    <string name="scan_zoom_ratio">%1$.1f×</string>
+    <string name="scan_zoom_current">当前放大 %1$.1f 倍</string>
+    <string name="scan_zoom_unavailable">相机缩放暂不可用，仍可正常扫码。</string>
+    <string name="scan_close">关闭扫码</string>
 </resources>

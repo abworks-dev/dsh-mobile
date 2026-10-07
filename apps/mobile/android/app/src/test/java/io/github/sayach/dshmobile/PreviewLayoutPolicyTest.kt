@@ -25,12 +25,10 @@ class PreviewLayoutPolicyTest {
     }
 
     @Test
-    fun prefersTheLargerMatchWhenAspectsTie() {
-        // 1280x720 and 1600x900 have the same 16:9 aspect; the scoring's small area term
-        // keeps the previously used ~720p target instead of jumping to 1080p.
+    fun prefers720pWhenAspectsTie() {
         val chosen = PreviewLayoutPolicy.choosePreviewSize(sizes, 1080, 2340)
 
-        assertTrue(chosen!!.width <= 1600)
+        assertEquals(1280, chosen!!.width)
     }
 
     @Test
@@ -101,5 +99,55 @@ class PreviewLayoutPolicyTest {
         assertEquals(4f, PreviewLayoutPolicy.maxZoomRatio(null))
         assertEquals(4f, PreviewLayoutPolicy.maxZoomRatio(emptyList()))
         assertEquals(6f, PreviewLayoutPolicy.maxZoomRatio(listOf(100, 300, 600)))
+    }
+
+    @Test
+    fun invalidCameraSizesAreNotChosen() {
+        assertNull(PreviewLayoutPolicy.choosePreviewSize(listOf(PreviewLayoutPolicy.Size(0, 0)), 1080, 2340))
+    }
+
+    @Test
+    fun displayOrientationHandlesEveryRotationAndBothCameraDirections() {
+        val rotations = listOf(0, 90, 180, 270)
+        assertEquals(listOf(90, 0, 270, 180),
+            rotations.map { PreviewLayoutPolicy.displayOrientation(90, it, false) })
+        assertEquals(listOf(90, 0, 270, 180),
+            rotations.map { PreviewLayoutPolicy.displayOrientation(270, it, true) })
+        assertEquals(listOf(270, 180, 90, 0),
+            rotations.map { PreviewLayoutPolicy.displayOrientation(270, it, false) })
+    }
+
+    @Test
+    fun landscapePreviewUsesItsUnrotatedCameraAspect() {
+        assertEquals(PreviewLayoutPolicy.Size(1280, 720),
+            PreviewLayoutPolicy.choosePreviewSize(sizes, 1920, 1080, rotated90 = false))
+        val frame = PreviewLayoutPolicy.previewFrame(1920, 1080, 1280, 720, rotated90 = false)
+        assertEquals(listOf(0, 0, 1920, 1080), frame.toList())
+    }
+
+    @Test
+    fun repeatedParentViewportUpdatesKeepTheSameCenteredCrop() {
+        val viewport = PreviewLayoutPolicy.Size(1080, 2340)
+        val first = PreviewLayoutPolicy.previewFrame(viewport.width, viewport.height, 1280, 720)
+        repeat(10) {
+            val next = PreviewLayoutPolicy.previewFrame(viewport.width, viewport.height, 1280, 720)
+            assertEquals(first.toList(), next.toList())
+            assertTrue(next[0] < 0)
+        }
+    }
+
+    @Test
+    fun portraitLandscapeAndFoldedViewportFramesCoverWithoutNonUniformScale() {
+        for ((w, h) in listOf(360 to 800, 800 to 360, 800 to 1280, 1280 to 800, 320 to 480)) {
+            for (rotated in listOf(false, true)) {
+                val frame = PreviewLayoutPolicy.previewFrame(w, h, 1280, 720, rotated)
+                val aspect = if (rotated) 720.0 / 1280 else 1280.0 / 720
+                assertTrue(frame[2] >= w && frame[3] >= h)
+                assertTrue(frame[0] <= 0 && frame[1] <= 0)
+                assertEquals(aspect, frame[2].toDouble() / frame[3], 0.01)
+                assertTrue(kotlin.math.abs(-frame[0] - (frame[0] + frame[2] - w)) <= 1)
+                assertTrue(kotlin.math.abs(-frame[1] - (frame[1] + frame[3] - h)) <= 1)
+            }
+        }
     }
 }

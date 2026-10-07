@@ -6,53 +6,63 @@ import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
 import android.hardware.Camera
 import android.os.Bundle
+import android.view.GestureDetector
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.ScaleGestureDetector
+import android.view.Surface
 import android.view.SurfaceHolder
 import android.view.SurfaceView
 import android.view.View
+import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.ImageButton
+import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
-import kotlin.math.abs
 
-/**
- * Full-screen QR scanner for the low-friction pairing path. Uses the legacy
- * android.hardware.Camera API plus ZXing so the shell stays free of AndroidX
- * dependencies; the CAMERA permission is requested by MainActivity before launch.
- *
- * The preview is laid out aspect-fill (uniform scale, center crop) so it never looks
- * squeezed on tall screens, and supports pinch zoom plus double-tap to toggle 1x/2x.
- */
+/** QR pairing scanner with uniformly cropped preview, pinch/double-tap zoom, and zoom buttons. */
+@Suppress("DEPRECATION")
 class ScanActivity : Activity(), SurfaceHolder.Callback {
     private var camera: Camera? = null
+    private var cameraInfo = Camera.CameraInfo()
+    private var cameraRotation = -1
     private var previewWidth = 0
     private var previewHeight = 0
     private var previewReady = false
+    private var resumed = false
     private var decoding = false
     private var finished = false
     private lateinit var preview: SurfaceView
-
-    // Zoom state: maxRatio comes from the device's own zoom table when it publishes one.
-    private var maxZoomIndex = 0
-    private var maxZoomRatio = PreviewLayoutPolicy.DEFAULT_MAX_ZOOM_RATIO
-    private var zoomRatios: List<Int>? = null
-    private var zoomRatio = 1f
+    private lateinit var previewContainer: FrameLayout
+    private lateinit var scanFrame: View
+    private lateinit var scanHint: TextView
+    private lateinit var zoomOut: Button
+    private lateinit var zoomIn: Button
+    private lateinit var zoomLabel: TextView
+    private var zoom = ScannerZoomState(0, null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        configureEdgeToEdgeWindow(window)
+        applyStatusBarIconContrast(window, Color.BLACK)
         setContentView(buildInterface())
+        applySafeAreaInsets(previewContainer)
         preview.holder.addCallback(this)
         installGestures()
+        previewContainer.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+            if (camera == null) openCamera() else updatePreviewGeometry()
+        }
     }
 
     override fun onResume() {
         super.onResume()
-        if (previewReady && camera == null) openCamera()
+        resumed = true
+        openCamera()
     }
 
     override fun onPause() {
+        resumed = false
         releaseCamera()
         super.onPause()
     }
@@ -63,8 +73,8 @@ class ScanActivity : Activity(), SurfaceHolder.Callback {
     }
 
     override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
-        // Reapply the aspect-fill frame on size changes (rotation, folding, resize).
-        applyPreviewFrame(width, height)
+        // The Surface can be larger than its viewport after crop; only the parent owns viewport size.
+        updatePreviewGeometry()
     }
 
     override fun surfaceDestroyed(holder: SurfaceHolder) {
@@ -73,173 +83,242 @@ class ScanActivity : Activity(), SurfaceHolder.Callback {
     }
 
     private fun installGestures() {
-        val scaleDetector = ScaleGestureDetector(
-            this,
-            object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
-                override fun onScale(detector: ScaleGestureDetector): Boolean {
-                    applyZoom(zoomRatio * detector.scaleFactor)
-                    return true
-                }
-            },
-        )
+        var multiTouch = false
+        val taps = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
+            override fun onDown(event: MotionEvent): Boolean = true
+            override fun onSingleTapConfirmed(event: MotionEvent): Boolean {
+                preview.performClick()
+                return true
+            }
+            override fun onDoubleTap(event: MotionEvent): Boolean {
+                applyZoom(if (zoom.requestedRatio > 1.5f) 1f else 2f)
+                return true
+            }
+        })
+        val scales = ScaleGestureDetector(this, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
+            override fun onScale(detector: ScaleGestureDetector): Boolean {
+                applyZoom(zoom.requestedRatio * detector.scaleFactor)
+                return true
+            }
+        }).apply { isQuickScaleEnabled = false }
         preview.setOnTouchListener { _, event ->
-            scaleDetector.onTouchEvent(event)
-            if (!scaleDetector.isInProgress) detectorDoubleTap(event) else false
+            if (event.actionMasked == MotionEvent.ACTION_DOWN) multiTouch = false
+            if (event.pointerCount > 1 && !multiTouch) {
+                multiTouch = true
+                val cancel = MotionEvent.obtain(event).apply { action = MotionEvent.ACTION_CANCEL }
+                taps.onTouchEvent(cancel)
+                cancel.recycle()
+            }
+            scales.onTouchEvent(event)
+            if (!multiTouch) taps.onTouchEvent(event)
+            // Consume DOWN through UP/CANCEL so the non-clickable SurfaceView retains its touch target.
+            true
         }
     }
 
-    private var lastTapTime = 0L
-    private var lastTapX = 0f
-    private var lastTapY = 0f
-
-    private fun detectorDoubleTap(event: android.view.MotionEvent): Boolean {
-        if (event.actionMasked != android.view.MotionEvent.ACTION_UP) return false
-        val now = event.eventTime
-        val quick = now - lastTapTime < TAP_TIMEOUT_MS
-        val near = abs(event.x - lastTapX) < DOUBLE_TAP_SLOP_PX &&
-            abs(event.y - lastTapY) < DOUBLE_TAP_SLOP_PX
-        if (quick && near) {
-            lastTapTime = 0L
-            applyZoom(if (zoomRatio > 1.5f) 1f else 2f)
-            return true
-        }
-        lastTapTime = now
-        lastTapX = event.x
-        lastTapY = event.y
-        return false
-    }
-
-    /** Applies a zoom ratio within device limits via the legacy camera zoom parameter. */
     private fun applyZoom(desired: Float) {
         val cam = camera ?: return
-        val clamped = PreviewLayoutPolicy.clampZoomRatio(desired, maxZoomRatio)
-        if (abs(clamped - zoomRatio) < ZOOM_EPSILON) return
-        val params = cam.parameters ?: return
-        val index = PreviewLayoutPolicy.zoomIndexFor(clamped, maxZoomIndex, zoomRatios)
-        if (params.isZoomSupported && index != params.zoom) {
-            params.zoom = index
-            runCatching {
+        if (!zoom.supported) return
+        try {
+            val params = cam.parameters
+            if (!params.isZoomSupported) return disableZoom()
+            val index = zoom.request(desired)
+            if (index != params.zoom) {
+                params.zoom = index
                 cam.parameters = params
-                zoomRatio = clamped
             }
+            zoom.applied(index)
+            updateZoomControls()
+        } catch (error: RuntimeException) {
+            // Camera hardware can reject updates after interruption; scanning remains available.
+            disableZoom()
+            Toast.makeText(this, R.string.scan_zoom_unavailable, Toast.LENGTH_SHORT).show()
         }
+    }
+
+    private fun disableZoom() {
+        zoom = ScannerZoomState(0, null)
+        updateZoomControls()
+    }
+
+    private fun updateZoomControls() {
+        zoomOut.isEnabled = zoom.supported && zoom.currentIndex > 0
+        zoomIn.isEnabled = zoom.supported && zoom.currentIndex < zoom.maxIndex
+        zoomOut.alpha = if (zoomOut.isEnabled) 1f else 0.45f
+        zoomIn.alpha = if (zoomIn.isEnabled) 1f else 0.45f
+        zoomLabel.text = getString(R.string.scan_zoom_ratio, zoom.actualRatio)
+        zoomLabel.contentDescription = getString(R.string.scan_zoom_current, zoom.actualRatio)
     }
 
     private fun buildInterface(): View {
-        val density = resources.displayMetrics.density
         val root = FrameLayout(this).apply { setBackgroundColor(Color.BLACK) }
-        val surface = SurfaceView(this)
-        preview = surface
-        root.addView(surface, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+        previewContainer = root
+        preview = SurfaceView(this)
+        root.addView(preview, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
 
-        val frameDrawable = GradientDrawable().apply {
-            setColor(Color.TRANSPARENT)
-            setStroke((2 * density).toInt(), Color.WHITE)
+        scanFrame = View(this).apply {
+            background = GradientDrawable().apply {
+                setColor(Color.TRANSPARENT)
+                setStroke(dp(2), Color.WHITE)
+            }
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
         }
-        val frameView = View(this).apply { background = frameDrawable }
-        val frameSize = (260 * density).toInt()
-        root.addView(
-            frameView,
-            FrameLayout.LayoutParams(frameSize, frameSize, Gravity.CENTER),
-        )
+        root.addView(scanFrame, FrameLayout.LayoutParams(dp(260), dp(260), Gravity.CENTER))
 
-        val hint = TextView(this).apply {
+        scanHint = TextView(this).apply {
             text = getString(R.string.scan_hint)
             setTextColor(Color.WHITE)
             textSize = 15f
             gravity = Gravity.CENTER
+            setPadding(dp(16), 0, dp(16), 0)
         }
-        root.addView(
-            hint,
-            FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT,
-                FrameLayout.LayoutParams.WRAP_CONTENT,
-                Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL,
-            ).apply {
-                bottomMargin = (48 * density).toInt()
-            },
-        )
+        root.addView(scanHint, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT,
+            Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply { bottomMargin = dp(80) })
+
+        val controls = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            background = GradientDrawable().apply { setColor(Color.BLACK); cornerRadius = dp(24).toFloat() }
+            setPadding(dp(8), 0, dp(8), 0)
+        }
+        fun zoomButton(label: Int, glyph: Int, direction: Int): Button = Button(this).apply {
+            setText(glyph)
+            textSize = 24f
+            setTextColor(Color.WHITE)
+            contentDescription = getString(label)
+            minWidth = dp(48)
+            minHeight = dp(48)
+            setPadding(0, 0, 0, 0)
+            val styled = obtainStyledAttributes(intArrayOf(android.R.attr.selectableItemBackgroundBorderless))
+            background = styled.getDrawable(0)
+            styled.recycle()
+            setOnClickListener { applyZoom(zoom.stepRatio(direction)) }
+        }
+        zoomOut = zoomButton(R.string.scan_zoom_out, R.string.scan_zoom_minus, -1)
+        zoomIn = zoomButton(R.string.scan_zoom_in, R.string.scan_zoom_plus, 1)
+        zoomLabel = TextView(this).apply {
+            setTextColor(Color.WHITE)
+            textSize = 16f
+            gravity = Gravity.CENTER
+            setPadding(dp(8), 0, dp(8), 0)
+            minWidth = dp(56)
+        }
+        controls.addView(zoomOut, LinearLayout.LayoutParams(dp(48), dp(48)))
+        controls.addView(zoomLabel, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(48)))
+        controls.addView(zoomIn, LinearLayout.LayoutParams(dp(48), dp(48)))
+        root.addView(controls, FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, dp(48),
+            Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply { bottomMargin = dp(16) })
+        updateZoomControls()
 
         val close = ImageButton(this).apply {
             setImageResource(android.R.drawable.ic_menu_close_clear_cancel)
+            imageTintList = android.content.res.ColorStateList.valueOf(Color.WHITE)
             setBackgroundColor(Color.TRANSPARENT)
+            contentDescription = getString(R.string.scan_close)
             setOnClickListener { finish() }
         }
-        root.addView(
-            close,
-            FrameLayout.LayoutParams(
-                (48 * density).toInt(),
-                (48 * density).toInt(),
-                Gravity.TOP or Gravity.START,
-            ).apply {
-                topMargin = (24 * density).toInt()
-                marginStart = (16 * density).toInt()
-            },
-        )
+        root.addView(close, FrameLayout.LayoutParams(dp(48), dp(48), Gravity.TOP or Gravity.START).apply {
+            topMargin = dp(16)
+            marginStart = dp(16)
+        })
         return root
     }
 
     private fun openCamera() {
-        if (finished) return
-        val cam = runCatching { Camera.open(0) }.getOrNull()
-        if (cam == null) {
-            runOnUiThread { Toast.makeText(this, R.string.camera_unavailable, Toast.LENGTH_LONG).show() }
-            finish()
-            return
-        }
-        camera = cam
+        val width = previewContainer.width - previewContainer.paddingLeft - previewContainer.paddingRight
+        val height = previewContainer.height - previewContainer.paddingTop - previewContainer.paddingBottom
+        if (finished || !resumed || !previewReady || camera != null || width <= 0 || height <= 0) return
         try {
+            val ids = 0 until Camera.getNumberOfCameras()
+            val id = ids.firstOrNull {
+                Camera.getCameraInfo(it, cameraInfo)
+                cameraInfo.facing == Camera.CameraInfo.CAMERA_FACING_BACK
+            } ?: ids.firstOrNull() ?: throw IllegalStateException("camera unavailable")
+            Camera.getCameraInfo(id, cameraInfo)
+            val cam = Camera.open(id)
+            camera = cam
+            cameraRotation = displayOrientation()
             val params = cam.parameters
-            val supported = params.supportedFocusModes
-            if (supported != null && supported.contains(Camera.Parameters.FOCUS_MODE_CONTINUOUS_PICTURE)) {
+            val focusModes = params.supportedFocusModes.orEmpty()
+            if (Camera.Parameters.FOCUS_MODE_CONTINUOUS_PICTURE in focusModes) {
                 params.focusMode = Camera.Parameters.FOCUS_MODE_CONTINUOUS_PICTURE
-            } else if (supported != null && supported.contains(Camera.Parameters.FOCUS_MODE_AUTO)) {
+            } else if (Camera.Parameters.FOCUS_MODE_AUTO in focusModes) {
                 params.focusMode = Camera.Parameters.FOCUS_MODE_AUTO
             }
-            // Choose the preview size whose aspect matches this screen so aspect-fill
-            // crops the least; the previous fixed 720p choice squeezed the picture.
-            val sizes = params.supportedPreviewSizes
-                ?.map { PreviewLayoutPolicy.Size(it.width, it.height) }
-                .orEmpty()
-            val size = PreviewLayoutPolicy.choosePreviewSize(sizes, preview.width.coerceAtLeast(1), preview.height.coerceAtLeast(1))
-                ?: params.previewSize?.let { PreviewLayoutPolicy.Size(it.width, it.height) }
-                ?: throw IllegalStateException("camera has no preview size")
+            val sizes = params.supportedPreviewSizes?.map { PreviewLayoutPolicy.Size(it.width, it.height) }.orEmpty()
+            val size = PreviewLayoutPolicy.choosePreviewSize(sizes, width, height, cameraRotation % 180 != 0)
+                ?: throw IllegalStateException("camera has no supported preview size")
             params.setPreviewSize(size.width, size.height)
-
-            // Remember the device's zoom capabilities for double-tap and pinch zoom.
-            maxZoomIndex = if (params.isZoomSupported) params.maxZoom else 0
-            zoomRatios = params.zoomRatios?.toList()
-            maxZoomRatio = PreviewLayoutPolicy.maxZoomRatio(zoomRatios)
-            zoomRatio = 1f
-
+            zoom = ScannerZoomState(if (params.isZoomSupported) params.maxZoom else 0,
+                if (params.isZoomSupported) params.zoomRatios?.toList() else null)
+            if (zoom.supported) params.zoom = 0
             cam.parameters = params
             previewWidth = size.width
             previewHeight = size.height
-            cam.setDisplayOrientation(90)
+            cam.setDisplayOrientation(cameraRotation)
             cam.setPreviewDisplay(preview.holder)
-            applyPreviewFrame(preview.width, preview.height)
+            updatePreviewGeometry()
+            updateZoomControls()
             cam.setPreviewCallback { data, _ -> onPreviewFrame(data) }
             cam.startPreview()
         } catch (error: Exception) {
+            finished = true
             releaseCamera()
-            runOnUiThread { Toast.makeText(this, R.string.camera_unavailable, Toast.LENGTH_LONG).show() }
+            Toast.makeText(this, R.string.camera_unavailable, Toast.LENGTH_LONG).show()
             finish()
         }
     }
 
-    /** Lays the surface-frame-independent preview out as center-crop aspect fill. */
-    private fun applyPreviewFrame(surfaceWidth: Int, surfaceHeight: Int) {
-        if (previewWidth <= 0 || previewHeight <= 0) return
-        val frame = PreviewLayoutPolicy.previewFrame(surfaceWidth, surfaceHeight, previewWidth, previewHeight)
-        val lp = preview.layoutParams as? FrameLayout.LayoutParams ?: return
-        if (lp.leftMargin != frame[0] || lp.topMargin != frame[1] ||
-            lp.width != frame[2] || lp.height != frame[3]
-        ) {
-            lp.leftMargin = frame[0]
-            lp.topMargin = frame[1]
-            lp.width = frame[2]
-            lp.height = frame[3]
-            preview.layoutParams = lp
+    private fun displayOrientation(): Int {
+        val degrees = when (windowManager.defaultDisplay.rotation) {
+            Surface.ROTATION_90 -> 90
+            Surface.ROTATION_180 -> 180
+            Surface.ROTATION_270 -> 270
+            else -> 0
+        }
+        return PreviewLayoutPolicy.displayOrientation(cameraInfo.orientation, degrees,
+            cameraInfo.facing == Camera.CameraInfo.CAMERA_FACING_FRONT)
+    }
+
+    private fun updatePreviewGeometry() {
+        val cam = camera ?: return
+        val width = previewContainer.width - previewContainer.paddingLeft - previewContainer.paddingRight
+        val height = previewContainer.height - previewContainer.paddingTop - previewContainer.paddingBottom
+        if (width <= 0 || height <= 0 || previewWidth <= 0 || previewHeight <= 0) return
+        val rotation = displayOrientation()
+        if (rotation != cameraRotation) {
+            try {
+                cam.setDisplayOrientation(rotation)
+                cameraRotation = rotation
+            } catch (error: RuntimeException) {
+                // Preview rotation can fail when the camera is interrupted; release rather than reuse it.
+                finished = true
+                releaseCamera()
+                Toast.makeText(this, R.string.camera_unavailable, Toast.LENGTH_LONG).show()
+                finish()
+                return
+            }
+        }
+        val frame = PreviewLayoutPolicy.previewFrame(width, height, previewWidth, previewHeight, rotation % 180 != 0)
+        val layout = preview.layoutParams as FrameLayout.LayoutParams
+        if (layout.leftMargin != frame[0] || layout.topMargin != frame[1] || layout.width != frame[2] || layout.height != frame[3]) {
+            layout.leftMargin = frame[0]
+            layout.topMargin = frame[1]
+            layout.width = frame[2]
+            layout.height = frame[3]
+            preview.layoutParams = layout
+        }
+        val topReserved = dp(80)
+        val usableHeight = (height - topReserved - dp(96) - scanHint.measuredHeight).coerceAtLeast(1)
+        val frameSize = minOf(dp(260), (width - dp(32)).coerceAtLeast(1), usableHeight)
+        val scanLayout = scanFrame.layoutParams as FrameLayout.LayoutParams
+        val topMargin = topReserved + (usableHeight - frameSize) / 2
+        if (scanLayout.width != frameSize || scanLayout.height != frameSize || scanLayout.topMargin != topMargin) {
+            scanLayout.width = frameSize
+            scanLayout.height = frameSize
+            scanLayout.gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+            scanLayout.topMargin = topMargin
+            scanFrame.layoutParams = scanLayout
         }
     }
 
@@ -259,17 +338,21 @@ class ScanActivity : Activity(), SurfaceHolder.Callback {
     }
 
     private fun releaseCamera() {
-        val cam = camera ?: return
+        val cam = camera
         camera = null
+        cameraRotation = -1
+        previewWidth = 0
+        previewHeight = 0
+        disableZoom()
+        if (cam == null) return
         runCatching { cam.setPreviewCallback(null) }
         runCatching { cam.stopPreview() }
-        cam.release()
+        runCatching { cam.release() }
     }
+
+    private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 
     companion object {
         const val EXTRA_QR_RESULT = "qr_result"
-        private const val TAP_TIMEOUT_MS = 300L
-        private const val DOUBLE_TAP_SLOP_PX = 100
-        private const val ZOOM_EPSILON = 0.01f
     }
 }

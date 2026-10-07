@@ -174,10 +174,20 @@
     <string name="icon_settings">Icona dell\'app</string>
     <string name="icon_settings_saved">Icona aggiornata. Alcuni launcher potrebbero aggiornarsi dopo un attimo.</string>
     <string name="icon_choice_whale_girl">Mascotte balena DSH</string>
-    <string name="icon_choice_official_whale">Balena ufficiale (blu)</string>
-    <string name="icon_choice_official_whale_dark">Balena ufficiale (blu scuro)</string>
-    <string name="icon_choice_official_whale_teal">Balena ufficiale (verde acqua)</string>
-    <string name="icon_choice_official_whale_mono">Balena ufficiale (grigio)</string>
-    <string name="icon_choice_official_whale_black">Balena ufficiale (nero)</string>
-    <string name="icon_choice_official_whale_white">Balena ufficiale (bianco)</string>
+    <string name="icon_choice_official_whale">Balena DeepSeek (blu)</string>
+    <string name="icon_choice_official_whale_dark">Balena DeepSeek (blu scuro)</string>
+    <string name="icon_choice_official_whale_teal">Balena DeepSeek (verde acqua)</string>
+    <string name="icon_choice_official_whale_mono">Balena DeepSeek (grigio)</string>
+    <string name="icon_choice_official_whale_black">Balena DeepSeek (nero)</string>
+    <string name="icon_choice_official_whale_white">Balena DeepSeek (bianco)</string>
+    <string name="device_list_settings">Impostazioni</string>
+    <string name="icon_settings_failed">Impossibile cambiare l’icona. Riprova.</string>
+    <string name="scan_zoom_in">Aumenta zoom</string>
+    <string name="scan_zoom_out">Riduci zoom</string>
+    <string name="scan_zoom_plus" translatable="false">+</string>
+    <string name="scan_zoom_minus" translatable="false">−</string>
+    <string name="scan_zoom_ratio">%1$.1f×</string>
+    <string name="scan_zoom_current">Zoom: %1$.1f volte</string>
+    <string name="scan_zoom_unavailable">Zoom della fotocamera non disponibile. Puoi comunque scansionare il codice.</string>
+    <string name="scan_close">Chiudi scanner</string>
 </resources>

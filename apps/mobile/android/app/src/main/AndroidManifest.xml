@@ -33,12 +33,13 @@
         <activity
             android:name=".MainActivity"
             android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden"
-            android:exported="false"
+            android:exported="true"
             android:resizeableActivity="true"
             android:windowSoftInputMode="adjustResize" />
-        <!-- Launcher icon switch: exactly one alias is enabled at a time.
-             PackageManager.setComponentEnabledSetting flips them; the default
-             alias ships enabled and the official-whale alias ships disabled. -->
+        <!-- MainActivity stays exported for existing explicit launcher shortcuts and
+             notification intents. New launcher entries use the selectable aliases. -->
+        <!-- One selected alias remains enabled after a switch. The default mascot
+             ships enabled; optional whale aliases ship disabled. -->
         <activity-alias
             android:name=".LauncherWhaleGirl"
             android:enabled="true"

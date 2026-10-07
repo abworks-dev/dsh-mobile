@@ -27,6 +27,29 @@ class QrDecoderTest {
         assertNull(QrDecoder.decodeNv21(ByteArray(100 * 100), 200, 200))
     }
 
+    @Test
+    fun decodesTheUncroppedBufferAtEveryDisplayRotation() {
+        val text = "dsh1:test-rotation-pairing-fixture"
+        val matrix = QRCodeWriter().encode(text, BarcodeFormat.QR_CODE, 256, 256)
+        var width = 480
+        var height = 320
+        var buffer = ByteArray(width * height) { 0xff.toByte() }
+        for (y in 0 until 256) for (x in 0 until 256) {
+            buffer[(y + 32) * width + x + 112] = if (matrix.get(x, y)) 0.toByte() else 0xff.toByte()
+        }
+        repeat(4) {
+            assertEquals(text, QrDecoder.decodeNv21(buffer, width, height))
+            val rotated = ByteArray(buffer.size)
+            for (y in 0 until height) for (x in 0 until width) {
+                rotated[x * height + height - 1 - y] = buffer[y * width + x]
+            }
+            buffer = rotated
+            val previousWidth = width
+            width = height
+            height = previousWidth
+        }
+    }
+
     private fun toGrayscale(matrix: BitMatrix, size: Int): ByteArray {
         val data = ByteArray(size * size)
         for (y in 0 until size) {
