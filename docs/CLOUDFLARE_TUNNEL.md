@@ -12,24 +12,30 @@
 | 可用性 | 官方定位为测试用途：有限流、无可用性保证 | 由你的 Cloudflare 账号承载 |
 | 配置项 | 无 | 连接器令牌、公网域名、本机转发端口 |
 
-命名隧道的公网域名由 Cloudflare 负责解析与 TLS，插件只负责在本机运行 `cloudflared` 并把流量交给已认证的私有网关；**手机端仍然要走 App 的远程访问扫码流程**，隧道不改变配对方式。
+Cloudflare 提供公网域名与 TLS，插件在本机运行 `cloudflared`，把请求交给有设备配对认证的私有网关。在 Android App 中请选择 **远程访问**；手机浏览器也可打开公开 HTTPS 配对链接。隧道不能替代 DSH Mobile 配对。
+
+## 快速隧道的功能限制
+
+[Cloudflare 官方限制](https://developers.cloudflare.com/tunnel/get-started/quick-tunnels/#limitations)包括无可用性保证、最多 200 个并发进行中的请求，以及不支持 SSE。插件通过 SSE 传递扩展变更、任务完成和在线设备撤销事件：快速隧道中扩展更新会退回定期检测，完成提醒与在线撤销提示可能无法及时送达，没有离线完成事件补发。服务端撤销认证仍然有效；长期使用请选择命名隧道或其他通道。
 
 ## 前置条件
 
 1. 一个已接入 Cloudflare 的域名（该域名的 NS 必须指向 Cloudflare 分配的名称服务器，在域名注册商处修改；改完通常几分钟到 24 小时生效）。
-2. Cloudflare Zero Trust（团队域名）已启用——隧道控制台位于其中。
+2. 可以管理该域名和 Tunnel 的 Cloudflare 账号。
 3. 面板中 cloudflared 组件已安装（命名隧道和快速隧道使用同一个官方客户端）。
 
 组件支持 Windows x64、Linux x64/arm64 与 macOS x64/arm64。所有平台都在安装前校验官方发布文件；macOS 另校验解压后的可执行文件，组件仅保存在 DSH Mobile 私有目录。
 
 ## 在 Cloudflare 控制台创建隧道
 
-1. 打开 **Zero Trust → Networks → Tunnels**，选择 **Create a tunnel**，类型选 **Cloudflared**。
-2. 命名（例如 `dsh-mobile`），保存后会显示 connector 安装命令。
-3. 在 **Public Hostname** 页签添加一条：
+1. 在 Cloudflare 控制台打开 **Networking → Tunnels**，创建隧道并命名，例如 `dsh-mobile`。
+2. 在连接器安装说明中取得 Tunnel token。**不要执行系统服务安装命令**：本插件会管理已校验的 cloudflared 进程。
+3. 打开 **Routes → Add route → Published application**，添加公网主机名：
    - Subdomain：`dsh`，Domain：选你的域名（得到 `dsh.example.com`）
    - Service：**HTTP** → `127.0.0.1:3444`
-4. 回到 **Overview** 页签复制连接器令牌（一长串以 `eyJ` 开头的字符串）。令牌里已经包含账号、隧道 ID 和隧道密钥，**等同于密码**。
+4. 保存路由，再把连接器令牌填写到下节的 DSH Mobile 面板。令牌是凭据，不要发到 issue、截图或日志中。
+
+步骤按 [Cloudflare 当前官方指南](https://developers.cloudflare.com/tunnel/get-started/)核对；旧控制台可能仍将公开路由称为 Public Hostname。此处的 Service 使用 HTTP 回环后端，不需要关闭 TLS 验证。
 
 > `127.0.0.1:3444` 就是面板里的「本机转发端口」。Cloudflare 把公网主机名固定转发到这个端口，所以它必须与面板中填写的端口一致，并且长期不变。
 
@@ -72,7 +78,7 @@
 | 本机转发端口不可用 | `cloudflared_tunnel_port_unavailable` | 配置的端口已被占用。命名隧道不能改用其他端口（Cloudflare 固定转发到该端口），请释放端口或换一个端口并同步修改 Cloudflare 的 Service。 |
 | 公网域名无效 | `cloudflared_tunnel_hostname_invalid` | 必须是本账号下域名的真实主机名；不接受 IP、通配符、`.trycloudflare.com` 与 `.cfargotunnel.com`。 |
 | 转发端口无效 | `cloudflared_tunnel_port_invalid` | 端口需在 1024–65535 之间。 |
-| 转发端口被保留 | `cloudflared_tunnel_port_reserved` | 不能填 **3443**：那是 DSH Mobile 局域网网关的 HTTPS 端口，只要 DSH 在运行就一直被占用，不是"临时被别的程序占了"。请换 3444 或 3445。 |
+| 转发端口被保留 | `cloudflared_tunnel_port_reserved` | **3443** 是保留的默认 LAN HTTPS 端口，此模式不接受它；选择 3444、3445 或其他允许且未占用的端口。保留规则不表示 LAN 始终在监听。 |
 | 令牌无效 | `cloudflared_tunnel_token_invalid` | 令牌需从控制台完整复制，不能有空格或换行。 |
 | 设置未通过校验 | `cloudflared_tunnel_settings_invalid` | 请求里带了不该有的字段（例如快速隧道模式下携带端口）。 |
 | 需要同时填写令牌、域名和端口 | `cloudflared_tunnel_config_missing` | 首次配置命名隧道时三项都必填。 |
@@ -95,7 +101,7 @@
 ## 排错
 
 - **连接一直停在「正在连接」**：命名隧道只有在 connector 向 Cloudflare 注册后才显示就绪。检查 DSH 日志中的 cloudflared 输出，以及本机到 Cloudflare 边缘的 DNS、UDP/QUIC 和 TCP 连通性。
-- **公网访问返回 1033**：Cloudflare 认为该主机名没有健康的 connector。确认隧道在 Zero Trust 里显示 Healthy，且 ingress 指向的端口与面板一致。
+- **公网访问返回 1033**：Cloudflare 认为该主机名没有健康的 connector。确认隧道在控制台显示 Healthy，且路由的 Service 端口与面板一致。
 - **`cloudflared` 报 `Unauthorized` 或隧道 ID 不存在**：令牌与控制台里的隧道不匹配（例如隧道被删除后重建）。重新复制令牌。
 - **手机卡在「正在加载插件」或远程页面明显慢，而本机开着 TUN/透明代理**：先检查 `cloudflared` 到 `*.argotunnel.com` 的连接是否被兜底规则送进代理节点。曾有这种路由导致启动资源传输很慢；它不等于配对失败。以下是 Windows 上 Clash 客户端的规则示例；Linux 的进程名与具体规则语法应按所用客户端调整，并让直连规则排在兜底规则前：
 

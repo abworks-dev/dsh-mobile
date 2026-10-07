@@ -36,7 +36,7 @@
 > **升级提醒**：请同步更新插件与 Android App 至 0.5.5，以获得完整修复；同一正式签名的旧 App 可原位升级并保留配对。[兼容说明](#兼容性)。
 
 <p align="center">
-  <a href="https://github.com/saya-ch/dsh-mobile/releases/download/v0.5.5/dsh-mobile-android-v0.5.5.apk"><img src="assets/brand/app-icon-rounded.svg" alt="DSH Mobile 安卓应用图标" width="72" height="72"></a><br>
+  <a href="https://github.com/saya-ch/dsh-mobile/releases/download/v0.5.5/dsh-mobile-android-v0.5.5.apk"><img src="https://raw.githubusercontent.com/saya-ch/dsh-mobile/main/assets/brand/app-icon-rounded.svg" alt="DSH Mobile 安卓应用图标" width="72" height="72"></a><br>
   <a href="https://github.com/saya-ch/dsh-mobile/releases/download/v0.5.5/dsh-mobile-android-v0.5.5.apk"><strong>下载 Android App 0.5.5</strong></a><br>
   <sub><a href="https://github.com/saya-ch/dsh-mobile/releases/tag/v0.5.5">版本说明与校验文件</a></sub>
 </p>
@@ -62,37 +62,38 @@ DSH Mobile 是一个 DeepSeek Harness 插件，让手机浏览器或 Android App
 
 ## 0.5.5 移动体验改进
 
+<details>
+<summary>已发布版本的输入栏、返回键与旋转改进</summary>
+
 屏幕宽度不超过 720px 时，未编辑的输入栏保留可滚动的 72px 草稿预览，为会话留出更多空间；编辑区或工具栏获得焦点后恢复展开。文字、引用和附件保留，发送、排队、引导与停止按钮的触摸区域至少为 44px。提交和输入法行为继续由既有 DSH 与 App 机制处理。
 
 模型搜索框与配对页的输入字号已补齐，Android 返回键可逐级退出模型菜单。App 旋转和调整窗口大小时保留当前页面、引用与未发送图片，已收到的“电脑端已移除”状态不会被后续检测覆盖。请同步更新插件与 App；App 进程终止后，未发送附件仍可能丢失。
 
+</details>
+
 ## 0.5.6 更新（待发布）
 
-以下是开发分支中的待发布改进；npm 正式版与上方 Android 下载仍为 0.5.5，尚无 0.5.6 正式安装包。
+本节介绍开发分支的候选内容。正式下载仍为 **0.5.5**，0.5.6 尚未发布；完整记录见 [CHANGELOG](CHANGELOG.md#unreleased)。
 
-触屏为主要输入方式的手机浏览器中，主会话输入栏的普通 Enter 用于换行，空草稿不执行操作；输入法组合、已打开的菜单与组合键仍交给 DSH。窄屏从侧边栏打开插件、日程等主面板后收起抽屉，并在面板上方保留“返回会话”入口。
+- **连接与加载**：重试临时失败的静态资源请求，长时间 DSH API 操作不再被普通传输超时截断；不重放 API 或写入请求。[慢链路说明](docs/SLOW_CONNECTIONS.md)
+- **移动布局**：输入栏更紧凑，改善键盘打开和大字号时的按钮可达性；支持独立移动字号、触屏浏览器 Enter 换行，以及窄屏面板“返回会话”。
+- **Android 体验**：可选鲸鱼娘及六种鲸鱼标志配色；改进扫码预览、对焦与缩放。设备列表支持固定顺序、上移／置顶，长按左上角抽屉按钮可切换电脑；启动仍优先连接最近使用的电脑。
+- **模块管理**：电脑默认与本设备选择分别保存，检查启动必需模块和依赖，不卸载插件、不自动刷新当前会话。旧选择失效时提供本设备恢复入口。[操作指南](docs/CLIENT_MODULES.md)
+- **网络与兼容**：托管局域网可追加明确的可信来源网段；补齐部分旧 WebView 缺失 API，完善扩展调用超时与取消。[可信网段](docs/TRUSTED_NETWORKS.md) · [WebView 说明](#app-与手机浏览器)
 
-窄屏输入栏正常保持紧凑单行，仅在空间不足时让工具组换行；发送、停止与标准插槽内的插件按钮保留，不替换插件自身的操作。键盘打开、可见高度较小时，草稿区域限高并可滚动，避免把操作按钮挤出屏幕。设置页新增“移动端字号”：默认 16px，可在 12–32px 之间调整，仅保存在当前访问地址的浏览器或 App WebView 数据中，不随电脑端字号变化；电脑端设置不受影响，颜色主题仍跟随 DSH。输入框继续保持至少 16px，避免聚焦时自动缩放。
-
-旧 WebView 的专用移动页在 DSH 启动前补齐缺失的 `Promise.withResolvers` 与 `AbortSignal.any`，处理相关启动、工作区与重连错误。兼容范围与 App 的提前加载方式见 [App 与手机浏览器](#app-与手机浏览器)，不代表所有旧内核或第三方插件都已适配。
-
-长时间的已认证 DSH API 请求使用独立的 `upstreamApiTimeoutMs`，默认 `0`（不设响应等待超时），不再被普通传输的 30 秒预算截断；显式超时返回 `504 upstream_timeout`。扩展动作与路由处理器则默认限时 30 秒，可按操作配置 `timeoutMs`；调用方离开即释放网关请求槽位。两类等待与错误码见[慢链路与反复重连指南](docs/SLOW_CONNECTIONS.md)。
-
-首次加载遇到临时上游断连时，网关会重试尚未开始返回的只读插件与静态资源请求，减少偶发空白页；不重放 API 或写入请求，也不把错误响应按一年缓存。
-
-Android App 的设备列表设置新增“应用图标”，可选择默认鲸鱼娘或鲸鱼标志，配对数据保持不变；部分桌面启动器需要片刻刷新。扫码预览按比例铺满，不再拉伸；相机支持时使用连续对焦，并提供双指、双击缩放和 ± 倍率按钮。实际倍率受设备限制。
-
-已配对电脑保持固定排列，新配对追加到末尾，连接和可达状态变化不再自动重排；长按设备或打开更多菜单可“上移”或“移到顶部”，升级保留原先看到的排列。顺序与启动时恢复上次电脑的选择分开。App 内还可长按会话左上角的抽屉按钮返回电脑列表；原有点击开关抽屉和“通用设置 → 切换电脑”保留，手机浏览器不会执行这个 App 专属动作。
-
-“通用设置 → 移动页面模块”可在电脑端设置移动访问的默认加载项，或在手机端只覆盖当前配对设备的选择。勾选表示加载，启动必需模块不能关闭，保存时检查依赖；不卸载电脑插件，不自动刷新当前会话，下次手动重新打开页面才生效。详见[移动页面模块指南](docs/CLIENT_MODULES.md)。
-
-托管局域网的“额外可信网段 · 高级”可明确追加 IPv4 / IPv6 来源 CIDR，保存后需重启 DSH；当前局域网默认网段继续保留，不自动扩大访问范围。Windows 防火墙仍需单独放行这些来源。详见[额外可信网段指南](docs/TRUSTED_NETWORKS.md)。
-
-自有反向代理增加托管 Caddy 上游模式的实现，默认仍为你自行维护的 external 代理。固定源码构建与隔离 TLS 验证已完成，但尚未发布可信的固定版本二进制，当前候选的托管安装与连接不可用；已有 Lucky / Nginx / Caddy 配置和其他远程通道不受影响。详见[托管 Caddy 状态与条件](docs/CADDY_MANAGED.md)。
+> **托管 Caddy 尚未开放安装。**代码与隔离 TLS 验证已完成，但可信固定二进制尚未分发；现有自备代理和其他通道不受影响。[状态与条件](docs/CADDY_MANAGED.md)
 
 ## 快速开始
 
-已经安装 `dsh` 命令：
+先在电脑安装插件，再用 Android App 或手机浏览器配对。按你使用的 DSH 选择安装方式。
+
+### 官方 DSH Desktop
+
+在应用的 **插件** 页面安装并启用 `dsh-mobile`，再打开 **移动访问** 配置局域网或远程通道。Desktop 的 profile 由应用管理，不适用下面的 `--profile web` 命令。
+
+### DSH Web
+
+已经安装 `dsh` 命令时，在终端执行：
 
 ```powershell
 dsh plugin --profile web add dsh-mobile@latest
@@ -100,16 +101,17 @@ dsh plugin --profile web exec dsh-mobile setup
 dsh --profile web
 ```
 
-直接使用 DeepSeek Harness 源码：
+<details>
+<summary>使用 DeepSeek Harness 源码或社区插件市场</summary>
+
+在 DeepSeek Harness 源码目录中执行：
 
 ```powershell
-corepack enable; pnpm install
+pnpm install
 pnpm dsh plugin --profile web add dsh-mobile@latest
 pnpm dsh plugin --profile web exec dsh-mobile setup
 pnpm dsh --profile web
 ```
-
-使用官方 DSH Desktop：在应用的 **插件** 页面安装并启用 `dsh-mobile`，再打开 **移动访问** 完成局域网配置或选择远程通道。Desktop 的 profile 由应用管理，不适用上面的 `--profile web` 命令。
 
 也可以通过插件市场安装（可选）：
 
@@ -119,9 +121,13 @@ dsh plugin --profile web add dshmarket
 
 重启 DSH 后，在 **设置 → 插件市场** 里搜索 dsh-mobile 并安装。首次打开“移动访问”时，局域网页会列出电脑当前网络；确认网卡后由插件生成私有证书并配置局域网，按提示重启一次 DSH 即可使用，无需再打开终端运行 `setup`。
 
+</details>
+
 `setup` 会自动选择并记住当前局域网，切换 Wi-Fi、热点或 IP 后通常自动恢复；仅在自动选择失败时使用 `--address 192.168.x.x`。设置、证书、设备和自定义文件保存在 `$DSH_HOME/mobile-access/`。
 
-安装并启动 DSH 后，按照下一节选择局域网或远程连接。
+### 安装手机 App
+
+从上方链接下载正式 Android APK，或用手机浏览器打开电脑端生成的配对链接。随后按[连接教程](#连接教程)选择局域网或远程访问；手机不需要安装额外的隧道客户端。
 
 通过 npm 安装的插件会在桌面界面加载时检查新版本，有更新时在访问面板标题右侧显示“更新插件”，安装后需重启 DSH。App 下载入口展示最新版本；本地开发包不会被自动覆盖，Android App 不会主动检查或推送版本更新。
 
@@ -144,7 +150,14 @@ dsh plugin --profile web add dshmarket
 
 端口说明：`dsh web --port` 修改 DSH Web 上游端口（默认 3080），插件会自动跟随；`dsh-mobile setup --port` 修改 Mobile HTTPS 监听端口（默认 3443），配对二维码会包含实际端口。
 
+<details>
+<summary>无界面主机、内网代理与额外来源网段</summary>
+
 无图形界面的 Linux 主机，或通过局域网 IP / 反向代理打开 DSH Web 时，左下角 **移动访问** 管理口同样可用。管理 API 仍要求 TCP 对端是本机回环（例如本机 `socat` / 反向代理连到 `127.0.0.1`），不会把插件自己暴露到公网；浏览器 Host 可以是 `localhost`、RFC1918 或 IPv4 链路本地地址，公网 IP 和任意域名仍会返回 403。反向代理必须只对可信的本机或内网请求开放，不能把 `/api/mobile-access` 管理路径公开转发到互联网。手机走的独立 HTTPS 入口（默认 3443）仍是移动端界面，不会变成桌面管理口。
+
+已有 WireGuard 等受控路由网络时，0.5.6 候选提供[额外可信网段](docs/TRUSTED_NETWORKS.md)。它只追加明确的来源 CIDR，不建立 VPN 或路由，也不自动改 Windows 防火墙。
+
+</details>
 
 不安装 App 也可以访问：点击 **复制配对链接**，在手机浏览器中打开。局域网使用私有证书，浏览器首次访问可能提示不受信任；只在确认这是自己的 DSH 网关后按浏览器指引继续。公开证书的远程入口不应出现证书警告，若出现请检查通道和证书，不要直接忽略。
 
@@ -158,20 +171,39 @@ dsh plugin --profile web add dshmarket
 
 页面能打开但一直“重连中”，应先区分 WebSocket 升级失败、慢速数据同步和心跳超时，操作见[慢链路与反复重连指南](docs/SLOW_CONNECTIONS.md)。0.5.4 还提供按确切路径启用的 WebSocket 压缩，默认关闭；长会话或计量网络可按指南尝试，并对比实际传输量。
 
+| 连接方式 | 需要准备 | 地址特点与注意事项 |
+| --- | --- | --- |
+| cpolar | cpolar 账号与 Authtoken | 国内网络可优先尝试；免费临时地址可能变化 |
+| cloudflared 快速隧道 | 无需账号或域名 | 临时随机地址；不支持 SSE，[即时通知存在限制](docs/CLOUDFLARE_TUNNEL.md#快速隧道的功能限制) |
+| cloudflared 命名隧道 | Cloudflare 账号与域名 | 固定域名；[配置指南](docs/CLOUDFLARE_TUNNEL.md) |
+| Tailscale Funnel | Tailscale 登录与 Funnel 授权 | 中国大陆网络可能不稳定 |
+| 自建 FRP | 已有 VPS，域名或真实公网 IPv4 | 需管理服务器；[部署](docs/SELF_HOSTED_FRP.md)或[接入既有 frps](docs/ATTACH_EXISTING_FRPS.md) |
+| 自有反向代理 | 已有公开 HTTPS 代理 | 插件只提供私有认证后端；[配置指南](docs/SELF_HOSTED_ORIGIN.md) |
+
 <p align="center">
   <img src="https://raw.githubusercontent.com/saya-ch/dsh-mobile/main/assets/screenshots/remote-access.png" width="82%" alt="DSH Mobile 远程访问与通道选择">
 </p>
 
-1. 在 DeepSeek Harness 左下角打开 **移动访问 → 远程**，选择一种连接方式：
+1. 在 DeepSeek Harness 左下角打开 **移动访问 → 远程**，按上表选择通道，完成登录或配置。
+2. 状态变为“远程访问已就绪”后，点击 **生成远程配对二维码**。自有反向代理仅显示“后端已监听”，仍需确认公网 HTTPS 与 WebSocket 可用。
+3. 在 Android App 中选择 **远程访问**，扫描当前二维码完成配对；公开证书入口也可用手机浏览器打开配对链接。
+4. 以后 App 使用保存的地址与凭据自动重连。临时地址改变时，重新扫描电脑端当前二维码验证新地址，不需要清除 App 数据；旧设备 token 不会发送给新 Origin。
+
+<details>
+<summary>各通道的安装与登录步骤</summary>
+
+在面板选择对应通道后：
    - **Tailscale Funnel**：点击 **启用远程访问**，在打开的官方页面完成一次 Tailscale 登录；按面板提示继续允许 Funnel，然后返回 DSH 等待连接就绪。
    - **cpolar**：点击 **安装官方组件**，登录 cpolar 控制台取得 Authtoken，粘贴后点击 **保存并连接**。组件只会在确认后下载到插件私有目录；免费临时地址可能在 DSH 或 cpolar 重启后变化。
    - **自建 FRP（高级）**：已有 VPS 时，展开 **自建连接**，填写 frps 信息和公开 HTTPS 域名或真实公网 IPv4。可以复制受限的 frps + Caddy 模板手动部署，也可以在 Ubuntu/Debian + systemd 上用 SSH 密钥一键部署；不支持密码登录，也不会覆盖非 DSH Mobile 管理的 Caddy 配置。部署或清理前须到 VPS 控制台核对主机指纹。本机 `frpc` 按需下载校验，VPS 需单独清理。需要 Android App 0.3.3 或更新版本；证书、端口和操作步骤见 [自建 FRP 使用指南](docs/SELF_HOSTED_FRP.md)。
    - **自有反向代理**：展开 **自建连接 → 自有反向代理**，填写公网 HTTPS 地址（支持自定义端口）、私有监听 IPv4、独立 HTTP 后端端口（默认 3444）和代理来源 CIDR，再点击 **保存并启动后端**。适合已有 Lucky/Nginx/Caddy 的用户，无需隧道组件；需要 Android App 0.4.0 或更高版本。详见 [自有反向代理指南](docs/SELF_HOSTED_ORIGIN.md)。
    - **cloudflared 快速隧道**：点击 **安装官方组件**，插件在确认后从官方发布页下载固定版本到插件私有目录，随后自动申请一个临时公网地址（quick tunnel），**无需注册或登录**。适合不想注册账号的用户；quick tunnel 地址每次重连都会变化，官方定位为测试用途、有限流且无可用性保证，请勿用于必须长期可达的生产访问，只适合临时或验证场景。
    - **cloudflared 命名隧道**：已有 Cloudflare 账号和域名时，把隧道类型切到 **命名隧道**，填入连接器令牌、公网域名与本机转发端口，即可获得重启后不变的固定地址（令牌只存私有目录、只经环境变量传给 cloudflared）。步骤见 [Cloudflare 命名隧道](docs/CLOUDFLARE_TUNNEL.md)。
-2. 状态变为“远程访问已就绪”后，点击 **生成远程配对二维码**。自有反向代理仅显示“后端已监听”：它不验证公网连通性，仍需检查代理 HTTPS、证书与 WebSocket 并用手机验收。
-3. 在 Android App 中进入 **远程访问**，扫描二维码完成独立配对。
-4. 此后 App 会保存当前地址和设备凭据并自动重连。若 cpolar 免费临时地址发生变化，请扫描电脑端当前远程二维码重新验证连接；无需清除 App 数据。旧设备 token 只会发送到原先保存的精确 Origin，不会发送给二维码中的新域名。
+
+</details>
+
+<details>
+<summary>远程通知、服务器运维与安全限制</summary>
 
 > **远程通知说明**：浏览器的 `Notification` 权限按 Origin 分别授权，网页系统通知只显示在运行该网页的设备上。Android App 的任务提醒是独立的 0.4.0 功能，需要在 App 内 DSH 的 **设置 → 通用设置** 中主动开启，且依赖 WebView 页面仍存活；它不是通用的后台推送。需要可靠的后台推送时，请使用你已配置的服务端 webhook 或机器人通道。
 
@@ -181,7 +213,9 @@ Tailscale Funnel 覆盖范围广，但在中国大陆网络下可能不稳定。
 
 自有反向代理的 HTTP 后端只允许留在可信私网；**不要把它映射到公网，也不要绕过它直连 DSH 或现有 LAN 3443**。来源 CIDR 匹配代理的直接 TCP 来源，不信任转发头；反代须保留外部 Host（含端口）、Origin、Cookie 和 WebSocket。清除代理配置不会删除已配对远程设备。
 
-远程公开地址仍受 DSH 设备配对保护。内置 Funnel 与托管 cpolar、cloudflared 支持 Windows x64 与 Linux x64/arm64；cloudflared 还支持 macOS x64/arm64 按需安装。FRP 0.70.1 支持 Windows、Linux、macOS 的 x64 与 arm64。各通道的系统支持矩阵见[兼容性](#兼容性)。
+各通道的系统和组件支持范围见[兼容性](#兼容性)。本机托管的程序、凭据与配置可从面板清理；VPS 上的文件必须按对应指南单独清理。
+
+</details>
 
 ## 扩展与自定义
 
@@ -218,15 +252,15 @@ Tailscale Funnel 覆盖范围广，但在中国大陆网络下可能不稳定。
 
 ## 设备管理
 
-Android App 用一个“已配对设备”列表同时显示多台电脑：局域网、cpolar、cloudflared、Tailscale Funnel 和自建 FRP 配对共处一处。首次升级会自动迁移旧版局域网与远程凭据，不要求重新配对；地址变化且 `instanceId` 与原记录一致时会合并条目，保留自定义名称。自签 FRP 使用独立 CA 指纹作为身份，首次与局域网配对时可能显示为另一条记录。设备 Token 和局域网 CA 由 Android Keystore 加密保存；0.4.6 App 还会加密保存自签 FRP 入口固定的远程 CA。这些信息不会显示在设备列表或二维码中。
+Android App 在“已配对设备”中统一显示电脑及其局域网／远程连接记录。两种方式的授权彼此独立，同一台电脑可能有两条记录。升级会迁移旧凭据，无需重新配对；重新验证变化的地址后，相同身份的记录会合并并保留名称。自签 FRP 使用独立 CA 指纹，可能另成一条记录。Token 和固定的 CA 由 Android Keystore 加密；配对二维码含短期配对信息，不含长期设备 Token 或 CA 私钥。
 
 每条记录显示自定义名称、连接方式、Origin、定期更新的可达状态和最近连接时间。绿色状态点表示“可达”，灰色状态点表示“检测中”“暂不可达”“配对已过期”或“电脑端已移除”；可达性检查直接验证 DSH Gateway，不依赖 ICMP，也不会把暂时断网误判成电脑端撤销。
 
-- **启动时打开 → 直接进入 DSH**（默认）：单设备直接连接；多设备优先连接上次使用的设备，其次按最近连接时间选择仍有效的设备。连接超过有限重试预算后自动回到列表，不会无限转圈。
-- **启动时打开 → 显示设备列表**：每次启动先选择电脑，适合经常在多台设备之间切换。该选项位于列表右上角的设置按钮中，修改后立即保存。
+- **启动行为 → 直接进入 DSH**（默认）：单设备直接连接；多设备优先连接上次使用的设备，其次按最近连接时间选择仍有效的设备。连接超过有限重试预算后自动回到列表，不会无限转圈。
+- **启动行为 → 显示设备列表**：每次启动先选择电脑，适合经常在多台设备之间切换。入口是列表右上角 **设置 → 启动行为**，修改后立即保存。
 - 点按设备行可连接；右侧“…”和长按提供相同的操作面板，可编辑名称、立即检测、重新配对或删除本地记录。删除前会二次确认，并提供短暂撤销；撤销只恢复本机记录，不恢复电脑端已经撤销的授权。
-- 在 WebView 页面打开 DSH **设置 → 通用设置 → 切换电脑** 可回到已配对设备列表；Android App 还支持长按左上角的抽屉开关快速返回，短按仍正常展开或收起抽屉。在线收到电脑端撤销通知后，App 保留该条目并显示“电脑端已移除”，停止自动重连，同时提供 **重新配对** 和 **删除本地记录**。
-- 列表顺序是固定的：连接哪台电脑都不会把它移到最前，新配对的电脑追加在末尾，升级后沿用你当前的顺序。要调整顺序时，在那一行的操作面板里用 **上移** 和 **置顶**（第一行不显示这两个动作，第二行只有 **上移**），顺序立即保存到本机。启动时的自动连接仍按“上次使用的那台”优先，与列表顺序无关。
+- 在 WebView 页面打开 DSH **设置 → 通用设置 → 切换电脑** 可回到已配对设备列表。在线收到电脑端撤销通知后，App 保留条目并显示“电脑端已移除”，停止自动重连，提供重新配对和删除本地记录。
+- **0.5.6 候选新增**：列表保持固定顺序，新配对追加到末尾，升级保留旧版可见顺序；操作面板提供 **上移／置顶**，顺序与启动选择分开。App 内还可长按左上角抽屉开关返回列表，短按仍开关抽屉；手机浏览器没有此原生动作。
 
 电脑端撤销会永久删除持久化存储中的设备记录及令牌摘要，而不是保留 `revokedAt` 标记；启动时也会清理旧版留下的已撤销记录。删除后，旧令牌与未知令牌一样返回 `401 authentication_failed`。现有 App 若在离线期间被撤销，再次检测时可能显示“配对已过期”，需要重新配对；在线会话仍会收到撤销通知并立即断开。
 
@@ -247,23 +281,26 @@ Android App 用一个“已配对设备”列表同时显示多台电脑：局�
 
 0.5.3 包含默认启用、可独立启停的 `dsh-mobile-question-fixes` 提问卡片组件。在 DSH 插件详情的组件列表中关闭它，可立即恢复原卡片样式。长问题、选项和底部按钮在有限高度的卡片内共同滚动，收起时标题最多显示两行；手机浏览器的触屏 Enter 保留换行，Android App 则仅在软键盘已打开且未连接实体键盘时使用该行为。答案草稿仍由 DSH 管理，不另存到浏览器 localStorage。
 
-开发中（下个版本）：触屏浏览器的主会话输入栏已有草稿时，普通 Enter 换行；空草稿保持无操作。输入法组合、展开的菜单与 Cmd/Ctrl+Enter 等组合键继续由 DSH 处理；非触屏桌面行为不变，但触屏设备连接外接键盘时，普通 Enter 也会换行。
+DSH Mobile 保留工作区、任务管理、终端和文件面板入口，第三方插件仍由 DSH 加载。移动层适配布局与连接，不修改 DeepSeek Harness 源码；具体插件在小屏上是否易用，仍取决于它自身的布局与交互。
 
-移动适配保持 DSH 原有的工作区、任务管理、终端和文件面板入口，不会把第三方插件内容隔离成另一套页面。下面的宽屏截图展示 Android App 在宽屏下的布局。App 会根据屏幕宽度自适应：手机使用抽屉和浮层，宽屏使用并排面板；两种布局共享相同的功能和连接方式。第三方插件仍由 DSH 自己加载，移动层负责适配布局与连接，不修改 DeepSeek Harness 源码。
+第三方插件需要能在 DSH Web 页面中运行，并使用可达的 HTTP／WebSocket 接口。移动层不保证把所有插件的自定义布局自动改成手机布局，也不能替代插件依赖的桌面原生窗口。
 
-开发中（下个版本）：窄屏下选择“插件”“自动化任务”等面板后，左侧抽屉会自动收起；面板上方预留导航条提供“返回会话”，不遮挡保存等操作，也不主动弹出输入法。
+### WebSocket 放行
 
-兼容条件与 WebSocket 放行规则：
-
-代理页面为兼容部分社区插件允许嵌入 HTTP 页面；这类内容未加密，可能被篡改，浏览器也可能因混合内容策略拦截。处理敏感内容时请使用 HTTPS。通过 HTTPS 管理入口打开远程面板时，页面顶部会显示相同提醒。
-
-- 0.5.2 不再因 DSH 版本号未列入依赖范围而阻止安装；已对 `0.2.0-rc.2` 进行源码契约、隔离配对、页面启动及工作区读取检查。未来新版本仍需实际验证。官方 DSH Desktop 的移动访问管理入口继续要求已认证的 DSH 会话，不放宽普通 Web 页面的管理请求。
-- 0.5.1 延续对 DSH `0.1.7-alpha.2`、`0.1.7-rc.1` 和 `0.1.7-rc.2` 的契约及启动检查，并适配 `0.2.0-rc.1`。官方 DSH Desktop `0.1.7-rc.2` 使用 `dsh-app://app/` 页面。
 - 网关默认只允许 DSH 内置的第一方 WebSocket 路径，包括 `/sidebar/ws/terminal`。社区侧边栏插件使用的其他路径默认拦截，通常会在诊断页显示为待处理项目；截图中的 `/sidebar/ws/agent-opens` 和 `/sidebar/ws/agent-terminals` 就属于这类需要按实际插件确认的路径。
 - 在 **连接诊断 → 第三方 WebSocket 路径** 中，只对确认过的精确路径点击 **允许**。系统不接受带查询字符串或模糊前缀的路径；不建议使用“全部允许”。已允许的路径可以随时移除，局域网和远程连接使用同一套规则。
 - 放行只代表该路径可以通过已认证、同源的 DSH Mobile 网关，不会开放任意 TCP/UDP 端口，也不会绕过设备配对。若社区插件仍然连接失败，先看诊断页的实际拦截路径，再按一条路径放行。
 
 若另一个远程访问插件在 DSH Mobile 页面上显示自己的“未配对”提示，那是两套不同的授权。可先在电脑端暂时关闭另一插件的远程访问，确认 Mobile 链路是否恢复；不要把 DSH Mobile 密钥输入它的配对页。仅用下面的模块排除选项不能保证移除该插件在页面启动前注入的请求改写脚本，参见 [#111](https://github.com/saya-ch/dsh-mobile/issues/111)。
+
+网关允许部分 HTTP iframe 不代表客户端会加载它：内容未加密，Android App 仍阻止 HTTPS 页面中的 HTTP 混合内容，浏览器也可能拦截。请优先配置 HTTPS；通过 HTTPS 管理入口打开远程面板时会显示相同风险提醒。
+
+### 可选模块与高级配置
+
+0.5.6 候选新增[移动页面模块设置](docs/CLIENT_MODULES.md)，可分别设置电脑默认和当前设备选择，不卸载电脑插件。保存后下次手动打开生效，不自动刷新会话；已保存选择失效时提供恢复入口。
+
+<details>
+<summary>通过 profile 配置 excludedClientModules</summary>
 
 若某个不需要的客户端插件显著增加手机首次加载流量，高级用户可在当前 profile 的 `mobile-access` 插件配置中设置 `excludedClientModules`，填入启动清单中的**准确包名**，重启 DSH 后生效。它只改变经网关提供的专用移动页面；电脑端和 `?frontend=stock` 页面不变。例如，若当前启动清单同时包含以下两个包，下面的配置会移除文档预览及依赖它的“在应用中打开”功能：
 
@@ -275,7 +312,9 @@ excludedClientModules:
 
 这是按安装环境选择的高级配置，没有默认排除列表。插件会拒绝不存在的包、启动必需模块，以及仍被保留模块通过 `inject` 或 `external` 引用的包；配置不匹配当前 DSH 或社区插件时，移动页面返回 `409 excluded_client_modules_invalid` 和冲突详情，电脑端也会提示，移除或调整配置即可恢复。模块内容与依赖会随 DSH 版本变化，不能把其他人的节省比例当作自己的预期。
 
-0.5.6（待发布）还提供上述[通用设置入口](docs/CLIENT_MODULES.md)：设备自己的选择优先于电脑默认，电脑默认优先于这里的插件配置。恢复默认只移除当前层的覆盖；保存无需重启 DSH，也不会自动重新加载已打开的页面。
+设置优先级为本设备选择 → 电脑默认 → 插件配置。详细生效与恢复规则见[模块指南](docs/CLIENT_MODULES.md)。
+
+</details>
 
 <table>
   <tr>
@@ -367,6 +406,13 @@ macOS 上局域网、cloudflared、自建 FRP 与自有反向代理可用；Funn
 | DSH Mobile 插件                         | 验证支持的 DeepSeek Harness 版本                             |
 | ----------------------------------------- | -------------------------------------------------------------- |
 | `0.5.5` | `0.1.7-alpha.2`、`0.1.7-rc.1`、`0.1.7-rc.2`、`0.2.0-rc.1`、`0.2.0-rc.2`（npm 打包安装、隔离配对、移动页面启动及 WebSocket 工作区读取） |
+| `0.5.6` 候选 | 功能整合的 CI 已覆盖 `0.1.7-alpha.2`、`0.1.7-rc.1`、`0.1.7-rc.2`、`0.2.0-rc.1`、`0.2.0-rc.2`；本地另验证输入栏与模块设置。文档／发布检查更新后，正式发布前仍按最终提交重验 |
+
+<details>
+<summary>历史版本验证记录</summary>
+
+| DSH Mobile 插件 | 验证支持的 DeepSeek Harness 版本 |
+| --- | --- |
 | `0.5.4` | `0.1.7-alpha.2`、`0.1.7-rc.1`、`0.1.7-rc.2`、`0.2.0-rc.1`、`0.2.0-rc.2`（npm 打包安装、隔离配对、移动页面启动及 WebSocket 工作区读取） |
 | `0.5.3` | `0.1.7-alpha.2`、`0.1.7-rc.1`、`0.1.7-rc.2`、`0.2.0-rc.1`、`0.2.0-rc.2`（源码契约、npm 打包安装、隔离配对、移动页面启动及 WebSocket 工作区读取） |
 | `0.5.2` | `0.1.7-alpha.2`、`0.1.7-rc.1`、`0.1.7-rc.2`、`0.2.0-rc.1`（延续既有验证）；`0.2.0-rc.2`（源码契约、隔离配对、移动页面启动和 WebSocket 工作区读取） |
@@ -386,6 +432,8 @@ macOS 上局域网、cloudflared、自建 FRP 与自有反向代理可用；Funn
 | `0.3.4`、`0.3.5`                        | `0.1.2-alpha.2`                                              |
 | `0.3.0`-`0.3.3`                         | `0.1.2-alpha.1`                                              |
 | `0.1.4`、`0.2.x`                        | `0.1.1-rc.2`                                                 |
+
+</details>
 
 现有 App（0.3.3 及更新）无需重新配对；cpolar 用户应使用 0.3.15 或更新 App，较早版本可能在免费线路的慢速首次加载完成前超时；更早的 App 还使用不同的状态栏策略。App 0.4.0 才支持多设备列表、启动行为设置和电脑端撤销状态同步；旧版 App 仍可连接已保存的单台设备。App 0.1.3 及更早版本需卸载重装并重新配对。
 
@@ -423,18 +471,6 @@ npm ci
 npm run verify
 ```
 
-修改提问卡片或移动布局时，完成构建后运行 `npx playwright install chromium --only-shell`、`npm run smoke:question-fixes` 和 `npm run smoke:native-layout`，检查实际客户端产物的滚动、键盘与布局行为。
-
-真实启动冒烟另用临时 DSH Home、随机回环端口和 Chromium 配对，不访问现有用户配置，也不发送模型请求。CI 分别测试 DSH `0.1.7-alpha.2`、`0.1.7-rc.1`、`0.1.7-rc.2`、`0.2.0-rc.1` 与 `0.2.0-rc.2`；本机可把 DSH `0.2.0-rc.2` 装在独立目录，避免替换插件的开发依赖：
-
-```powershell
-$dshMobileTestRuntime = Join-Path $env:TEMP 'dsh-mobile-test-runtime'
-npm install --prefix $dshMobileTestRuntime --no-save --package-lock=false @deepseek-ai/dsh@0.2.0-rc.2
-$env:DSH_BOOT_SMOKE_BIN = Join-Path $dshMobileTestRuntime 'node_modules/@deepseek-ai/dsh/lib/bin.js'
-npx playwright install chromium --only-shell
-npm run smoke:dsh-boot
-```
-
-Android 构建见 [App 文档](https://github.com/saya-ch/dsh-mobile/blob/main/apps/mobile/README.zh-CN.md)。
+文档快速检查使用 `npm run check:docs`。按改动选择的浏览器测试、隔离 DSH 打包验收、截图和正式发布流程见 [CONTRIBUTING.md](CONTRIBUTING.md)；Android 构建见 [App 手册](apps/mobile/README.zh-CN.md#构建)。不要用真实用户配置或正式 App 数据替代测试资料。
 
 Apache-2.0，详见 [LICENSE](LICENSE)。

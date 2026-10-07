@@ -1,32 +1,41 @@
-# DSH Mobile 文档 / Documentation
+# 使用指南 / Documentation
 
-本目录收录需要展开说明的指南。内置的远程通道（Tailscale Funnel、cpolar、cloudflared）为零配置或按需安装，说明见根目录 [README](../README.md#连接教程)，不单独成文；cloudflared 的命名隧道需要在 Cloudflare 控制台建隧道、配公开主机名并取令牌，步骤较多，单独成文。
+第一次使用请先看[快速开始](../README.md#快速开始)和[局域网／远程连接教程](../README.md#连接教程)。这里收录需要进一步配置或排障的专题；不必为了完成首次配对读完所有页面。
 
-## 面向用户 / User guides
+## 已发布功能 / Released features
 
-| 中文 | English | 内容 |
+| 你想做什么 | 中文 | English |
 | --- | --- | --- |
-| [Cloudflare 命名隧道](CLOUDFLARE_TUNNEL.md) | [Cloudflare named tunnel](CLOUDFLARE_TUNNEL.en.md) | 用 Cloudflare 账号令牌把 cloudflared 从随机快速隧道换成固定公网域名 |
-| [自建 FRP 使用指南](SELF_HOSTED_FRP.md) | [Self-hosted FRP guide](SELF_HOSTED_FRP.en.md) | 已有 VPS 时用 frps + Caddy 自建远程通道，避开公共隧道带宽限制 |
-| [接入你既有的 frps](ATTACH_EXISTING_FRPS.md) | [Attach to an existing frps](ATTACH_EXISTING_FRPS.en.md) | 复用 VPS 上已运行的 frps，不自动修改服务器；可选公开 CA + Caddy 或自签 CA + TCP 透传，须核对监听与证书有效期。 |
-| [自有 HTTPS 反向代理](SELF_HOSTED_ORIGIN.md) | [Own HTTPS reverse proxy](SELF_HOSTED_ORIGIN.en.md) | 复用已有的 Lucky / Nginx / Caddy 公网 HTTPS 入口，无需隧道组件 |
-| [托管 Caddy](CADDY_MANAGED.md) | [Managed Caddy](CADDY_MANAGED.en.md) | 待发布的自有代理上游模式；固定二进制尚未分发，安装不可用，external 模式不受影响 |
-| [移动页面模块](CLIENT_MODULES.md) | [Mobile page modules](CLIENT_MODULES.en.md) | 待发布的电脑默认与设备覆盖选择；下次手动打开生效，不卸载电脑插件 |
-| [额外可信网段](TRUSTED_NETWORKS.md) | [Additional trusted networks](TRUSTED_NETWORKS.en.md) | 待发布的托管局域网来源 CIDR 设置；保留默认 LAN 网段，Windows 防火墙另行配置 |
-| [慢链路与反复重连](SLOW_CONNECTIONS.md) | [Slow links and repeated reconnection](SLOW_CONNECTIONS.en.md) | 区分 HTTP 与实时连接故障，按需配置 DSH 等待时间或启用 WebSocket 压缩 |
+| 使用 Android App、了解返回键、权限与升级 | [App 手册](../apps/mobile/README.zh-CN.md) | [Android app](../apps/mobile/README.md) |
+| 使用固定 Cloudflare 域名，而非临时随机地址 | [命名隧道](CLOUDFLARE_TUNNEL.md) | [Named tunnel](CLOUDFLARE_TUNNEL.en.md) |
+| 在已有 VPS 上新部署 FRP 与 HTTPS 入口 | [自建 FRP](SELF_HOSTED_FRP.md) | [Self-hosted FRP](SELF_HOSTED_FRP.en.md) |
+| 复用已经运行的 frps，不自动修改服务器 | [接入既有 frps](ATTACH_EXISTING_FRPS.md) | [Existing frps](ATTACH_EXISTING_FRPS.en.md) |
+| 复用 Lucky、Nginx 或 Caddy 的公开 HTTPS 入口 | [自有反向代理](SELF_HOSTED_ORIGIN.md) | [Own reverse proxy](SELF_HOSTED_ORIGIN.en.md) |
+| 页面加载慢、实时连接反复重连或长操作超时 | [慢链路与重连](SLOW_CONNECTIONS.md) | [Slow links and reconnection](SLOW_CONNECTIONS.en.md) |
 
-> 命名隧道与两个自建提供方都要求手机端走 App 的**远程访问**扫码流程；`SELF_HOSTED_ORIGIN.en.md` 是精简版，字段表与排错清单以中文版为准。
+在 Android App 中连接公开隧道或自建入口时请选择 **远程访问**。公开受信任证书也可用手机浏览器配对；既有 frps 的自签入口需要 **0.4.6 或更高版本 App** 固定远程 CA。各通道仍要求 DSH Mobile 配对，不能直接暴露普通 DSH 或私有 HTTP 后端。
 
-> 既有 frps 接入从 0.4.6 起提供；其中自签入口需要 0.4.6 Android App，旧版不能配对。
+## 0.5.6 候选功能 / Candidate features
 
-## 验证记录 / Verification records
+正式下载仍为 0.5.5；以下指南说明当前开发候选，不表示已有正式 0.5.6 安装包。
 
-| 文档 | 内容 |
+| 功能 | 中文 | English | 使用状态 |
+| --- | --- | --- | --- |
+| 为移动页面选择加载模块 | [模块设置](CLIENT_MODULES.md) | [Module settings](CLIENT_MODULES.en.md) | 候选提供；电脑默认与设备覆盖分别保存，不自动刷新会话 |
+| 允许受控路由网络访问 LAN Gateway | [额外可信网段](TRUSTED_NETWORKS.md) | [Trusted networks](TRUSTED_NETWORKS.en.md) | 候选提供；不建立 VPN，不自动扩大防火墙规则 |
+| 由插件管理 Caddy HTTPS 上游 | [托管 Caddy](CADDY_MANAGED.md) | [Managed Caddy](CADDY_MANAGED.en.md) | 尚无可信固定二进制分发，安装与连接仍禁用 |
+
+## 开发与安全 / Development and security
+
+- [贡献指南](../CONTRIBUTING.md)：本地检查、浏览器与 Android 验证、发布要求。
+- [安全说明](../SECURITY.md)：配对授权、TLS、组件清理与私密漏洞反馈。
+- [贡献记录](../CONTRIBUTORS.md)与[更新记录](../CHANGELOG.md)：分别查看社区参与和版本变化。
+
+## 历史验证 / Historical records
+
+以下记录保留原来的版本和测试范围，不能当作当前候选或你的网络环境已验证的证明。
+
+| 记录 | 范围 |
 | --- | --- |
-| [DSH 0.1.5 局域网验证记录](DSH_0.1.5_LAN.md) | DSH Mobile 0.3.15 的历史局域网实测；当前版本组合请看[兼容性表](../README.md#兼容性) |
-
-## 面向维护者 / Maintainer notes
-
-维护者文档面向改代码的人，**不随 npm 包发布**，只在仓库中阅读：
-
-- [自建 FRP 维护记录](HANDOFF_SELF_HOSTED_FRP.md) —— 0.4.6 开发时的代码地图、安全检查点与历史真机验证；当前使用步骤以本页上方的用户指南为准。
+| [DSH 0.1.5 局域网验证](DSH_0.1.5_LAN.md) | 0.3.15 的历史实测；当前组合见[兼容性](../README.md#兼容性) |
+| [FRP 维护交接](HANDOFF_SELF_HOSTED_FRP.md) | 0.4.6 开发时的代码地图与历史证据，仅在仓库阅读，不随 npm 包发布 |

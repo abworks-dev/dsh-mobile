@@ -1,5 +1,11 @@
 # Third-party notices
 
+## Brand artwork
+
+The Android launcher whale-mark variants were contributed by [@abworks-dev in PR #175](https://github.com/saya-ch/dsh-mobile/pull/175), which describes rendering the DeepSeek whale SVG path. They identify the upstream brand; DSH Mobile remains a community-maintained client, not an official DeepSeek Android application or an assertion of endorsement. This repository's code license does not assert ownership of third-party names or marks. The default character artwork and repository hero remain the project's existing brand assets.
+
+## Runtime components
+
 DSH Mobile includes platform-specific Windows and Linux Funnel helpers built from the source in `native/funnel-host`. They use [Tailscale tsnet](https://pkg.go.dev/tailscale.com/tsnet) `v1.102.3`, distributed under the BSD 3-Clause license. Their exact statically linked Go module versions and complete license and notice texts are generated from the bundled executables into `FUNNEL_THIRD_PARTY_LICENSES.txt`, which is included in every npm package.
 
 The optional cpolar component is not included in the npm package or Android App. When a user explicitly chooses cpolar installation, DSH Mobile downloads the pinned official archive shown in the UI, verifies its size and SHA-256 digest, and stores it only under the user's DSH Mobile data directory. cpolar remains subject to its [terms of service](https://www.cpolar.com/tos).

@@ -2,7 +2,7 @@
 
 [English guide](SELF_HOSTED_FRP.en.md)
 
-本页介绍托管部署（插件安装 frps 与 Caddy）。
+本页介绍新建 FRP 远程入口，可手动部署，也可让插件通过 SSH 托管部署 frps 与 Caddy。
 
 > **已经有一台跑着 frps 的 VPS？** 从 0.4.6 起可直接接入，见 [接入你既有的 frps](ATTACH_EXISTING_FRPS.md)：
 > 插件不装不改你的 frps、**零 SSH**；还提供**完全不用公开证书**的自签穿透档（frps 只做 TCP 透传，
@@ -22,16 +22,16 @@
 ## 两种入口
 
 - **域名模式**：公开地址是自己的域名，Caddy 自动申请并续期证书。
-- **公网 IPv4 模式**：公开地址直接是 VPS 公网 IPv4（例如你自己的 VPS 地址），插件用 Certbot 申请约 6 天有效的 Let's Encrypt IP 证书，并安装每日自动续期定时器。注意：文档示例地址（如 `203.0.113.10`）和内网、保留地址会被拒绝，必须填写真实可路由的公网 IP。
+- **公网 IPv4 模式**：公开地址直接是 VPS 公网 IPv4，当前模板用 Certbot 申请约 6 天有效的 Let's Encrypt IP 证书。自动部署会安装每日续期定时器；手动部署须自行安排续期、证书复制和 Caddy 重载。示例地址（如 `203.0.113.10`）、内网和保留地址会被拒绝，必须填写真实可路由的公网 IP。
 
 本页的公开证书入口需要 Android App 0.3.3 或更高版本（远程自定义入口）。另见[接入既有 frps](ATTACH_EXISTING_FRPS.md)中的自签 TCP 穿透档：它仅适用于接入模式，需要 0.4.6 或更新的 Android App 固定远程 CA；旧版 App 不支持该档，仍可使用局域网、cpolar 和 Tailscale。
 
 ## 手动部署 vs 自动部署
 
-- **手动部署**：在面板复制受限模板，把 frps 部分存为 `/etc/dsh-mobile/frps.toml`，把 Caddy 片段存为 `/etc/caddy/dsh-mobile-dsh.caddy`，并确保主 Caddyfile 里有且仅需这一行：`import /etc/caddy/dsh-mobile-dsh.caddy`（没有 Caddyfile 就新建一个只写这一行）。复制操作本身不改变任何东西。公网 IPv4 还需要按模板里的注释步骤用 Certbot 申请一次 IP 证书（Caddy 自己签发不了 IP 证书）；域名模式 Caddy 全自动。
+- **手动部署**：先自行安装 frps、Caddy，配置服务和防火墙，再复制面板的受限模板。frps 部分存为 `/etc/dsh-mobile/frps.toml`，Caddy 片段存为 `/etc/caddy/dsh-mobile-dsh.caddy`；主 Caddyfile 只需添加一次 `import /etc/caddy/dsh-mobile-dsh.caddy`，不要覆盖其他站点。复制或保存模板不会自动安装、启动服务。公网 IPv4 按本项目模板使用 Certbot，并需自行维护续期和证书重载；域名证书由 Caddy 管理。
 - **自动部署**：填写 SSH 用户、端口和本机私钥路径（留空则用 ssh-agent 或 SSH 配置），点击一键部署。要求 Ubuntu/Debian + systemd，只接受密钥登录，不接受密码。
 
-点部署按钮前，面板会列出自动部署将在 VPS 上做的全部改动：从官方 APT 源安装 Caddy；仅在公网 IPv4 模式安装 Python venv、Certbot 和证书续期定时器；创建 `dsh-mobile` 系统用户（已存在则复用，卸载时保留）、frps 配置与服务、Caddy 片段和主文件里的一行 import；如果 UFW 已启用，则放行 FRP 控制端口与 80/443。**主 Caddyfile 里你自己的内容永远不会被改写或合并**：没有 Caddyfile、空文件或官方默认文件时才写入这一行 import；已有 DSH Mobile import 时只整理为一行，其他非空配置会停止部署并告诉你手动加这一行。
+点部署按钮前，面板会列出自动部署将在 VPS 上做的全部改动：从官方 APT 源安装 Caddy；仅在公网 IPv4 模式安装 Python venv、Certbot 和证书续期定时器；创建 `dsh-mobile` 系统用户、frps 配置与服务、Caddy 片段和主文件里的一行 import；如果 UFW 已启用，则放行 FRP 控制端口与 80/443。已存在的系统用户会复用并在清理时保留，本次部署创建的用户则会在清理时删除。**主 Caddyfile 里你自己的内容不会被改写或合并**：没有 Caddyfile、空文件或官方默认文件时才写入这一行 import；已有 DSH Mobile import 时只整理为一行，其他非空配置会停止部署并告诉你手动加这一行。
 
 ## 主机指纹核对（每次必做）
 
@@ -67,12 +67,12 @@ curl -v https://PUBLIC_HOST/mobile-access/discovery
 
 本机优先看插件日志（`$DSH_HOME/mobile-access/logs/dsh-mobile.log`，JSONL，超 5 MB 轮转，自动脱敏 Token 与密钥）与面板诊断报告。Windows 杀毒软件可能隔离 frpc；如确有拦截，只为已校验的组件目录设置最小范围例外。
 
-一台 frps 被多台电脑共用时：代理名在**整台服务器**内唯一，公网入口端口同样先到先得。插件按本机安装标识注册代理名（`dsh-mobile-<安装标识前 12 位>`），不同电脑之间不会再抢同一个名字；若报「已有本机安装名对应的 FRP 代理在使用中」，说明该名字被另一台电脑占用，或本机上一次连接尚未等到 frps 心跳超时，处理后再重连；若报「入口端口已被占用」，为这台电脑换一个入口端口即可。frpc 遇到这两种冲突时并不会退出，只是入口端口从未发布，修复前面板只会显示「公网端点未能就绪」。
+一台 frps 被多台电脑共用时，代理名在整台服务器内唯一，公网入口端口也不能重复。插件使用 `dsh-mobile-<安装标识前 12 位>` 作为代理名。报代理名已使用时，检查另一台电脑或尚未过期的旧连接；报入口端口已占用时，为本机选择另一个入口端口。frpc 仍在运行并不表示入口已发布，应以公网验证结果为准。
 
 ## 限制
 
 - 中国大陆 VPS 上的未备案域名可能被云厂商拦截，此时改用公网 IPv4 模式。
-- IPv4 证书是短期证书，必须保持续期定时器与 Caddy 正常运行。
+- IPv4 证书是短期证书，必须保持自动部署的续期定时器，或手动配置的续期／复制／重载流程正常运行。
 - SSH 表单按浏览器配置文件保存，换浏览器或清理站点数据后需重填（私钥与密码从不保存）。
 - VPS 的 SSH 目前不支持 IPv6 地址。
 - frps 明文 vhost 必须只监听 `127.0.0.1`；插件会拒绝公网可达的明文端口，并在公开发现接口确认是当前电脑后才显示“已就绪”。

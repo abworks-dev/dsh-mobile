@@ -95,14 +95,15 @@
     "capture:screenshots": "node ./scripts/capture-mobile-screenshots.mjs",
     "check:release-tag": "node ./scripts/check-release-version.mjs --tag-env",
     "check:version": "node ./scripts/check-release-version.mjs",
+    "check:docs": "node ./scripts/check-docs.mjs",
     "clean": "node ./scripts/clean.mjs",
     "generate:funnel-licenses": "node ./scripts/funnel-third-party-licenses.mjs --write",
     "lint": "tsc --noEmit",
     "test": "vitest run --pool=threads --maxWorkers=1",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
-    "prepack": "npm run check:version && npm run check:funnel-licenses && npm run build",
-    "verify": "npm run check:version && npm run check:funnel-licenses && npm run check:mobile-release && npm run typecheck && npm run test && npm run build && npm pack --dry-run"
+    "prepack": "npm run check:version && npm run check:docs && npm run check:funnel-licenses && npm run build",
+    "verify": "npm run check:version && npm run check:docs && npm run check:funnel-licenses && npm run check:mobile-release && npm run typecheck && npm run test && npm run build && npm pack --dry-run"
   },
   "engines": {
     "node": "^22.19.0 || >=24.0.0"

@@ -2,9 +2,6 @@
 
 本文保留 0.4.6 开发时的代码地图和验证记录，供维护者核对；当前用户操作以 [SELF_HOSTED_FRP.md](SELF_HOSTED_FRP.md) 和 [ATTACH_EXISTING_FRPS.md](ATTACH_EXISTING_FRPS.md) 为准。既有 frps 接入与自签入口从 0.4.6 起提供；自签档需要 0.4.6 或更新的 Android App。下文的 2026-09-03 真机记录只验证托管部署的公开证书 IP 档，不是 attach 档验收结果。
 
-面向维护者。用户文档见 [SELF_HOSTED_FRP.md](SELF_HOSTED_FRP.md)；「接入既有 frps + 自签穿透」用户指南见
-[ATTACH_EXISTING_FRPS.md](ATTACH_EXISTING_FRPS.md)。
-
 ## 两档置备方式（`mode`）与两档入口证书（`entryTls`）
 
 | | `mode: 'deploy'`（缺省） | `mode: 'attach'` |

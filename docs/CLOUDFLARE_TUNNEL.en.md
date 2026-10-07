@@ -12,24 +12,30 @@ The built-in cloudflared provider runs in one of two modes, chosen in the panel 
 | Availability | Officially for testing: rate-limited, no uptime guarantee | Carried by your own Cloudflare account |
 | Settings | None | Connector token, public hostname, local forward port |
 
-Cloudflare terminates DNS and TLS for the public hostname. The plugin only runs `cloudflared` locally and hands traffic to its authenticated private gateway, so **the phone still pairs through the app's Remote access flow** — a tunnel does not change how devices pair.
+Cloudflare provides the public hostname and TLS. The plugin runs `cloudflared` locally and forwards requests to its paired-device gateway. Select **Remote access** in the Android app; a mobile browser can also use the public HTTPS pairing link. The tunnel does not replace DSH Mobile pairing.
+
+## Quick tunnel feature limits
+
+[Cloudflare's official limits](https://developers.cloudflare.com/tunnel/get-started/quick-tunnels/#limitations) include no uptime guarantee, up to 200 in-flight requests and no SSE. DSH Mobile uses SSE for extension changes, task completion and online revocation events. Quick-tunnel extension updates fall back to periodic checks; completion notifications and immediate revocation notices may not arrive, and missed completion events are not replayed. Server-side revocation still blocks access. For regular use, choose a named tunnel or another channel.
 
 ## Prerequisites
 
 1. A domain already on Cloudflare. Its nameservers must point at the pair Cloudflare assigned, changed at your registrar; that usually takes minutes and up to 24 hours.
-2. Cloudflare Zero Trust (a team domain) enabled, because the tunnel console lives inside it.
+2. A Cloudflare account permitted to manage that domain and Tunnel.
 3. The cloudflared component installed in the panel. Named and quick tunnels share the same official client.
 
 The component supports Windows x64, Linux x64/arm64 and macOS x64/arm64. Official downloads are verified before installation; macOS also verifies the extracted executable. Components remain inside DSH Mobile's private directory.
 
 ## Create the tunnel in the Cloudflare dashboard
 
-1. Open **Zero Trust → Networks → Tunnels** and choose **Create a tunnel** → **Cloudflared**.
-2. Name it, for example `dsh-mobile`, and save; the dashboard then shows a connector install command.
-3. On the **Public Hostname** tab add one entry:
+1. In the Cloudflare dashboard, open **Networking → Tunnels** and create a tunnel named, for example, `dsh-mobile`.
+2. Obtain its Tunnel token from the connector instructions. **Do not run the service-install command**: DSH Mobile manages the verified cloudflared process.
+3. Open **Routes → Add route → Published application** and add a public hostname:
    - Subdomain `dsh`, and pick your domain, giving `dsh.example.com`
    - Service: **HTTP** → `127.0.0.1:3444`
-4. On the **Overview** tab copy the connector token — the long string starting with `eyJ`. It already contains the account, tunnel id and tunnel secret, so **it is a credential**.
+4. Save the route and enter the connector token in the DSH Mobile panel below. It is a credential: never put it in an issue, screenshot or log.
+
+These labels follow [Cloudflare's current official guide](https://developers.cloudflare.com/tunnel/get-started/); older dashboards may call the published route Public Hostname. This setup uses an HTTP loopback Service and does not require disabling TLS verification.
 
 > `127.0.0.1:3444` is the panel's "Local forward port". Cloudflare routes the public hostname to exactly that port, so it must match what you enter in the panel and must not change afterwards.
 
@@ -72,7 +78,7 @@ The old address may show **Address may have changed** or temporarily unreachable
 | Local forward port unavailable | `cloudflared_tunnel_port_unavailable` | The configured port is taken. A named tunnel cannot move to another port, because Cloudflare routes to that exact one: free the port, or pick another and update the Service in Cloudflare to match. |
 | Invalid public hostname | `cloudflared_tunnel_hostname_invalid` | Must be a real hostname under a domain on this account. IP literals, wildcards, `.trycloudflare.com` and `.cfargotunnel.com` are refused. |
 | Invalid forward port | `cloudflared_tunnel_port_invalid` | The port must be between 1024 and 65535. |
-| Reserved forward port | `cloudflared_tunnel_port_reserved` | **3443** cannot be used: it is the DSH Mobile LAN gateway's HTTPS port, held for as long as DSH runs. It is not a transient conflict, so pick 3444 or 3445. |
+| Reserved forward port | `cloudflared_tunnel_port_reserved` | **3443** is the reserved default LAN HTTPS port and is rejected in this mode. Select 3444, 3445 or another allowed, unused port. Reservation does not mean the LAN listener is always active. |
 | Invalid token | `cloudflared_tunnel_token_invalid` | Copy the whole token from the dashboard, with no spaces or newlines. |
 | Settings rejected | `cloudflared_tunnel_settings_invalid` | The request carried a field that does not belong to the mode, such as a port in quick mode. |
 | Token, hostname and port are all required | `cloudflared_tunnel_config_missing` | First-time named-tunnel setup needs all three. |
@@ -95,7 +101,7 @@ The old address may show **Address may have changed** or temporarily unreachable
 ## Troubleshooting
 
 - **Stuck on "connecting"**: the named tunnel becomes ready only after the connector registers with Cloudflare. Check cloudflared output in the DSH log and test DNS, UDP/QUIC and TCP reachability from the computer to a Cloudflare edge.
-- **Public access returns 1033**: Cloudflare believes no connector is healthy for that hostname. Check the tunnel shows Healthy in Zero Trust, and that its ingress port matches the panel.
+- **Public access returns 1033**: Cloudflare sees no healthy connector for the hostname. Confirm the dashboard reports Healthy and the route's Service port matches the panel.
 - **`cloudflared` reports `Unauthorized`, or the tunnel id does not exist**: the token belongs to a different tunnel, for example one that was deleted and recreated. Copy the token again.
 - **The phone stalls on "Loading plugins" or the remote page is slow while a TUN or transparent proxy is active**: check whether a catch-all rule sends `cloudflared` connections to `*.argotunnel.com` through a proxy node. This routing has caused slow boot-resource transfers before; it does not by itself indicate a pairing failure. This Clash-rule example is for Windows; on Linux, adapt the process name and syntax to your proxy client, and put direct-route rules before catch-all rules:
 

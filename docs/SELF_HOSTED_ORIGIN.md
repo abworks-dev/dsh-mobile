@@ -46,7 +46,7 @@ CIDR 限制针对 TCP 连接的**直接来源地址**，不是手机 IP，也不
 4. 透传浏览器的 Origin、Cookie、Set-Cookie，以及认证/CSRF 相关头，不要改写 Cookie 的域或安全属性；不要缓存配对或认证响应。
 5. 透传 WebSocket 升级（HTTP/1.1、Upgrade、Connection）以及双向数据。已有的 WebSocket 路径白名单继续生效；第三方插件需要时仍在现有面板中单独允许其路径。
 
-根据 [Lucky 官方 Web 模块文档](https://lucky666.cn/docs/modules/web)，WebSocket 默认支持，不必寻找单独的开启开关。Host 自定义模式应使用 **“使用请求Host”**，不要选 **“使用目标地址Host”**，并核对非默认端口没有丢失。TLS/证书仍配置在 Lucky，不在这个 HTTP 后端上配置。
+[Lucky 官方 Web 文档](https://www.lucky666.cn/docs/modules/web/)说明其支持 WebSocket。配置界面随版本变化，但本插件要求不变：保留外部请求 Host，不要启用“使用目标地址Host”；若版本提供自定义 Host，请填写完整公网主机名及端口。TLS/证书配置在 Lucky，不在这个 HTTP 后端上配置。
 
 若代理在另一台机器上，还需由管理员保证网络可达，并将主机防火墙入站范围限制到代理的实际私网来源；此功能不自动改防火墙。
 

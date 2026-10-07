@@ -6,7 +6,16 @@ DeepSeek Harness is the display name of this lightweight, community-maintained A
 
 Android is the only supported native target. The iOS client remains an unpublished local experiment and is outside the build, release, and support scope.
 
-The current stable app is 0.5.5. It fixes model-menu Back, retains the page through rotation and preserves known computer-side revocation, while keeping existing pairing and renewal compatible. The paired-device list and startup choice remain available; microphone capture requires user approval, and speech recognition depends on the device WebView and speech service. The self-signed HTTPS entry for an existing frps requires Android app 0.4.6 or later to pin the remote gateway CA; older apps cannot use that entry but can continue using their existing LAN and publicly trusted remote connections.
+The current stable app is **0.5.5**; 0.5.6 is an unreleased candidate. Install the signed GitHub Release APK and update it with the plugin. Older official APKs with the same signer retain pairing during in-place upgrades; a differently signed Debug build cannot overwrite the official app.
+
+## 0.5.6 candidate changes
+
+- Fixed list order with new pairings appended. Move up / Move to top affect presentation only; startup still prefers the last-used computer.
+- The list's **Settings → App icon** offers the mascot and six whale-mark colors without changing package identity or paired data.
+- Proportionally cropped scanner preview, camera-supported continuous focus, pinch/double-tap zoom and 48dp zoom controls.
+- Hold the top-left drawer toggle inside the app to return to the list. **Settings → General → Switch computer** remains available.
+
+These features are not in the 0.5.5 official download. Plugin module management, mobile font size and compatibility improvements are described in the [candidate summary](../../README.en.md#056-update-unreleased).
 
 ## Use the app
 
@@ -15,7 +24,11 @@ The current stable app is 0.5.5. It fixes model-menu Back, retains the page thro
 3. With no paired computers, choose **Local network** or **Remote access**. For LAN, create a pairing key or link under **Mobile Access → Local network**. For remote access, configure a provider and generate its pairing QR code. Scan the corresponding QR code or paste its link in the app.
 4. Name the computer after pairing. The app stores each LAN or remote pairing as a device record: LAN pins its private CA; ordinary remote paths use platform-trusted public HTTPS certificates; the self-signed FRP entry pins a remote CA. No provider app is needed on the phone.
 
-The **Paired devices** list shows each computer's name, connection type, address, reachability, and last connection. Tap a row to connect; long-press or use its **More** button to connect, rename, check, re-pair, or delete the local record. The list's settings offer **Open DSH directly** (the default, using the last-used eligible computer even when several are paired) and **Show device list**. In the Android app's DSH page, **Settings → General → Switch computer** returns to the list. Existing LAN and remote credentials migrate on first launch without re-pairing. A computer revoked on the desktop stays listed for re-pairing or local deletion; a temporarily unreachable computer is not treated as revoked.
+The **Paired computers** list shows each computer's name, connection type, address, reachability and last connection. Tap a row to connect; long-press or use its **More** button to connect, rename, check, re-pair or delete the local record. The list's settings offer **Open DSH directly** (the default, using the last-used eligible computer even when several are paired) and **Show device list**. In the app's DSH page, **Settings → General → Switch computer** returns to the list. Existing LAN and remote credentials migrate without re-pairing. A revoked computer remains listed for re-pairing or deletion; temporary unreachability is not treated as revocation.
+
+Startup options are under the list's **Settings → Startup behavior**. Deleting a local device does not revoke its authorization on the computer; use the computer's Mobile Access device controls for revocation.
+
+### Connection recovery and certificates
 
 The managed self-hosted FRP path uses a public-CA HTTPS domain or IPv4 origin and requires Android app 0.3.3 or later. The existing-frps path, introduced in 0.4.6, can use the same public-CA pairing or a public-IPv4 self-signed entry that requires app 0.4.6 or later. See the [attachment guide](../../docs/ATTACH_EXISTING_FRPS.en.md); older supported apps continue to work with LAN, cpolar, and Tailscale Funnel.
 
@@ -39,12 +52,14 @@ The private CA is not discovery data. After explicit LAN or self-signed FRP pair
 
 - No browser address or tab bars.
 - System Back dismisses supported page layers before same-origin WebView history and exits the app at the root. Model submenus return to their parent before closing.
-- File selection, same-origin downloads, sharing, and site-data clearing use narrow native implementations.
+- File selection, same-origin downloads and sharing use narrow native implementations; no extra native toolbar appears above the WebView.
 - The app remains a shell around the same Web UI and protocol used by browsers.
 
 A mobile browser remains an alternative for LAN and publicly trusted remote entries. The self-signed FRP entry requires the 0.4.6 Android app: ordinary browsers do not trust its private CA automatically.
 
-On WebView 151 or later, the app gives its own HTTP cache a 64 MiB minimum quota so large versioned DSH scripts can be reused across page loads. Older WebViews keep their default quota; the app never lowers a larger existing quota. **Clear Site Data** also removes this cached content.
+On WebView 151 or later, the app gives its own HTTP cache a 64 MiB minimum quota so large versioned DSH scripts can be reused across page loads. Older WebViews keep their default quota; the app never lowers a larger existing quota.
+
+To remove one computer, delete its row from the device list. A full reset uses Android system app information → clear app data (labels vary by system). It deletes all pairings, cookies, cache and Web storage and requires pairing again; do not use it as the first response to an ordinary reconnection failure.
 
 ## Security properties
 
@@ -56,7 +71,7 @@ On WebView 151 or later, the app gives its own HTTP cache a 64 MiB minimum quota
 | Navigation | Same-origin main frames stay inside; user-initiated external HTTPS links open in the system browser. |
 | Permissions | File input uses the system document picker without storage permission. Camera permission is requested for QR scanning or photo capture; microphone permission is requested for DSH voice input. |
 | Downloads | Foreground GET from the exact origin only; authentication control paths are never downloads. |
-| Data | Android Keystore encrypts paired-device records, including tokens, origins, and any pinned LAN or self-signed FRP CA; Web storage stays in the app sandbox. Clear Site Data removes credentials, origins, cookies, cache, and Web storage. |
+| Data | Android Keystore encrypts device records, including tokens, origins and pinned CAs; Web storage stays in the app sandbox. Deleting a device removes its record only; system clear-app-data removes all pairings and Web data. |
 | Backup | App backup is disabled; TLS private keys and signing keys must remain outside the repository. |
 
 The network security configuration does not trust user-installed CAs. For LAN, the plugin signs a new leaf for the selected interface address while the app retains the stable CA pin. For the self-signed FRP entry, the computer-side CA lasts five years and its public-IPv4 leaf lasts 397 days; the leaf can rotate under the same CA, but CA expiry or replacement requires a new fingerprint check and re-pairing. These are certificate lifetimes, not an unattended-availability guarantee.
@@ -65,11 +80,17 @@ The network security configuration does not trust user-installed CAs. For LAN, t
 
 The authenticated page can call the Android bridge through `dshMobile` extensions. It uses an `androidx.webkit` WebMessage listener, checks the exact configured top-level origin and `isMainFrame` on every message, and never uses `addJavascriptInterface`. Inbound messages are capped at 1 MiB, clipboard text at 256 KiB, binary results at 8 MiB, and replies at 12 MiB. The bridge does not expose cookies, device tokens, pairing keys, CA private keys, or arbitrary Android APIs.
 
-Available actions are `files.pick`, `camera.capture`, `share`, `clipboard.read`, `clipboard.write`, `notification.notify`, and `notification.settings`. DSH keeps its own file-attachment action in the composer Add group; Mobile adds camera capture to that same group when the current attachment owner can accept the image. Extensions may use `files.pick` separately: its system picker follows the caller's accepted MIME types and returns at most 8 MiB through the bridge, which is not a limit on DSH's native file selector. Camera capture requests Android camera permission only when used, writes a full-resolution JPEG through `FileProvider`, and returns it as a browser `File`. Task reminders use exact Host completion events and explicit pending-input cards while the page remains alive in the background. Open notification permission or system settings from DSH General settings inside the app; reminders use generic lock-screen text, separate completed turns do not replace each other, and tapping opens the app. Only one interactive Android result runs at a time and receives a five-minute deadline; cancellation, WebView destruction, timeout, and stale-session results are cleaned up or rejected. Browsers use the corresponding Web APIs and return `unsupported` when a capability is unavailable.
+Available actions include `files.pick`, `camera.capture`, `share`, `clipboard.read`, `clipboard.write`, `notification.notify`, `notification.settings` and `mobile.switch-computer`. DSH keeps its file-attachment action in Add; Mobile adds camera capture there when the current attachment owner accepts images. The separate `files.pick` follows the caller's MIME types and returns at most 8 MiB through the bridge; that is not a limit on DSH's file selector. Camera capture requests permission when used, writes a full-resolution JPEG through `FileProvider` and returns a browser `File`.
+
+Task reminders use Host completion events and explicit pending-input cards while the page remains alive. Enable notifications or open system settings from DSH **Settings → General** inside the app. Lock-screen text is generic, different tasks do not replace each other and tapping opens the app. Completion reminders require SSE and have no offline event replay; Cloudflare Quick Tunnels do not support the stream. See [channel limits](../../docs/CLOUDFLARE_TUNNEL.en.md#quick-tunnel-feature-limits).
+
+Only one file-selection or camera interaction runs at a time, with a five-minute deadline. Cancellation, WebView destruction, timeout and stale-session results are cleaned up or rejected. Browsers use corresponding Web APIs and return `unsupported` when unavailable.
 
 From 0.4.7, the app uses plain Enter for a new draft line only when an inset-backed on-screen keyboard is visible, Android reports no hardware keyboard, and an active session composer is focused. The Send button still submits a multiline draft. Floating keyboards, unknown state, older apps, and mobile browsers retain DSH's original Enter behavior; physical keyboards can still use Shift+Enter for a line break.
 
-Voice input uses the DSH page's `getUserMedia`, not the extension bridge. The Android app requests microphone permission on first use and grants only audio-only capture from the paired HTTPS Origin; camera and other Origins remain denied. Client plugins loaded into that page share its Origin, so use voice input only with plugins you trust. This permission integration does not guarantee that DSH's speech-recognition service succeeds on every device or network.
+The 0.5.6 candidate separately changes the main composer in touch-primary browsers: Enter adds a line to a nonempty draft and does nothing for an empty draft. DSH retains menus, composition and modified shortcuts. An external keyboard on a touch-primary browser uses that same rule; a non-touch desktop is unchanged. General settings offers a mobile font size of 12–32px, default 16px, saved for the current address only; editable inputs retain a 16px minimum.
+
+DSH records through `getUserMedia` and sends audio to the configured computer-side DSH speech provider for transcription, not browser-native SpeechRecognition or the extension bridge. The app requests microphone permission on first use and grants audio-only capture for the paired HTTPS Origin. Computer components, model and network must be available; permission does not guarantee transcription. Same-origin client plugins share the page's permissions, so grant recording only when you trust them.
 
 Computer-side extensions are separate: their `host.mjs` runs as trusted local Node.js code on the DSH host, while `mobile.js` calls its scoped actions and routes. The app bridge cannot edit or upload extension source files.
 
@@ -89,5 +110,7 @@ The debug APK is written to `app/build/outputs/apk/debug/app-debug.apk`. GitHub 
 ## Acceptance
 
 Shared URL-policy tests cover origin normalization, pairing entry, same-origin navigation and download paths. PJW110 with Android 16 and WebView 151 was used to verify model-menu Back, rotation with draft/reference/image retention, known revocation through checks and restart, and re-pairing the same device. That evidence uses an isolated HTTPS instance over USB, not a public tunnel. A real VPS plus phone end-to-end test of the self-signed FRP entry has not been recorded; other devices, cutouts, font scaling, TLS failures, file input and downloads still require device-specific acceptance.
+
+The 0.5.6 candidate additionally verified in-place Debug upgrade with paired data retained, all seven Launcher choices, two isolated computers, explicit order surviving later connections, scanner buttons/double-tap zoom and camera release on this device. Physical pinch, real QR recognition, older-Android fallback and process-death restoration are not represented as completed device checks.
 
 Apache-2.0 licensed. See [LICENSE](../../LICENSE).

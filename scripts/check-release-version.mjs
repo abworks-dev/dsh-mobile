@@ -55,10 +55,12 @@ async function main() {
       throw new Error(`GITHUB_REF_NAME ${JSON.stringify(actualTag)} must equal ${JSON.stringify(expectedTag)}`)
     }
 
-    const [changelog, readme, englishReadme] = await Promise.all([
+    const [changelog, readme, englishReadme, englishAppReadme, chineseAppReadme] = await Promise.all([
       read('CHANGELOG.md'),
       read('README.md'),
       read('README.en.md'),
+      read('apps/mobile/README.md'),
+      read('apps/mobile/README.zh-CN.md'),
     ])
     const escapedVersion = packageVersion.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
     const finalizedHeading = new RegExp(`^## ${escapedVersion} - \\d{4}-\\d{2}-\\d{2}$`, 'mu')
@@ -74,8 +76,13 @@ async function main() {
       `${packageVersion} (in development)`,
       `${packageVersion} update (unreleased)`,
       `${packageVersion} is not published yet`,
+      `${packageVersion} is not released`,
     ]
-    for (const [source, label] of [[readme, 'README.md'], [englishReadme, 'README.en.md']]) {
+    const appVersion = '(\\d+\\.\\d+\\.\\d+(?:-[a-z\\d]+(?:[.-][a-z\\d]+)*)?(?:\\+[a-z\\d]+(?:[.-][a-z\\d]+)*)?)'
+    for (const [source, label, prefix] of [
+      [readme, 'README.md', '当前正式版本：'],
+      [englishReadme, 'README.en.md', 'Current stable release:'],
+    ]) {
       const marker = developmentMarkers.find(candidate => source.includes(candidate))
       if (marker !== undefined) throw new Error(`${label} still marks ${marker} as in development`)
       const apk = `releases/download/v${packageVersion}/dsh-mobile-android-v${packageVersion}.apk`
@@ -83,6 +90,21 @@ async function main() {
       if (!source.includes(apk) || !source.includes(release)) {
         throw new Error(`${label} must link the Android download and release notes for ${packageVersion}`)
       }
+      const stableVersion = singleMatch(source,
+        new RegExp(`^[ \\t]*(?:>[ \\t]*)?(?:\\*\\*)?${prefix}[ \\t]*(?:\\*\\*)?${appVersion}(?:\\*\\*)?(?=\\s|[;。；]|\\.(?:\\s|$))`, 'gimu'),
+        `${label} stable release version`)
+      if (stableVersion !== packageVersion) throw new Error(`${label} stable release version ${JSON.stringify(stableVersion)} must equal package.version ${JSON.stringify(packageVersion)} before tagging`)
+    }
+    const candidateHeading = new RegExp(`^#{1,6}[ \\t]+[^\\n]*(?<![a-z\\d.+-])${escapedVersion}[ \\t]+(?:candidate changes|候选更新)(?:[ \\t]|$)`, 'imu')
+    for (const [source, label, prefix] of [
+      [englishAppReadme, 'apps/mobile/README.md', 'The current stable app is '],
+      [chineseAppReadme, 'apps/mobile/README.zh-CN.md', '当前正式 App 为 '],
+    ]) {
+      const stableVersion = singleMatch(source,
+        new RegExp(`^${prefix}(?:\\*\\*)?${appVersion}(?:\\*\\*)?(?=\\s|[;。；]|\\.(?:\\s|$))`, 'gimu'),
+        `${label} stable App version`)
+      if (stableVersion !== packageVersion) throw new Error(`${label} stable App version ${JSON.stringify(stableVersion)} must equal package.version ${JSON.stringify(packageVersion)} before tagging`)
+      if (candidateHeading.test(source)) throw new Error(`${label} still has a ${packageVersion} candidate changes headline before tagging`)
     }
     for (const screenshot of [
       'assets/screenshots/lan-access.png',
