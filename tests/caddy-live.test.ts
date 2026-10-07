@@ -1,7 +1,8 @@
-import { spawn } from 'node:child_process'
-import { createServer, type IncomingHttpHeaders } from 'node:http'
+import { spawn, type ChildProcess } from 'node:child_process'
+import { createHash } from 'node:crypto'
+import { createServer, request as httpRequest, type IncomingHttpHeaders } from 'node:http'
 import { request } from 'node:https'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { lstat, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { once } from 'node:events'
@@ -12,36 +13,52 @@ import { CaddyConfigStore, parseCaddySettings, renderCaddyfile } from '../src/ca
 import { caddyProcessEnvironment } from '../src/caddy.js'
 import { parseGatewayConfig } from '../src/config.js'
 import { MobileAccessGateway } from '../src/gateway.js'
-import { MemoryDeviceStore } from '../src/storage.js'
+import { JsonDeviceStore } from '../src/storage.js'
+import { installedCaddyFixture } from './helpers/caddy-component-fixture.js'
 import { remoteGatewayConfig } from '../src/plugin.js'
 import { terminateRemoteProcess } from '../src/remote.js'
-import { SESSION_COOKIE } from '../src/http-security.js'
+import { DEVICE_COOKIE, SESSION_COOKIE, parseCookies } from '../src/http-security.js'
 
-const executable = process.env.DSH_CADDY_TEST_EXECUTABLE
+const inputExecutable = process.env.DSH_CADDY_TEST_EXECUTABLE
+const manifestFile = process.env.DSH_CADDY_TEST_MANIFEST
 const cleanups: (() => Promise<void>)[] = []
-afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup() })
+let fixtureController: AbortController | undefined
+let activeBodyTask: Promise<void> | undefined
+afterEach(async () => {
+  // Runner timeout alone does not cancel its callback. Quiesce the inner work before taking the cleanup snapshot.
+  fixtureController?.abort(new Error('Live fixture teardown'))
+  try { await activeBodyTask } catch { /* The test body reports its own failure. */ }
+  activeBodyTask = undefined
+  fixtureController = undefined
+  const errors: unknown[] = []
+  for (const cleanup of cleanups.splice(0).reverse()) {
+    try { await cleanup() } catch (error) { errors.push(error) }
+  }
+  if (errors.length > 0) throw new AggregateError(errors, 'Owned live-fixture cleanup failed')
+}, 60_000)
 
 /** Observe only the spawned Caddy process's atomically allocated TCP listener. */
-async function ownedPort(pid: number): Promise<number> {
+async function ownedPort(pid: number, signal: AbortSignal): Promise<number> {
+  signal.throwIfAborted()
   if (process.platform === 'win32') {
     const systemRoot = process.env.SystemRoot
     if (systemRoot === undefined) throw new Error('Windows system root missing')
     const output = await execFileText(join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
-      ['-NoProfile', '-NonInteractive', '-Command', `(Get-NetTCPConnection -State Listen -OwningProcess ${String(pid)} -ErrorAction SilentlyContinue | Where-Object LocalAddress -eq '127.0.0.1' | Select-Object -ExpandProperty LocalPort) -join ','`], { timeout: 10_000 })
+      ['-NoProfile', '-NonInteractive', '-Command', `(Get-NetTCPConnection -State Listen -OwningProcess ${String(pid)} -ErrorAction SilentlyContinue | Where-Object LocalAddress -eq '127.0.0.1' | Select-Object -ExpandProperty LocalPort) -join ','`], { timeout: 10_000, signal })
     const ports = output.stdout.trim().split(',').filter(Boolean).map(Number)
     if (ports.length !== 1 || !Number.isInteger(ports[0])) throw new Error('Owned Caddy listener is not ready')
     return ports[0]!
   }
-  const output = await execFileText('ss', ['-ltnp'], { timeout: 10_000 })
+  const output = await execFileText('ss', ['-ltnp'], { timeout: 10_000, signal })
   const line = output.stdout.split(/\r?\n/u).find(value => value.includes('pid=' + String(pid) + ',') && value.includes('127.0.0.1:'))
   const port = Number(line?.match(/127\.0\.0\.1:(\d+)/u)?.[1])
   if (!Number.isInteger(port) || port < 1) throw new Error('Owned Caddy listener is not ready')
   return port
 }
 
-function exchange(port: number, ca: string, path: string, method = 'GET', headers: Record<string, string> = {}, body = ''): Promise<{ status: number; headers: IncomingHttpHeaders; body: string; rawBody: Buffer }> {
+function exchange(signal: AbortSignal, port: number, ca: string, path: string, method = 'GET', headers: Record<string, string> = {}, body = ''): Promise<{ status: number; headers: IncomingHttpHeaders; body: string; rawBody: Buffer }> {
   return new Promise((resolve, reject) => {
-    const outgoing = request({ host: '127.0.0.1', port, servername: 'phone.example.com', ca, agent: false, method, path,
+    const outgoing = request({ host: '127.0.0.1', port, servername: 'phone.example.com', ca, agent: false, method, path, signal,
       headers: { host: 'phone.example.com', origin: 'https://phone.example.com', 'sec-fetch-site': 'same-origin', ...headers },
     }, incoming => {
       const chunks: Buffer[] = []
@@ -54,10 +71,71 @@ function exchange(port: number, ca: string, path: string, method = 'GET', header
   })
 }
 
-it.runIf(executable !== undefined)('runs the built Caddy template through trusted TLS, authenticated pairing, API bytes and WSS with ephemeral owned listeners', async () => {
-  if (executable === undefined) throw new Error('Explicit test executable required')
+/** One direct, cookie-free boundary probe; never follows redirects or proxy environment. */
+async function directUnauthenticated(signal: AbortSignal, port: number, path: string): Promise<{ status: number; headers: IncomingHttpHeaders; body: string }> {
+  return new Promise((resolve, reject) => {
+    const outgoing = httpRequest({ host: '127.0.0.1', port, path, method: 'GET', agent: false, signal,
+      headers: { host: 'phone.example.com', origin: 'https://phone.example.com', 'sec-fetch-site': 'same-origin' },
+    }, incoming => {
+      let body = ''
+      incoming.on('data', (chunk: Buffer) => { body = (body + chunk.toString()).slice(0, 2048) })
+      incoming.once('end', () => resolve({ status: incoming.statusCode ?? 0, headers: incoming.headers, body }))
+      incoming.once('error', reject)
+    })
+    outgoing.setTimeout(10_000, () => outgoing.destroy(new Error('Direct gateway request timeout')))
+    outgoing.once('error', reject); outgoing.end()
+  })
+}
+
+function responseDiagnostic(response: { status: number; headers: IncomingHttpHeaders; body: string }): string {
+  const names = ['content-type', 'content-length', 'cache-control', 'strict-transport-security', 'server']
+  return JSON.stringify({ status: response.status, body: response.body.slice(0, 2048),
+    headers: Object.fromEntries(names.map(name => [name, String(response.headers[name] ?? '').slice(0, 512)])),
+  })
+}
+
+it.runIf(inputExecutable !== undefined || manifestFile !== undefined)('runs optional installed Caddy through trusted TLS, durable pairing, API/WSS, restart, corruption and purge', async () => {
+  if (inputExecutable === undefined) throw new Error('Explicit test executable required')
+  fixtureController = new AbortController()
+  const signal = fixtureController.signal
+  const controller = fixtureController
+  const deadline = setTimeout(() => controller.abort(new Error('Live fixture 90s deadline exceeded')), 90_000)
+  const body = async (): Promise<void> => {
+  const step = async <T>(operation: () => Promise<T>): Promise<T> => {
+    signal.throwIfAborted()
+    const result = await operation()
+    signal.throwIfAborted()
+    return result
+  }
+  signal.throwIfAborted()
   const root = await mkdtemp(join(tmpdir(), 'dsh-mobile-caddy-live-'))
-  cleanups.push(() => rm(root, { recursive: true, force: true }))
+  const ownedChildren: { child: ChildProcess; closed: boolean }[] = []
+  const ownChild = (child: ChildProcess): (() => Promise<void>) => {
+    const owned = { child, closed: false }
+    ownedChildren.push(owned)
+    // Register immediately after spawn: only the actual close event confirms all child handles closed.
+    child.once('close', () => { owned.closed = true })
+    const stop = async (): Promise<void> => {
+      if (!owned.closed) await terminateRemoteProcess(child)
+      // terminateRemoteProcess can return on exitCode before stdio's close event.
+      if (!owned.closed) await once(child, 'close', { signal: AbortSignal.timeout(1_500) })
+    }
+    cleanups.push(stop)
+    return stop
+  }
+  cleanups.push(async () => {
+    // Independent cleanup still runs on stop failure, but never remove files under an unclosed child.
+    if (ownedChildren.some(owned => !owned.closed)) {
+      throw new Error('Owned Caddy close unconfirmed; retained fixture root: ' + root)
+    }
+    // Only the root allocated by this test is recursively removed.
+    expect((await lstat(root)).isDirectory()).toBe(true)
+    await rm(root, { recursive: true, force: true })
+  })
+  // A late mkdtemp result is owned before the cancellation check.
+  signal.throwIfAborted()
+  const fixture = manifestFile === undefined ? undefined : await step(() => installedCaddyFixture(root, inputExecutable, manifestFile, fn => cleanups.push(fn), signal))
+  const executable = fixture?.executable ?? inputExecutable
   const upstream = createServer((incoming, outgoing) => {
     if (incoming.url === '/api/caddy-test-resource') { outgoing.writeHead(200, { 'content-type': 'application/octet-stream' }); outgoing.end(Buffer.from([0, 1, 2, 250])); return }
     outgoing.writeHead(404); outgoing.end()
@@ -66,51 +144,147 @@ it.runIf(executable !== undefined)('runs the built Caddy template through truste
   const peers = new Set<WebSocket>()
   webSockets.on('connection', peer => { peers.add(peer); peer.on('message', data => peer.send(data)); peer.on('close', () => peers.delete(peer)) })
   upstream.on('upgrade', (incoming, socket, head) => { webSockets.handleUpgrade(incoming, socket, head, peer => webSockets.emit('connection', peer, incoming)) })
-  await new Promise<void>(resolve => upstream.listen(0, '127.0.0.1', resolve))
-  cleanups.push(async () => { for (const peer of peers) peer.terminate(); await new Promise<void>(resolve => webSockets.close(() => resolve())); await new Promise<void>(resolve => upstream.close(() => resolve())) })
+  cleanups.push(async () => { for (const peer of peers) peer.terminate(); await new Promise<void>(resolve => webSockets.close(() => resolve())); upstream.closeAllConnections(); await new Promise<void>(resolve => upstream.close(() => resolve())) })
+  await step(() => new Promise<void>((resolve, reject) => { upstream.once('error', reject); upstream.listen(0, '127.0.0.1', resolve) }))
   const upstreamAddress = upstream.address(); if (upstreamAddress === null || typeof upstreamAddress === 'string') throw new Error('missing port')
   const template = parseGatewayConfig({ listenHost: '127.0.0.1', listenPort: 0, tls: { mode: 'disabled' },
     stateFile: join(root, 'devices.json'), upstreamOrigin: 'http://127.0.0.1:' + String(upstreamAddress.port),
     publicAuthorities: ['127.0.0.1'], allowedCidrs: ['127.0.0.0/8'],
   })
-  const gateway = new MobileAccessGateway(remoteGatewayConfig(template, 'https://phone.example.com', template.stateFile, 'a'.repeat(64)), new MemoryDeviceStore())
-  await gateway.start(); cleanups.push(() => gateway.close())
+  const store = new JsonDeviceStore(template.stateFile)
+  const gatewayConfig = remoteGatewayConfig(template, 'https://phone.example.com', template.stateFile, 'a'.repeat(64))
+  const gateway = new MobileAccessGateway(gatewayConfig, store)
+  cleanups.push(() => gateway.close())
+  await step(() => gateway.start())
   const settings = parseCaddySettings({ publicOrigin: 'https://phone.example.com', dnsProvider: 'tencentcloud', listenPort: 8443 })
-  const config = new CaddyConfigStore(root); await config.configure(settings, { secretId: 'fake-id', secretKey: 'fake-key' }); await config.prepareCaddyfile(gateway.address().port)
+  const config = new CaddyConfigStore(root)
+  await step(() => config.configure(settings, { secretId: 'fake-id', secretKey: 'fake-key' }))
+  await step(() => config.prepareCaddyfile(gateway.address().port))
   const environment = caddyProcessEnvironment(config, settings)
   // Validate the actual DNS-01 template without contacting DNS or acquiring a production certificate.
-  await execFileText(executable, ['adapt', '--config', config.caddyfile, '--adapter', 'caddyfile'], { env: environment, timeout: 15_000 })
-  const internal = renderCaddyfile(settings, root, gateway.address().port)
+  await step(() => execFileText(executable, ['adapt', '--config', config.caddyfile, '--adapter', 'caddyfile'], { env: environment, timeout: 15_000 }))
+  const rendered = renderCaddyfile(settings, root, gateway.address().port)
+  expect(rendered.match(/https:\/\/phone\.example\.com:8443 \{/gu)).toHaveLength(1)
+  expect(rendered.match(/\ttls \{\n\t\tdns tencentcloud \{[\s\S]*?\n\t\t\}\n\t\}/gu)).toHaveLength(1)
+  const internal = rendered
     .replace('{\n', '{\n\tskip_install_trust\n\tservers {\n\t\tprotocols h1\n\t}\n')
     .replace('https://phone.example.com:8443 {', 'https://phone.example.com:0 {\n\tbind 127.0.0.1')
     .replace(/\ttls \{\n\t\tdns tencentcloud \{[\s\S]*?\n\t\t\}\n\t\}/u, '\ttls internal')
+    .replace('output discard', 'output stderr')
   const testConfig = join(config.rootDirectory, 'Caddyfile.internal-test')
-  await writeFile(testConfig, internal, { mode: 0o600 })
+  await step(() => writeFile(testConfig, internal, { mode: 0o600 }))
+  expect(internal).toContain('\tskip_install_trust\n')
+  expect(internal).toContain('https://phone.example.com:0 {\n\tbind 127.0.0.1')
+  expect(internal).toContain('\ttls internal\n')
+  expect(internal).not.toMatch(/dns|acme|tencentcloud|8443/iu)
+  const adapted = JSON.parse((await step(() => execFileText(executable, ['adapt', '--config', testConfig, '--adapter', 'caddyfile'], { env: environment, timeout: 15_000 }))).stdout)
+  expect(adapted.apps.tls.automation.policies[0].issuers).toEqual([{ module: 'internal' }])
+  expect(adapted.apps.http.servers.srv0.listen).toEqual(['127.0.0.1:0'])
+  signal.throwIfAborted()
   const child = spawn(executable, ['run', '--config', testConfig, '--adapter', 'caddyfile'], { env: environment, shell: false, windowsHide: true, stdio: 'pipe' })
-  child.stdout.resume(); child.stderr.resume(); child.stdin.end()
-  cleanups.push(() => terminateRemoteProcess(child))
-  await once(child, 'spawn')
+  const stopChild = ownChild(child)
+  let childDiagnostics = ''
+  child.stdout.resume(); child.stderr.on('data', (chunk: Buffer) => { childDiagnostics = (childDiagnostics + chunk.toString()).slice(-8192) }); child.stdin.end()
+  await step(() => once(child, 'spawn', { signal: AbortSignal.any([signal, AbortSignal.timeout(10_000)]) }))
   if (child.pid === undefined) throw new Error('Missing child PID')
   let port = 0
-  await vi.waitFor(async () => { port = await ownedPort(child.pid!) }, { timeout: 20_000, interval: 100 })
+  try {
+    await vi.waitFor(async () => {
+      if (child.exitCode !== null) throw new Error('Caddy exited: ' + String(child.exitCode))
+      port = await step(() => ownedPort(child.pid!, signal))
+    }, { timeout: 20_000, interval: 100 })
+    signal.throwIfAborted()
+  } catch (error) { throw new Error('Caddy listener startup failed: ' + childDiagnostics, { cause: error }) }
   let ca = ''
-  await vi.waitFor(async () => { ca = await readFile(join(config.dataDirectory, 'pki', 'authorities', 'local', 'root.crt'), 'utf8') }, { timeout: 10_000 })
-  const discovery = await exchange(port, ca, '/mobile-access/discovery')
-  expect(discovery.status).toBe(200); expect(JSON.parse(discovery.body).instanceId).toBe(gateway.config.instanceId)
-  expect((await exchange(port, ca, '/api/caddy-test-resource')).status).toBe(401)
-  const pairing = await gateway.access.openPairing()
-  const paired = await exchange(port, ca, '/mobile-access/auth/pair', 'POST', { 'content-type': 'application/json' }, JSON.stringify({ token: pairing.token, label: 'Isolated Caddy test' }))
+  await step(() => vi.waitFor(async () => { ca = await step(() => readFile(join(config.dataDirectory, 'pki', 'authorities', 'local', 'root.crt'), 'utf8')) }, { timeout: 10_000 }))
+  const discovery = await step(() => exchange(signal, port, ca, '/mobile-access/discovery'))
+  expect(discovery.status, '[DEBUG-caddy-live] Discovery response=' + responseDiagnostic(discovery)
+    + '; Caddy stderr=' + childDiagnostics).toBe(200)
+  expect(JSON.parse(discovery.body).instanceId).toBe(gateway.config.instanceId)
+  const unauthenticated = await step(() => exchange(signal, port, ca, '/api/caddy-test-resource'))
+  if (unauthenticated.status !== 401) {
+    const direct = await step(() => directUnauthenticated(signal, gateway.address().port, '/api/caddy-test-resource')
+      .then(responseDiagnostic, (error: unknown) => String(error).slice(0, 2048)))
+    throw new Error('[DEBUG-caddy-live] Unauthenticated API expected 401; proxied=' + responseDiagnostic(unauthenticated)
+      + '; direct=' + direct + '; Caddy stderr=' + childDiagnostics)
+  }
+  expect(unauthenticated.status).toBe(401)
+  const pairing = await step(() => gateway.access.openPairing())
+  const paired = await step(() => exchange(signal, port, ca, '/mobile-access/auth/pair', 'POST', { 'content-type': 'application/json' }, JSON.stringify({ token: pairing.token, label: 'Isolated Caddy test' })))
   expect(paired.status).toBe(201)
   const cookie = paired.headers['set-cookie']?.find(value => value.startsWith(SESSION_COOKIE + '='))?.split(';')[0]
   expect(cookie).toBeDefined()
-  const resource = await exchange(port, ca, '/api/caddy-test-resource', 'GET', { cookie: cookie! })
+  const deviceCookie = paired.headers['set-cookie']?.find(value => value.startsWith(DEVICE_COOKIE + '='))?.split(';')[0]
+  const deviceToken = parseCookies(deviceCookie)?.get(DEVICE_COOKIE)
+  // The cookie serializer uses a raw base64url value, not percent encoding; never log credentials.
+  expect(typeof deviceToken === 'string' && deviceToken.length > 0).toBe(true)
+  const resource = await step(() => exchange(signal, port, ca, '/api/caddy-test-resource', 'GET', { cookie: cookie! }))
   expect(resource.status).toBe(200); expect(resource.rawBody).toEqual(Buffer.from([0, 1, 2, 250]))
   const socketOptions: WebSocket.ClientOptions & { servername: string } = { ca, servername: 'phone.example.com',
     headers: { host: 'phone.example.com', origin: 'https://phone.example.com', cookie: cookie! },
   }
+  signal.throwIfAborted()
   const socket = new WebSocket('wss://127.0.0.1:' + String(port) + '/api/events.mux', socketOptions)
-  cleanups.push(async () => { if (socket.readyState !== WebSocket.CLOSED) { const closed = once(socket, 'close'); socket.terminate(); await closed } })
-  await once(socket, 'open')
-  const received = once(socket, 'message'); socket.send('CADDY_WSS_ROUNDTRIP')
-  const [echo] = await received; expect(String(echo)).toBe('CADDY_WSS_ROUNDTRIP')
-}, 45_000)
+  cleanups.push(async () => { if (socket.readyState !== WebSocket.CLOSED) { const closed = once(socket, 'close', { signal: AbortSignal.timeout(5_000) }); socket.terminate(); await closed } })
+  await step(() => once(socket, 'open', { signal: AbortSignal.any([signal, AbortSignal.timeout(10_000)]) }))
+  signal.throwIfAborted()
+  const received = once(socket, 'message', { signal: AbortSignal.any([signal, AbortSignal.timeout(10_000)]) }); socket.send('CADDY_WSS_ROUNDTRIP')
+  const [echo] = await received; signal.throwIfAborted(); expect(String(echo)).toBe('CADDY_WSS_ROUNDTRIP')
+  const socketClosed = once(socket, 'close', { signal: AbortSignal.any([signal, AbortSignal.timeout(5_000)]) }); socket.terminate(); await socketClosed
+  signal.throwIfAborted()
+  await step(() => stopChild())
+  const pairedBody = JSON.parse(paired.body) as { paired: boolean; deviceId: string; deviceToken?: unknown; sessionExpiresAt: number }
+  expect(pairedBody.paired).toBe(true)
+  expect(pairedBody.deviceId).toMatch(/^[a-f\d]{32}$/u)
+  expect(pairedBody.sessionExpiresAt).toBeGreaterThan(Date.now())
+  // Browser pairing withholds the device credential from JSON; durable state stores only its digest.
+  expect(pairedBody.deviceToken === undefined).toBe(true)
+  signal.throwIfAborted()
+  const restartedChild = spawn(executable, ['run', '--config', testConfig, '--adapter', 'caddyfile'], { env: environment, shell: false, windowsHide: true, stdio: 'pipe' })
+  const stopRestartedChild = ownChild(restartedChild)
+  restartedChild.stdout.resume(); restartedChild.stderr.resume(); restartedChild.stdin.end()
+  await step(() => once(restartedChild, 'spawn', { signal: AbortSignal.any([signal, AbortSignal.timeout(10_000)]) }))
+  if (restartedChild.pid === undefined) throw new Error('Missing restarted child PID')
+  await step(() => vi.waitFor(async () => { port = await step(() => ownedPort(restartedChild.pid!, signal)) }, { timeout: 20_000, interval: 100 }))
+  expect((await step(() => exchange(signal, port, ca, '/api/caddy-test-resource', 'GET', { cookie: cookie! }))).rawBody).toEqual(Buffer.from([0, 1, 2, 250]))
+  await step(() => stopRestartedChild())
+  await step(() => gateway.close())
+  const snapshot = await step(() => store.load())
+  const deviceBytes = await step(() => readFile(template.stateFile))
+  expect(snapshot.devices).toHaveLength(1)
+  expect(snapshot.devices[0]).toMatchObject({ id: pairedBody.deviceId, label: 'Isolated Caddy test' })
+  expect(snapshot.devices[0]?.tokenDigest === createHash('sha256').update(deviceToken!, 'utf8').digest('hex')).toBe(true)
+  expect(deviceBytes.toString().includes(deviceToken!)).toBe(false)
+  expect(deviceBytes.toString().includes(cookie!.slice((SESSION_COOKIE + '=').length))).toBe(false)
+  const restartedGateway = new MobileAccessGateway(gatewayConfig, new JsonDeviceStore(template.stateFile))
+  cleanups.push(() => restartedGateway.close())
+  await step(() => restartedGateway.start())
+  expect(restartedGateway.access.listDevices()).toEqual([expect.objectContaining({ id: pairedBody.deviceId, label: 'Isolated Caddy test' })])
+  expect(restartedGateway.access.authorizeDevice(deviceToken!).deviceId).toBe(pairedBody.deviceId)
+  await step(() => restartedGateway.close())
+  expect(await step(() => new JsonDeviceStore(template.stateFile).load())).toEqual(snapshot)
+  if (fixture !== undefined) {
+    const privateKey = join(config.dataDirectory, 'pki', 'authorities', 'local', 'root.key')
+    expect((await step(() => readFile(privateKey))).byteLength).toBeGreaterThan(0)
+    const cache = join(config.configDirectory, 'owned-test-cache')
+    await step(() => writeFile(cache, 'isolated-cache'))
+    const providerMarker = join(root, 'components', 'neighbor-provider', 'marker')
+    await step(() => mkdir(join(root, 'components', 'neighbor-provider')))
+    const dataMarker = join(root, 'neighbor-data')
+    await step(() => writeFile(providerMarker, 'provider-preserved'))
+    await step(() => writeFile(dataMarker, 'data-preserved'))
+    // All owned WSS clients, children and gateways are stopped before mutation or purge.
+    expect(ownedChildren.every(owned => owned.closed)).toBe(true)
+    await step(() => fixture.corruptAndPurge())
+    await step(() => config.purge())
+    for (const path of [config.rootDirectory, privateKey, cache]) await step(() => expect(lstat(path)).rejects.toMatchObject({ code: 'ENOENT' }))
+    expect(config.status().configured).toBe(false)
+    expect(await step(() => readFile(template.stateFile))).toEqual(deviceBytes)
+    expect(await step(() => new JsonDeviceStore(template.stateFile).load())).toEqual(snapshot)
+    expect(await step(() => readFile(providerMarker, 'utf8'))).toBe('provider-preserved')
+    expect(await step(() => readFile(dataMarker, 'utf8'))).toBe('data-preserved')
+  }
+  }
+  activeBodyTask = body()
+  try { await activeBodyTask } finally { clearTimeout(deadline) }
+}, 120_000)

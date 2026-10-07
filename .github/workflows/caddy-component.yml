@@ -4,7 +4,9 @@ on:
   workflow_dispatch:
   pull_request:
     paths:
-      - 'scripts/build-caddy-component.mjs'
+      - 'scripts/*caddy*.mjs'
+      - 'scripts/caddy-component-lock.json'
+      - 'tests/helpers/caddy-component-fixture.ts'
       - '.github/workflows/caddy-component.yml'
       - 'src/caddy*.ts'
       - 'src/managed-origin.ts'
@@ -18,29 +20,40 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, ubuntu-latest]
+        include:
+          - os: windows-latest
+            target: win32-x64
+            executable: caddy.exe
+          - os: ubuntu-latest
+            target: linux-x64
+            executable: caddy
     runs-on: ${{ matrix.os }}
     timeout-minutes: 25
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: '24'
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version: '1.26.6'
           cache: false
       - name: Build pinned core and DNS module, verify metadata, collect licenses
         run: node scripts/build-caddy-component.mjs --output-dir "${{ runner.temp }}/caddy-component"
+      - name: Repeat build with independent compiler and module caches
+        run: node scripts/build-caddy-component.mjs --output-dir "${{ runner.temp }}/caddy-component-second"
+      - name: Compare native binary sizes and hashes
+        run: node scripts/compare-caddy-builds.mjs --first "${{ runner.temp }}/caddy-component" --second "${{ runner.temp }}/caddy-component-second" --target "${{ matrix.target }}"
       - name: Install test dependencies
         run: npm ci
       - name: Verify TLS, authenticated Gateway, API bytes and WebSockets through built Caddy
         env:
-          DSH_CADDY_TEST_EXECUTABLE: ${{ runner.temp }}/caddy-component/${{ runner.os == 'Windows' && 'caddy.exe' || 'caddy' }}
-        run: npx vitest run tests/caddy.test.ts tests/caddy-controller.test.ts tests/caddy-mode.test.ts tests/caddy-live.test.ts
-      - uses: actions/upload-artifact@v7
+          DSH_CADDY_TEST_EXECUTABLE: ${{ runner.temp }}/caddy-component/${{ matrix.executable }}
+          DSH_CADDY_TEST_MANIFEST: ${{ runner.temp }}/caddy-component/manifest.json
+        run: npx vitest run tests/caddy.test.ts tests/caddy-controller.test.ts tests/caddy-mode.test.ts tests/caddy-live.test.ts tests/caddy-build-inputs.test.ts tests/caddy-artifacts.test.ts
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
-          name: managed-caddy-review-${{ runner.os }}
+          name: managed-caddy-review-${{ matrix.target }}
           path: |
             ${{ runner.temp }}/caddy-component/caddy*
             ${{ runner.temp }}/caddy-component/manifest.json
@@ -48,5 +61,6 @@ jobs:
             ${{ runner.temp }}/caddy-component/modules.txt
             ${{ runner.temp }}/caddy-component/go-build.json
             ${{ runner.temp }}/caddy-component/THIRD_PARTY_LICENSES.txt
+            ${{ runner.temp }}/caddy-component/reproducibility.json
           if-no-files-found: error
           retention-days: 14
