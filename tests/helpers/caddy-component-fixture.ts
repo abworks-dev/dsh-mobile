@@ -67,7 +67,8 @@ export async function installedCaddyFixture(root: string, executable: string, ma
   corruptDownload = true
   await step(() => expect(restarted.install()).rejects.toThrow('caddy_download_hash_mismatch'))
   expect(requests).toBe(2)
-  expect(await step(() => readFile(restarted.executable))).toEqual(bytes)
+  // Native binaries are ~83 MB: generic deep equality enumerates byte keys and can exhaust V8's heap.
+  expect((await step(() => readFile(restarted.executable))).equals(bytes)).toBe(true)
   await step(() => restarted.ensureExecutable())
   expect(await step(() => readdir(join(root, 'staging', 'caddy')))).toEqual([])
   expect((await step(() => readdir(manager.componentRoot))).filter(name => /^\.(install|previous)-/u.test(name))).toEqual([])
