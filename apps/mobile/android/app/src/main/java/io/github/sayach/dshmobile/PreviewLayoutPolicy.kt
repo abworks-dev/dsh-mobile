@@ -20,7 +20,7 @@ object PreviewLayoutPolicy {
      * so its on-screen aspect after the 90 degree display rotation is width/height.
      */
     fun choosePreviewSize(sizes: List<Size>, surfaceWidth: Int, surfaceHeight: Int): Size? {
-        if (sizes.isEmpty()) return null
+        if (sizes.isEmpty() || surfaceWidth <= 0 || surfaceHeight <= 0) return null
         val surfaceAspect = surfaceHeight.coerceAtLeast(1).toDouble() / surfaceWidth.coerceAtLeast(1)
         return sizes.minByOrNull { size ->
             val aspect = size.width.toDouble() / size.height.coerceAtLeast(1)

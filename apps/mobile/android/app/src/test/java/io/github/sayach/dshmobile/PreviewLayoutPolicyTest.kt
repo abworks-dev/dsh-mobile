@@ -55,8 +55,9 @@ class PreviewLayoutPolicyTest {
         assertEquals(0, top)
         // Centered horizontally: crop is symmetric.
         assertEquals(-left, left + width - 1080)
-        // The preview is scaled uniformly (no distortion).
-        assertEquals(width.toDouble() / height, 1280.0 / 720.0, 0.01)
+        // The preview is scaled uniformly (no distortion): after the 90 degree display
+        // rotation the on-screen aspect of the 1280x720 buffer is 720x1280.
+        assertEquals(width.toDouble() / height, 720.0 / 1280.0, 0.01)
     }
 
     @Test
