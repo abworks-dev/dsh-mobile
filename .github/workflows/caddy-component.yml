@@ -58,6 +58,9 @@ jobs:
           DSH_CADDY_TEST_EXECUTABLE: ${{ runner.temp }}/caddy-component/${{ matrix.executable }}
           DSH_CADDY_TEST_MANIFEST: ${{ runner.temp }}/caddy-component/manifest.json
         run: npx vitest run tests/caddy.test.ts tests/caddy-controller.test.ts tests/caddy-mode.test.ts tests/caddy-live.test.ts tests/caddy-build-inputs.test.ts tests/caddy-artifacts.test.ts tests/caddy-buffer-comparison.test.ts tests/caddy-publication.test.ts
+      - name: Install pinned pnpm for existing Windows updater smoke test
+        if: runner.os == 'Windows'
+        run: npm install --global pnpm@10.10.0
       - name: Verify complete plugin regression suite without optional native inputs
         run: npm test
       - name: Verify plugin production build without publishing it
