@@ -89,5 +89,5 @@ object PreviewLayoutPolicy {
         return (ratios.last() / 100f).coerceAtLeast(1f)
     }
 
-    private const val DEFAULT_MAX_ZOOM_RATIO = 4f
+    internal const val DEFAULT_MAX_ZOOM_RATIO = 4f
 }
