@@ -89,6 +89,8 @@ try {
   await writeFile(join(output, 'THIRD_PARTY_LICENSES.txt'), licenses.join('\n'))
   console.log(JSON.stringify({ output, version, bytes: bytes.length, sha256: sha(bytes), published: false }))
 } finally {
-  // work was atomically allocated beneath the newly created explicit output directory.
+  // Go extracts module directories read-only on POSIX; let Go remove its OWN private cache first.
+  // GOMODCACHE is fixed to modulesCache beneath this atomically allocated work tree, never GOPATH.
+  await command(go, ['clean', '-modcache'])
   await rm(work, { recursive: true, force: true })
 }
