@@ -22,7 +22,7 @@ const compressedWebSocket = process.argv.includes('--compressed-websocket')
 const blockedCompatibility = process.argv.includes('--negative-control-compat')
 const legacyWebView = blockedCompatibility || process.argv.includes('--legacy-webview')
 const compatibilityPath = '/mobile-access/compat.js'
-const compatibilityError = /AbortSignal\.any|Promise\.withResolvers|Iterator.*(?:not defined|not a constructor|not a function)/u
+const compatibilityError = /AbortSignal\.any|throwIfAborted|AbortSignal getters|Promise\.withResolvers|Iterator.*(?:not defined|not a constructor|not a function)/u
 const excludedClientModules = process.env.DSH_BOOT_SMOKE_EXCLUDED_MODULES?.split(',').map(id => id.trim()).filter(Boolean) ?? []
 const startedAt = Date.now()
 
@@ -82,10 +82,14 @@ async function inspectBrowser(baseUrl, logs) {
       await phone.addInitScript(() => {
         delete Promise.withResolvers
         delete AbortSignal.any
+        delete AbortSignal.prototype.throwIfAborted
+        delete AbortSignal.prototype.reason
         delete globalThis.Iterator
         globalThis.__DSH_BOOT_SMOKE_MISSING_APIS__ = {
           promise: typeof Promise.withResolvers,
           abort: typeof AbortSignal.any,
+          abortCheck: typeof AbortSignal.prototype.throwIfAborted,
+          abortReason: typeof Object.getOwnPropertyDescriptor(AbortSignal.prototype, 'reason')?.get,
           iterator: typeof globalThis.Iterator,
         }
       })
@@ -156,11 +160,13 @@ async function inspectBrowser(baseUrl, logs) {
         restored: {
           promise: typeof Promise.withResolvers,
           abort: typeof AbortSignal.any,
+          abortCheck: typeof AbortSignal.prototype.throwIfAborted,
+          abortReason: typeof Object.getOwnPropertyDescriptor(AbortSignal.prototype, 'reason')?.get,
           iterator: typeof globalThis.Iterator,
         },
         scripts: Array.from(document.scripts, script => script.src === '' ? '<inline>' : new URL(script.src).pathname),
       }))
-      if (Object.values(features.missingAtInit ?? {}).length !== 3
+      if (Object.values(features.missingAtInit ?? {}).length !== 5
         || Object.values(features.missingAtInit).some(value => value !== 'undefined')
         || Object.values(features.restored).some(value => value !== 'function')) {
         throw new Error(`Legacy WebView compatibility did not restore the missing APIs: ${JSON.stringify(features)}`)

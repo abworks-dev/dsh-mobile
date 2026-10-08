@@ -6,7 +6,7 @@ The remote page may open and `/mobile-access/health` may respond normally while 
 
 ## Identify the stage that fails
 
-First update DSH, the DSH Mobile plugin, and the Android app together. On the computer, check the current channel under **Mobile Access → Connection diagnostics**, then inspect DSH startup logs and the browser's developer tools under Network → WS. Remove Tokens, Cookies, and complete pairing URLs before sharing logs.
+First record the DSH, DSH Mobile plugin and Android app versions. On the computer, check the current channel under **Mobile Access → Connection diagnostics**, then inspect DSH startup logs and the browser's developer tools under Network → WS and update the component involved. The plugin and app release independently; their version numbers do not need to match. Remove Tokens, Cookies, and complete pairing URLs before sharing logs.
 
 - **WebSocket never connects**: check for `101 Switching Protocols` and errors such as `401`, `403`, `404`, or `502`. Authentication, Host/Origin checks, proxy upgrade support, paths, and version differences can all cause this. Heartbeat adjustments do not resolve these failures. Allow blocked third-party plugin paths individually in Connection diagnostics; DSH's built-in paths do not need to be added again.
 - **The request gets 101 but connections keep closing**: record the interval and compare the same page and Session through LAN and remote access. If a long Session repeatedly disconnects only through the remote channel while downloads saturate the link, investigate the heartbeat and initialization deadlines below. Browser close code `1006` means an abnormal end and does not identify which layer disconnected.

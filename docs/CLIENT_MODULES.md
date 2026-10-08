@@ -1,8 +1,8 @@
 # 移动页面模块
 
-[English](CLIENT_MODULES.en.md) · [返回 README](../README.md#060-更新)
+[English](CLIENT_MODULES.en.md) · [返回 README](../README.md#可选模块与高级配置)
 
-> DSH Mobile 0.6.0 在通用设置中提供模块管理入口；请同步更新插件与 App。
+> DSH Mobile 插件 0.6.0 起在通用设置中提供模块管理入口；插件与 App 的版本号不必相同。
 
 用“移动页面模块”选择专用移动页面要加载的客户端组件。它不卸载电脑上的插件，不停止插件服务，也不是设备权限隔离；已配对设备仍是受信任的 DSH 操作者。
 

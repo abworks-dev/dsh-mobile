@@ -682,6 +682,15 @@ describe('dedicated mobile layout boot', () => {
     expect(MOBILE_LAYOUT_STYLES).not.toContain('data-dsh-sidebar-dragging')
   })
 
+  it('bounds the shell before dynamic viewport units enhance its height', () => {
+    const shell = /\.dshm-shell\{([^}]+)\}/u.exec(MOBILE_LAYOUT_STYLES)?.[1]
+    expect(shell).toContain('height:100%;height:100dvh;')
+    expect(MOBILE_LAYOUT_STYLES).toContain('html,body,#root{width:100%;height:100%;overflow:hidden}')
+    // A pre-dvh parser drops the enhancement; the root still bounds the scrollport.
+    const legacyShell = shell?.replace(/height:100dvh;/u, '')
+    expect(legacyShell).toContain('height:100%;')
+  })
+
   it('uses the full phone viewport for the right panel without changing wide docking', () => {
     expect(MOBILE_LAYOUT_STYLES).toContain('@media(max-width:899px){.dshm-details{width:100%;max-width:100%;box-shadow:none}')
     expect(MOBILE_LAYOUT_STYLES).toContain('.dshm-details [data-sidebar-right-toggle],.dshm-details [data-sidebar-right-mode]{min-width:48px;min-height:48px}')

@@ -27,6 +27,23 @@ function positiveBuildNumber(value, label) {
   return value
 }
 
+function stableVersion(value, label) {
+  if (typeof value !== 'string' || !/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(value)
+    || value.split('.').some(part => !Number.isSafeInteger(Number(part)))) {
+    throw new Error(`${label} must be a stable numeric SemVer`)
+  }
+  return value
+}
+
+function compareStableVersions(left, right) {
+  const a = left.split('.').map(Number)
+  const b = right.split('.').map(Number)
+  for (let index = 0; index < 3; index += 1) {
+    if (a[index] !== b[index]) return Math.sign(a[index] - b[index])
+  }
+  return 0
+}
+
 async function main() {
   const manifest = JSON.parse(await read('package.json'))
   if (typeof manifest.version !== 'string') throw new Error('package.version must be a string')
@@ -39,13 +56,34 @@ async function main() {
   }
   const android = await read('apps/mobile/android/app/build.gradle.kts')
 
-  const androidVersion = singleMatch(android, /^\s*versionName\s*=\s*"([^"]+)"\s*$/gm, 'Android versionName')
+  const androidVersion = stableVersion(singleMatch(android, /^\s*versionName\s*=\s*"([^"]+)"\s*$/gm, 'Android versionName'), 'Android versionName')
   const androidBuild = positiveBuildNumber(
     singleMatch(android, /^\s*versionCode\s*=\s*(\d+)\s*$/gm, 'Android versionCode'),
     'Android versionCode',
   )
-  if (androidVersion !== packageVersion) {
-    throw new Error(`Android versionName ${JSON.stringify(androidVersion)} must equal package.version ${JSON.stringify(packageVersion)}`)
+  const publishedApp = JSON.parse(await read('apps/mobile/release.json'))
+  const publishedAppVersion = stableVersion(publishedApp?.version, 'Published Android version')
+  if (!Number.isSafeInteger(publishedApp.versionCode) || publishedApp.versionCode <= 0) {
+    throw new Error('Published Android versionCode must be a positive safe integer')
+  }
+  if (publishedApp.releaseTag !== `v${publishedAppVersion}` && publishedApp.releaseTag !== `android-v${publishedAppVersion}`) {
+    throw new Error('Published Android releaseTag must match its version with v or android-v prefix')
+  }
+  if (Number(androidBuild) < publishedApp.versionCode || compareStableVersions(androidVersion, publishedAppVersion) < 0
+    || (Number(androidBuild) === publishedApp.versionCode && androidVersion !== publishedAppVersion)) {
+    throw new Error('Android candidate must not precede or reuse a differently versioned published App build')
+  }
+  if (process.argv.includes('--android-tag-env')) {
+    const expectedTag = `android-v${androidVersion}`
+    if (process.env.GITHUB_REF_NAME !== expectedTag) {
+      throw new Error(`GITHUB_REF_NAME ${JSON.stringify(process.env.GITHUB_REF_NAME)} must equal ${JSON.stringify(expectedTag)}`)
+    }
+    const applicationId = singleMatch(android, /^\s*applicationId\s*=\s*"([^"]+)"\s*$/gm, 'Android applicationId')
+    if (applicationId !== 'io.github.sayach.dshmobile') throw new Error('Android release must retain the established applicationId')
+    if (Number(androidBuild) <= publishedApp.versionCode || compareStableVersions(androidVersion, publishedAppVersion) <= 0) {
+      throw new Error('Android release must increment both versionName and versionCode beyond the published App')
+    }
+    console.log(`Android release tag ok: ${expectedTag}`)
   }
 
   if (process.argv.includes('--tag-env')) {
@@ -85,17 +123,18 @@ async function main() {
     ]) {
       const marker = developmentMarkers.find(candidate => source.includes(candidate))
       if (marker !== undefined) throw new Error(`${label} still marks ${marker} as in development`)
-      const apk = `releases/download/v${packageVersion}/dsh-mobile-android-v${packageVersion}.apk`
+      const apk = `releases/download/${publishedApp.releaseTag}/dsh-mobile-android-v${publishedAppVersion}.apk`
       const release = `releases/tag/v${packageVersion}`
       if (!source.includes(apk) || !source.includes(release)) {
-        throw new Error(`${label} must link the Android download and release notes for ${packageVersion}`)
+        throw new Error(`${label} must link the published Android ${publishedAppVersion} download and plugin ${packageVersion} release notes`)
       }
       const stableVersion = singleMatch(source,
         new RegExp(`^[ \\t]*(?:>[ \\t]*)?(?:\\*\\*)?${prefix}[ \\t]*(?:\\*\\*)?${appVersion}(?:\\*\\*)?(?=\\s|[;。；]|\\.(?:\\s|$))`, 'gimu'),
         `${label} stable release version`)
       if (stableVersion !== packageVersion) throw new Error(`${label} stable release version ${JSON.stringify(stableVersion)} must equal package.version ${JSON.stringify(packageVersion)} before tagging`)
     }
-    const candidateHeading = new RegExp(`^#{1,6}[ \\t]+[^\\n]*(?<![a-z\\d.+-])${escapedVersion}[ \\t]+(?:candidate changes|候选更新)(?:[ \\t]|$)`, 'imu')
+    const escapedAppVersion = publishedAppVersion.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const candidateHeading = new RegExp(`^#{1,6}[ \\t]+[^\\n]*(?<![a-z\\d.+-])${escapedAppVersion}[ \\t]+(?:candidate changes|候选更新)(?:[ \\t]|$)`, 'imu')
     for (const [source, label, prefix] of [
       [englishAppReadme, 'apps/mobile/README.md', 'The current stable app is '],
       [chineseAppReadme, 'apps/mobile/README.zh-CN.md', '当前正式 App 为 '],
@@ -103,8 +142,8 @@ async function main() {
       const stableVersion = singleMatch(source,
         new RegExp(`^${prefix}(?:\\*\\*)?${appVersion}(?:\\*\\*)?(?=\\s|[;。；]|\\.(?:\\s|$))`, 'gimu'),
         `${label} stable App version`)
-      if (stableVersion !== packageVersion) throw new Error(`${label} stable App version ${JSON.stringify(stableVersion)} must equal package.version ${JSON.stringify(packageVersion)} before tagging`)
-      if (candidateHeading.test(source)) throw new Error(`${label} still has a ${packageVersion} candidate changes headline before tagging`)
+      if (stableVersion !== publishedAppVersion) throw new Error(`${label} stable App version ${JSON.stringify(stableVersion)} must equal published Android version ${JSON.stringify(publishedAppVersion)} before tagging`)
+      if (candidateHeading.test(source)) throw new Error(`${label} still has a ${publishedAppVersion} candidate changes headline before tagging`)
     }
     for (const screenshot of [
       'assets/screenshots/lan-access.png',
@@ -119,7 +158,7 @@ async function main() {
     console.log(`release tag ok: ${actualTag}`)
   }
 
-  console.log(`release versions ok: package=${packageVersion}, Android=${androidVersion} (${androidBuild})`)
+  console.log(`release versions ok: package=${packageVersion}, Android=${androidVersion} (${androidBuild}), published App=${publishedAppVersion} (${publishedApp.versionCode})`)
 }
 
 main().catch((error) => {

@@ -7,14 +7,15 @@ import { DSH_MOBILE_VERSION } from './version.js'
 
 const PACKAGE_NAME = 'dsh-mobile'
 const NPM_LATEST_URL = 'https://registry.npmjs.org/dsh-mobile/latest'
-const GITHUB_LATEST_URL = 'https://github.com/saya-ch/dsh-mobile/releases/latest'
-const GITHUB_API_LATEST_URL = 'https://api.github.com/repos/saya-ch/dsh-mobile/releases/latest'
+const ANDROID_RELEASE_DESCRIPTOR_URL = 'https://raw.githubusercontent.com/saya-ch/dsh-mobile/main/apps/mobile/release.json'
+const GITHUB_RELEASE_API = 'https://api.github.com/repos/saya-ch/dsh-mobile/releases/tags/'
 const GITHUB_RELEASES_URL = 'https://github.com/saya-ch/dsh-mobile/releases'
 const RELEASE_NOTES_MAX_CHARS = 4000
 const STATUS_CACHE_MS = 10 * 60_000
 const REQUEST_TIMEOUT_MS = 8_000
 const UPDATE_TIMEOUT_MS = 120_000
 const UPDATE_TERMINATION_GRACE_MS = 1_500
+const bundledAndroidRelease: unknown = createRequire(import.meta.url)('../apps/mobile/release.json')
 
 const NUMERIC_VERSION_IDENTIFIER = '(?:0|[1-9]\\d*)'
 const WILDCARD_VERSION_IDENTIFIER = '(?:[xX*])'
@@ -38,7 +39,7 @@ export interface PluginReleaseStatus {
   readonly updateSupported: boolean
   readonly androidVersion?: string
   readonly androidDownloadUrl: string
-  /** Trimmed body of the latest GitHub release (What’s new + notices). */
+  /** Trimmed GitHub release notes for the selected npm version. */
   readonly releaseNotes?: string
 }
 
@@ -200,37 +201,51 @@ async function fetchNpmVersion(fetcher: typeof globalThis.fetch): Promise<string
     : undefined
 }
 
-function githubReleaseVersion(location: string | null, responseUrl: string): string | undefined {
-  let url: URL
-  try { url = new URL(location ?? responseUrl, GITHUB_LATEST_URL) }
-  catch { return undefined }
-  if (url.origin !== 'https://github.com' || url.username !== '' || url.password !== '' || url.search !== '' || url.hash !== '') return undefined
-  const prefix = '/saya-ch/dsh-mobile/releases/tag/v'
-  if (!url.pathname.startsWith(prefix)) return undefined
-  let version: string
-  try { version = decodeURIComponent(url.pathname.slice(prefix.length)) } catch { return undefined }
-  return parseSemver(version) === undefined ? undefined : version
+interface AndroidRelease {
+  readonly version: string
+  readonly downloadUrl: string
 }
 
-function androidReleaseDownloadUrl(version: string | undefined): string {
-  if (version === undefined) return GITHUB_RELEASES_URL
-  const tag = `v${version}`
-  return `https://github.com/saya-ch/dsh-mobile/releases/download/${encodeURIComponent(tag)}/dsh-mobile-android-${encodeURIComponent(tag)}.apk`
-}
-
-async function fetchAndroidVersion(fetcher: typeof globalThis.fetch): Promise<string | undefined> {
-  const response = await fetcher(GITHUB_LATEST_URL, {
-    method: 'GET',
-    redirect: 'manual',
-    headers: { accept: 'text/html', 'user-agent': 'dsh-mobile-release-check' },
-    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+function androidRelease(version: unknown, tag: unknown): AndroidRelease | undefined {
+  if (typeof version !== 'string' || !/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u.test(version)
+    || parseSemver(version) === undefined || (tag !== `v${version}` && tag !== `android-v${version}`)) return undefined
+  return Object.freeze({
+    version,
+    downloadUrl: `https://github.com/saya-ch/dsh-mobile/releases/download/${tag}/dsh-mobile-android-v${version}.apk`,
   })
-  return githubReleaseVersion(response.headers.get('location'), response.url)
 }
 
-/** Best-effort body of the latest GitHub release, trimmed to a bounded size. */
-async function fetchReleaseNotes(fetcher: typeof globalThis.fetch): Promise<string | undefined> {
-  const response = await fetcher(GITHUB_API_LATEST_URL, {
+function androidReleaseDescriptor(payload: unknown): AndroidRelease | undefined {
+  if (typeof payload !== 'object' || payload === null) return undefined
+  const fields = payload as { readonly version?: unknown; readonly releaseTag?: unknown; readonly versionCode?: unknown }
+  return Number.isSafeInteger(fields.versionCode) && Number(fields.versionCode) > 0
+    ? androidRelease(fields.version, fields.releaseTag)
+    : undefined
+}
+
+async function fetchAndroidRelease(fetcher: typeof globalThis.fetch): Promise<AndroidRelease | undefined> {
+  const fallback = androidReleaseDescriptor(bundledAndroidRelease)
+  try {
+    const response = await fetcher(ANDROID_RELEASE_DESCRIPTOR_URL, {
+      redirect: 'error',
+      headers: { accept: 'application/json', 'user-agent': 'dsh-mobile-release-check' },
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    })
+    if (response.ok) {
+      const release = androidReleaseDescriptor(await response.json())
+      if (release !== undefined) {
+        return fallback !== undefined && comparePluginVersions(release.version, fallback.version) === -1 ? fallback : release
+      }
+    }
+  } catch {
+    // The package's verified App pointer remains available when the network lookup fails.
+  }
+  return fallback
+}
+
+/** Best-effort body of the selected npm version's GitHub release, trimmed to a bounded size. */
+async function fetchReleaseNotes(fetcher: typeof globalThis.fetch, version: string): Promise<string | undefined> {
+  const response = await fetcher(`${GITHUB_RELEASE_API}${encodeURIComponent(`v${version}`)}`, {
     headers: { accept: 'application/vnd.github+json', 'user-agent': 'dsh-mobile-release-check' },
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   })
@@ -433,13 +448,14 @@ export class PluginReleaseManager {
     if (!force && this.cache !== undefined && this.cache.expiresAt > this.now()) return this.cache.status
     const dependencySpec = this.profileDirectory === undefined ? undefined : await profileDependencySpec(this.profileDirectory)
     const updateSupported = isRegistryPluginSpec(dependencySpec)
+    const npmVersion = fetchNpmVersion(this.fetcher)
     const [npmResult, androidResult, notesResult] = await Promise.allSettled([
-      fetchNpmVersion(this.fetcher),
-      fetchAndroidVersion(this.fetcher),
-      fetchReleaseNotes(this.fetcher),
+      npmVersion,
+      fetchAndroidRelease(this.fetcher),
+      npmVersion.then(version => version === undefined ? undefined : fetchReleaseNotes(this.fetcher, version)),
     ])
     const latestVersion = npmResult.status === 'fulfilled' ? npmResult.value : undefined
-    const androidVersion = androidResult.status === 'fulfilled' ? androidResult.value : undefined
+    const android = androidResult.status === 'fulfilled' ? androidResult.value : undefined
     const releaseNotes = notesResult.status === 'fulfilled' ? notesResult.value : undefined
     const comparison = latestVersion === undefined
       ? undefined
@@ -449,8 +465,8 @@ export class PluginReleaseManager {
       ...(latestVersion === undefined ? {} : { latestVersion }),
       updateAvailable: updateSupported && comparison === 1,
       updateSupported,
-      ...(androidVersion === undefined ? {} : { androidVersion }),
-      androidDownloadUrl: androidReleaseDownloadUrl(androidVersion),
+      ...(android === undefined ? {} : { androidVersion: android.version }),
+      androidDownloadUrl: android?.downloadUrl ?? GITHUB_RELEASES_URL,
       ...(releaseNotes === undefined ? {} : { releaseNotes }),
     })
     this.cache = { expiresAt: this.now() + STATUS_CACHE_MS, status }

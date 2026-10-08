@@ -2,6 +2,6 @@
 import 'core-js/es/iterator/index.js'
 import 'core-js/actual/iterator/join.js'
 import 'core-js/es/promise/with-resolvers.js'
-import { installAbortSignalAny } from './mobile-abort-signal.js'
+import { installAbortSignalCompatibility } from './mobile-abort-signal.js'
 
-installAbortSignalAny()
+installAbortSignalCompatibility()

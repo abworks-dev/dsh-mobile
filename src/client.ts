@@ -539,11 +539,11 @@ function releaseVersion(value: unknown): string | undefined {
 export function clientReleaseInfo(data: Readonly<Record<string, unknown>>): ClientReleaseInfo {
   const latestVersion = releaseVersion(data.latestVersion)
   const androidVersion = releaseVersion(data.androidVersion)
-  const expectedAndroidDownloadUrl = androidVersion === undefined
-    ? undefined
-    : `${GITHUB_RELEASES_URL}/download/v${androidVersion}/dsh-mobile-android-v${androidVersion}.apk`
-  const androidDownloadUrl = expectedAndroidDownloadUrl !== undefined && data.androidDownloadUrl === expectedAndroidDownloadUrl
-    ? expectedAndroidDownloadUrl
+  const expectedAndroidDownloadUrls = androidVersion === undefined
+    ? []
+    : ['v', 'android-v'].map(prefix => `${GITHUB_RELEASES_URL}/download/${prefix}${androidVersion}/dsh-mobile-android-v${androidVersion}.apk`)
+  const androidDownloadUrl = typeof data.androidDownloadUrl === 'string' && expectedAndroidDownloadUrls.includes(data.androidDownloadUrl)
+    ? data.androidDownloadUrl
     : GITHUB_RELEASES_URL
   return {
     updateAvailable: data.updateAvailable === true && latestVersion !== undefined,
