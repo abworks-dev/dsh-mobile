@@ -21,6 +21,7 @@ Browser checks consume built client files. Run `npm run build` and `npx playwrig
 | --- | --- |
 | Question cards | `npm run smoke:question-fixes` |
 | Layout, drawers and panels | `npm run smoke:native-layout` |
+| Conversation scrollport and older viewport units | `node scripts/smoke-conversation-scroll.mjs` |
 | Composer focus and keyboard | `npm run smoke:composer-keyboard` |
 | Composer controls, typography and wrapping | `npm run smoke:composer-overflow` |
 | Dictation lifecycle and focus | `npm run smoke:voice-session` |
@@ -48,6 +49,8 @@ The smoke installs the actual npm tarball into an owned temporary profile before
 
 Compatibility changes also run `npm run smoke:dsh-boot -- --legacy-webview`. The `--negative-control-compat` variation must fail with its expected missing-API marker after the compatibility script is blocked; an installation or fixture failure is not a successful negative control.
 
+The conversation scroll check uses the same isolated runtime and packed plugin. Its `--negative-control-viewport` variation removes the height fallback and must fail with `Viewport negative control detected`; it cannot substitute for testing the reporter's actual WebView.
+
 `npm run capture:screenshots -- --out <directory>` produces credential-masked pairing, conversation, drawer and settings PNGs. `--overwrite` permits replacing existing captures; generated files are not committed automatically.
 
 ## Android and optional components
@@ -66,13 +69,17 @@ The Caddy publisher shell test needs Bash on POSIX and Git for Windows on Window
 
 Release preparation is not publication. Keep the candidate marked unreleased and retain working stable APK links until publication is authorized.
 
-1. Align package, lockfile and Android versions; use `npm run check:version`.
+1. Align the npm package and lockfile versions; use `npm run check:version`. Keep Android `versionName` and `versionCode` unchanged for plugin-only changes. The checker validates Android separately against the published App descriptor in [apps/mobile/release.json](apps/mobile/release.json).
 2. Review release notes, app manuals, compatibility statements, contributors, third-party notices and package contents. Preserve original author commits when incorporating community PRs.
 3. Pass relevant local checks and every applicable CI job for the final candidate, not only the checks required by branch protection. Record device/network coverage without treating local probes as public-route evidence.
-4. After publication is authorized, finalize the CHANGELOG date and stable version/download text in both root READMEs and app manuals. `check:release-tag` refuses unfinished candidate documentation.
-5. Merge the exact tested candidate, tag that commit and let [.github/workflows/release.yml](.github/workflows/release.yml) build/publish. Verify npm/GitHub package equality, checksums, APK identity, versionCode and signer afterward.
+4. After publication is authorized, finalize the CHANGELOG date and plugin stable version in both root READMEs. Keep APK links and App manuals on the published App version. `check:release-tag` validates these independently and refuses unfinished plugin release documentation.
+5. Merge the tested candidate, tag that commit with `v<plugin-version>` and let [.github/workflows/release.yml](.github/workflows/release.yml) build and publish the plugin. Verify npm/GitHub package equality and checksums afterward. Link the current App download in the plugin release notes; an unchanged App does not get a new APK.
 
-Stable Android releases require `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS` and `ANDROID_KEY_PASSWORD`; npm publication requires `NPM_TOKEN`. Never copy their values into the repository. The release workflow uses a temporary runner, validates the established single signer and completes Android signing before npm publication. Missing signing configuration fails the release rather than publishing an unusable APK.
+For native changes, increase Android `versionName` and `versionCode`, document the App changes, complete Android validation and use an `android-v<app-version>` tag. [The Android workflow](.github/workflows/android-release.yml) builds and publishes the signed APK independently, without publishing npm or replacing GitHub's latest plugin release. The APK name remains `dsh-mobile-android-v<app-version>.apk`.
+
+After verifying the published APK's checksum, identity, versionCode and established signer, copy the generated `dsh-mobile-android-release.json` into `apps/mobile/release.json` in a reviewed commit and update the App manuals and root APK links. This descriptor names an already published APK; do not advance it for an unpublished candidate. Its legacy `v<app-version>` tags remain valid, so existing downloads do not move. The plugin checks the public descriptor and falls back to its bundled copy when that lookup is unavailable.
+
+Stable Android releases require `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS` and `ANDROID_KEY_PASSWORD`; npm publication requires `NPM_TOKEN`. Never copy their values into the repository. The Android workflow uses a temporary runner and validates the established single signer. Missing signing configuration fails the Android release; plugin-only publication does not require Android signing credentials.
 
 ## Reports and community conduct
 

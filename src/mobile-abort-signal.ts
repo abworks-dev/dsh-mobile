@@ -1,6 +1,62 @@
-/** Browser cancellation support for engines with AbortController but no AbortSignal.any. */
+/** Missing cancellation APIs for browsers with native AbortController support. */
 
 type SourceListeners = Map<AbortSignal, EventListener>
+type SignalGetter<T> = (this: AbortSignal) => T
+
+/** Preserve supplied reasons on engines whose native cancellation has no reason getter. */
+function installAbortReason(aborted: SignalGetter<boolean>): SignalGetter<unknown> {
+  const nativeReason = Object.getOwnPropertyDescriptor(AbortSignal.prototype, 'reason')?.get
+  if (nativeReason !== undefined) return nativeReason
+  const signal = Object.getOwnPropertyDescriptor(AbortController.prototype, 'signal')?.get
+  if (signal === undefined) throw new TypeError('AbortController signal getter is unavailable')
+  const reasons = new WeakMap<AbortSignal, unknown>()
+  const defaultReason = (): DOMException => new DOMException('This operation was aborted', 'AbortError')
+  const reason: SignalGetter<unknown> = function () {
+    if (!aborted.call(this)) return undefined
+    // Old signals cancelled before installation did not retain a custom reason.
+    if (!reasons.has(this)) reasons.set(this, defaultReason())
+    return reasons.get(this)
+  }
+  const nativeAbort = AbortController.prototype.abort
+  Object.defineProperty(AbortController.prototype, 'abort', {
+    configurable: true, enumerable: true, writable: true,
+    value: function abort(this: AbortController, supplied: unknown = undefined): void {
+      const target: AbortSignal = signal.call(this)
+      if (!aborted.call(target)) reasons.set(target, supplied === undefined ? defaultReason() : supplied)
+      nativeAbort.call(this, supplied)
+    },
+  })
+  const nativeStaticAbort = AbortSignal.abort
+  if (typeof nativeStaticAbort === 'function') {
+    Object.defineProperty(AbortSignal, 'abort', {
+      configurable: true, enumerable: true, writable: true,
+      value: function abort(supplied: unknown = undefined): AbortSignal {
+        const target = nativeStaticAbort(supplied)
+        reasons.set(target, supplied === undefined ? defaultReason() : supplied)
+        return target
+      },
+    })
+  }
+  Object.defineProperty(AbortSignal.prototype, 'reason', { configurable: true, enumerable: true, get: reason })
+  return reason
+}
+
+/** Fill missing cancellation checks before DSH starts, retaining native implementations. */
+export function installAbortSignalCompatibility(): void {
+  if (typeof AbortSignal === 'undefined' || typeof AbortController === 'undefined') return
+  const aborted = Object.getOwnPropertyDescriptor(AbortSignal.prototype, 'aborted')?.get
+  if (aborted === undefined) throw new TypeError('AbortSignal aborted getter is unavailable')
+  const reason = installAbortReason(aborted)
+  if (typeof AbortSignal.prototype.throwIfAborted !== 'function') {
+    Object.defineProperty(AbortSignal.prototype, 'throwIfAborted', {
+      configurable: true, enumerable: true, writable: true,
+      value: function throwIfAborted(this: AbortSignal): void {
+        if (aborted.call(this)) throw reason.call(this)
+      },
+    })
+  }
+  installAbortSignalAny()
+}
 
 /** Release source subscriptions without retaining their combined signal. */
 function detachSources(listeners: SourceListeners): void {

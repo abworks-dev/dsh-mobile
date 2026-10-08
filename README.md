@@ -31,9 +31,9 @@
 
 > DSH Mobile 是 DeepSeek Harness 社区插件，原生 App 仅支持 Android。
 >
-> **当前正式版本：0.6.1**。优化远程 HTTPS 配置表单，完善 Caddy 固定构建与跨平台验证；Android App 同步版本，保留 0.6.0 的模块管理、图标选择、设备排序与扫码改进。[更新记录](CHANGELOG.md#061---2026-10-08)。
+> **当前正式版本：0.6.2**。补齐旧 WebView 的加载与滚动兼容，插件与 App 独立更新。[更新记录](https://github.com/saya-ch/dsh-mobile/releases/tag/v0.6.2)。
 >
-> **升级提醒**：请同步更新插件与 Android App 至 0.6.1；同一正式签名的旧 App 可原位升级并保留配对。[兼容说明](#兼容性)。
+> **升级提醒**：插件与 Android App 独立更新。网页与连接修复通常只需更新插件；涉及原生功能或提示 App 版本过旧时，再更新 App。[兼容说明](#兼容性)。
 
 <p align="center">
   <a href="https://github.com/saya-ch/dsh-mobile/releases/download/v0.6.1/dsh-mobile-android-v0.6.1.apk"><img src="https://raw.githubusercontent.com/saya-ch/dsh-mobile/main/assets/brand/app-icon-rounded.svg" alt="DSH Mobile 安卓应用图标" width="72" height="72"></a><br>
@@ -59,37 +59,6 @@ DSH Mobile 是一个 DeepSeek Harness 插件，让手机浏览器或 Android App
 - **纵深安全**：局域网固定私有 CA，公开远程入口使用受信任 HTTPS；自签 FRP 入口由 0.4.6 App 固定远程 CA。凭据存 Keystore，设备令牌只发往精确 Origin，第三方 WS 默认拦截。
 
 配对设备可以操作电脑上的 DSH，应视为完全受信任的设备。局域网只在可信网络开启；远程访问应使用可靠的 HTTPS 通道。手机丢失时，请立即从电脑端撤销设备。
-
-## 0.5.5 移动体验改进
-
-<details>
-<summary>已发布版本的输入栏、返回键与旋转改进</summary>
-
-屏幕宽度不超过 720px 时，未编辑的输入栏保留可滚动的 72px 草稿预览，为会话留出更多空间；编辑区或工具栏获得焦点后恢复展开。文字、引用和附件保留，发送、排队、引导与停止按钮的触摸区域至少为 44px。提交和输入法行为继续由既有 DSH 与 App 机制处理。
-
-模型搜索框与配对页的输入字号已补齐，Android 返回键可逐级退出模型菜单。App 旋转和调整窗口大小时保留当前页面、引用与未发送图片，已收到的“电脑端已移除”状态不会被后续检测覆盖。请同步更新插件与 App；App 进程终止后，未发送附件仍可能丢失。
-
-</details>
-
-## 0.6.1 更新
-
-- **远程配置**：重新整理 HTTPS 地址、自备代理与托管 Caddy 的表单分组、字段和操作按钮，小窗口下也能清楚区分配置方式。
-- **构建与验证**：固定 Caddy 构建输入，增加 Windows／Linux 双构建一致性及隔离 TLS、配对、API、WebSocket 和清理检查，修正 Windows Git Bash 路径与测试失败分类。[Caddy 状态](docs/CADDY_MANAGED.md)
-- **Android App**：同步为 0.6.1（build 77），原生功能与配对协议不变，沿用正式签名；已有配对无需重建。
-
-感谢 [@abworks-dev](https://github.com/abworks-dev) 的 [#184](https://github.com/saya-ch/dsh-mobile/pull/184) 与 [#185](https://github.com/saya-ch/dsh-mobile/pull/185)。托管 Caddy 仍未开放正式安装；完整记录见 [CHANGELOG](CHANGELOG.md#061---2026-10-08)。
-
-## 0.6.0 更新
-
-本次更新聚焦模块管理、App 个性化与移动访问体验；完整记录见 [CHANGELOG](CHANGELOG.md#060---2026-10-07)。
-
-- **连接与加载**：重试临时失败的静态资源请求，长时间 DSH API 操作不再被普通传输超时截断；不重放 API 或写入请求。[慢链路说明](docs/SLOW_CONNECTIONS.md)
-- **移动布局**：输入栏更紧凑，改善键盘打开和大字号时的按钮可达性；支持独立移动字号、触屏浏览器 Enter 换行，以及窄屏面板“返回会话”。
-- **Android 体验**：可选鲸鱼娘及六种鲸鱼标志配色；改进扫码预览、对焦与缩放。设备列表支持固定顺序、上移／置顶，长按左上角抽屉按钮可切换电脑；启动仍优先连接最近使用的电脑。
-- **模块管理**：电脑默认与本设备选择分别保存，检查启动必需模块和依赖，不卸载插件、不自动刷新当前会话。旧选择失效时提供本设备恢复入口。[操作指南](docs/CLIENT_MODULES.md)
-- **网络与兼容**：托管局域网可追加明确的可信来源网段；补齐部分旧 WebView 缺失 API，完善扩展调用超时与取消。[可信网段](docs/TRUSTED_NETWORKS.md) · [WebView 说明](#app-与手机浏览器)
-
-> **托管 Caddy 尚未开放安装。**代码与隔离 TLS 验证已完成，但可信固定二进制尚未分发；现有自备代理和其他通道不受影响。[状态与条件](docs/CADDY_MANAGED.md)
 
 ## 快速开始
 
@@ -447,7 +416,7 @@ macOS 上局域网、cloudflared、自建 FRP 与自有反向代理可用；Funn
 
 现有 App（0.3.3 及更新）无需重新配对；cpolar 用户应使用 0.3.15 或更新 App，较早版本可能在免费线路的慢速首次加载完成前超时；更早的 App 还使用不同的状态栏策略。App 0.4.0 才支持多设备列表、启动行为设置和电脑端撤销状态同步；旧版 App 仍可连接已保存的单台设备。App 0.1.3 及更早版本需卸载重装并重新配对。
 
-0.6.1（build 77）的原生功能与配对、续期协议延续 0.6.0，已有配对无需重建；旧 App 的正常连接可继续使用。建议同步升级插件与 App，以保留 0.6.0 的图标选择、扫码改进、设备排序、切换快捷方式及此前修复。
+Android App 当前正式版为 0.6.1（build 77），原生功能与配对、续期协议延续 0.6.0，已有配对无需重建。插件和 App 的版本号不要求相同；连接按协议及最低版本要求检查，具体原生功能另有要求时会说明所需 App 版本。
 
 GitHub Release 的正式 APK 使用固定签名，可从同一签名的旧正式版原位升级并保留配对。自行构建的 Debug APK 若使用不同签名，不能直接覆盖安装正式版；切换前请准备重新配对。
 

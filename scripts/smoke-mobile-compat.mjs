@@ -14,17 +14,18 @@ const browser = await chromium.launch({ headless: true })
 try {
   for (const mode of ['bundle', 'Android document-start']) {
     const page = await browser.newPage()
-    await page.addInitScript(() => {
+    await page.addInitScript(mode => {
       delete Promise.withResolvers
       delete AbortSignal.any
       delete globalThis.Iterator
+      if (mode === 'bundle') delete AbortSignal.prototype.throwIfAborted
       globalThis.compatMissingAtStart = [typeof Promise.withResolvers, typeof AbortSignal.any, typeof Iterator]
-    })
+    }, mode)
     await page.route('https://compat.test/**', route => {
       const pathname = new URL(route.request().url()).pathname
       return pathname === '/compat.js'
         ? route.fulfill({ contentType: 'text/javascript', body: mode === 'bundle' ? bundle : shim })
-        : route.fulfill({ contentType: 'text/html', body: '<!doctype html><script src="/compat.js"></script><script>globalThis.bootReady = Promise.withResolvers(); bootReady.resolve("ready");</script>' })
+        : route.fulfill({ contentType: 'text/html', body: '<!doctype html><script src="/compat.js"></script><script>new AbortController().signal.throwIfAborted(); globalThis.bootReady = Promise.withResolvers(); bootReady.resolve("ready");</script>' })
     })
     const errors = []
     page.on('pageerror', error => errors.push(error.message))
@@ -62,6 +63,17 @@ try {
         const reason = { message: 'cancelled' }
         right.abort(reason)
         left.abort('later')
+        let exactThrownReason = false
+        try { combined.throwIfAborted() } catch (error) { exactThrownReason = error === reason }
+        const fresh = new AbortController()
+        const pendingCheck = fresh.signal.throwIfAborted()
+        fresh.abort()
+        let defaultThrownReason = false
+        try { fresh.signal.throwIfAborted() } catch (error) { defaultThrownReason = error === fresh.signal.reason && error.name === 'AbortError' }
+        const invalidReceivers = []
+        for (const receiver of [undefined, null, {}, { aborted: false }, Object.create(AbortSignal.prototype)]) {
+          try { AbortSignal.prototype.throwIfAborted.call(receiver); invalidReceivers.push(false) } catch (error) { invalidReceivers.push(error instanceof TypeError) }
+        }
         const invalid = []
         for (const input of [null, {}, [AbortSignal.abort('early'), {}], [{ aborted: false, addEventListener() {} }]]) {
           try { AbortSignal.any(input); invalid.push(false) } catch (error) { invalid.push(error instanceof TypeError) }
@@ -73,11 +85,14 @@ try {
         const crossRealmSource = new iframe.contentWindow.AbortController()
         const crossRealmResult = AbortSignal.any([crossRealmSource.signal])
         crossRealmSource.abort('other frame')
+        let crossRealmThrown = false
+        try { AbortSignal.prototype.throwIfAborted.call(crossRealmSource.signal) } catch (error) { crossRealmThrown = error === 'other frame' }
         iframe.remove()
         return {
           syntheticIgnored, aborted: combined.aborted, sameReason: combined.reason === reason,
           added, removed, events, invalid, generatorReason, crossRealmReason: crossRealmResult.reason,
           emptyPending: !AbortSignal.any([]).aborted,
+          pendingCheck, exactThrownReason, defaultThrownReason, invalidReceivers, crossRealmThrown,
           enumerable: Object.getOwnPropertyDescriptor(AbortSignal, 'any').enumerable,
           iterator: Iterator.from([1, 2, 3]).map(value => value * 2).join(','),
         }
@@ -86,26 +101,82 @@ try {
         syntheticIgnored: true, aborted: true, sameReason: true, added: 2, removed: 2, events: 1,
         invalid: [true, true, true, true], generatorReason: 'second', crossRealmReason: 'other frame',
         emptyPending: true, enumerable: false, iterator: '2,4,6',
+        pendingCheck: undefined, exactThrownReason: true, defaultThrownReason: true,
+        invalidReceivers: [true, true, true, true, true], crossRealmThrown: true,
       })
     }
     const installed = await page.evaluate(() => {
       globalThis.installedPromise = Promise.withResolvers
       globalThis.installedAny = AbortSignal.any
+      globalThis.installedCheck = AbortSignal.prototype.throwIfAborted
       return typeof installedPromise
     })
     assert.equal(installed, 'function')
     await page.addScriptTag({ content: mode === 'bundle' ? bundle : shim })
-    assert.equal(await page.evaluate(() => installedPromise === Promise.withResolvers && installedAny === AbortSignal.any), true)
+    assert.equal(await page.evaluate(() => installedPromise === Promise.withResolvers && installedAny === AbortSignal.any && installedCheck === AbortSignal.prototype.throwIfAborted), true)
     assert.deepEqual(errors, [])
     await page.close()
     console.log(`${mode}: missing-API boot, Promise capabilities and idempotence passed${mode === 'bundle' ? '; real browser cancellation, iframe signals and listener cleanup passed' : ''}`)
   }
+  const oldest = await browser.newPage()
+  await oldest.goto('about:blank')
+  await oldest.evaluate(() => {
+    globalThis.originalController = AbortController
+    globalThis.oldSignal = new AbortController().signal
+    delete AbortSignal.prototype.reason
+    delete AbortSignal.prototype.throwIfAborted
+    delete AbortSignal.any
+  })
+  await oldest.addScriptTag({ content: bundle })
+  assert.deepEqual(await oldest.evaluate(() => {
+    const source = new AbortController(), reason = { message: 'cancelled' }
+    let observed, thrown, events = 0
+    source.signal.addEventListener('abort', () => { observed = source.signal.reason; events++ })
+    source.signal.dispatchEvent(new Event('abort'))
+    const syntheticIgnored = source.signal.reason === undefined
+    const combined = AbortSignal.any([source.signal])
+    source.abort(reason)
+    source.abort('later')
+    try { combined.throwIfAborted() } catch (error) { thrown = error }
+    const staticSignal = AbortSignal.abort(reason), fallback = AbortSignal.abort()
+    return {
+      nativeController: originalController === AbortController, pending: oldSignal.reason === undefined,
+      syntheticIgnored, synchronousReason: observed === reason, exactReason: source.signal.reason === reason,
+      combinedReason: combined.reason === reason, thrownReason: thrown === reason, events,
+      staticReason: staticSignal.reason === reason, defaultReason: fallback.reason.name,
+      stableDefault: fallback.reason === fallback.reason,
+    }
+  }), {
+    nativeController: true, pending: true, syntheticIgnored: true, synchronousReason: true,
+    exactReason: true, combinedReason: true, thrownReason: true, events: 2, staticReason: true,
+    defaultReason: 'AbortError', stableDefault: true,
+  })
+  assert.equal(await oldest.evaluate(async () => {
+    const source = new AbortController(), reason = { message: 'cancelled fetch' }
+    const combined = AbortSignal.any([source.signal])
+    source.abort(reason)
+    try { await fetch('data:text/plain,not-requested', { signal: combined }); return false } catch (error) { return error === reason }
+  }), true, 'The composed signal must still cancel native fetch with its exact reason')
+  await oldest.evaluate(() => {
+    globalThis.installedReason = Object.getOwnPropertyDescriptor(AbortSignal.prototype, 'reason').get
+    globalThis.installedAbort = AbortController.prototype.abort
+  })
+  await oldest.addScriptTag({ content: bundle })
+  assert.equal(await oldest.evaluate(() => installedReason === Object.getOwnPropertyDescriptor(AbortSignal.prototype, 'reason').get && installedAbort === AbortController.prototype.abort), true)
+  await oldest.close()
+  console.log('Reason-less browser cancellation keeps the native controller and exact synchronous controller/static reasons')
   const native = await browser.newPage()
   await native.goto('about:blank')
-  await native.evaluate(() => { globalThis.originalPromise = Promise.withResolvers; globalThis.originalAny = AbortSignal.any })
+  await native.evaluate(() => {
+    globalThis.originalPromise = Promise.withResolvers
+    globalThis.originalAny = AbortSignal.any
+    globalThis.originalCheck = AbortSignal.prototype.throwIfAborted
+    globalThis.originalAbort = AbortController.prototype.abort
+  })
   await native.addScriptTag({ content: bundle })
   await native.addScriptTag({ content: shim })
-  assert.equal(await native.evaluate(() => originalPromise === Promise.withResolvers && originalAny === AbortSignal.any), true)
+  assert.equal(await native.evaluate(() => originalPromise === Promise.withResolvers && originalAny === AbortSignal.any
+    && originalCheck === AbortSignal.prototype.throwIfAborted && originalAbort === AbortController.prototype.abort), true)
   await native.close()
   console.log('Native browser Promise and AbortSignal implementations remained unchanged')
 } finally {

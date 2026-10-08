@@ -31,9 +31,9 @@
 
 > DSH Mobile is a DeepSeek Harness community plugin; the native app supports Android only.
 >
-> **Current stable release: 0.6.1**. Improve remote HTTPS settings and pinned Caddy builds with cross-platform checks. The Android app receives a matching version, retaining 0.6.0's module management, icon choices, device ordering and scanning improvements. [Release notes](CHANGELOG.md#061---2026-10-08).
+> **Current stable release: 0.6.2**. Improve loading and scrolling on older WebViews, with independent plugin and app updates. [Release notes](https://github.com/saya-ch/dsh-mobile/releases/tag/v0.6.2).
 >
-> **Upgrade reminder**: update the plugin and Android app together to 0.6.1. Older official apps with the same signer can be upgraded in place while keeping pairings. [Compatibility notes](#compatibility).
+> **Upgrade reminder**: the plugin and Android app update independently. Web UI and connection fixes usually require only a plugin update; update the app for native changes or when it reports that its version is too old. [Compatibility notes](#compatibility).
 
 <p align="center">
   <a href="https://github.com/saya-ch/dsh-mobile/releases/download/v0.6.1/dsh-mobile-android-v0.6.1.apk"><img src="https://raw.githubusercontent.com/saya-ch/dsh-mobile/main/assets/brand/app-icon-rounded.svg" alt="DSH Mobile Android app icon" width="72" height="72"></a><br>
@@ -59,37 +59,6 @@ It also lets you customize the phone from a DSH conversation: `/mobile <what you
 - **Defense in depth**: a private CA pinned for LAN, trusted HTTPS for public remote paths, and a remote CA pinned by the 0.4.6 app for the self-signed FRP entry. Credentials are Keystore-backed, device tokens go only to their exact Origin, and third-party WebSockets are blocked by default.
 
 A paired device can operate DSH on the computer and must be treated as fully trusted. Enable LAN access only on trusted networks, and use a reliable HTTPS channel for remote access. Revoke a lost phone from the computer immediately.
-
-## Mobile improvements in 0.5.5
-
-<details>
-<summary>Released composer, Back and rotation improvements</summary>
-
-At widths up to 720px, an inactive composer retains a scrollable 72px draft preview, leaving more room for the conversation; editor or toolbar focus restores the expanded view. Text, references, and attachments remain intact, and Send, Queue, Steer, and Stop controls have touch targets of at least 44px. Existing DSH and app mechanisms retain submission and IME behavior.
-
-Model-search and pairing-page input sizes are corrected, and Android Back navigates the model menu one level at a time. Rotation and window resizing retain the page, references and unsent images; a known **Removed on computer** status survives later checks. Update both the plugin and app. Unsent attachments may still be lost after app-process termination.
-
-</details>
-
-## 0.6.1 update
-
-- **Remote settings**: clearer HTTPS origin, external-proxy and managed-Caddy form groups, fields and actions, including narrow-window layouts.
-- **Builds and checks**: pinned Caddy inputs, Windows/Linux double-build comparison and isolated TLS, pairing, API, WebSocket and cleanup tests; corrected Windows Git Bash discovery and test-failure classification. [Caddy status](docs/CADDY_MANAGED.en.md)
-- **Android app**: version-aligned 0.6.1 (build 77) with unchanged native features and pairing protocol, using the established release signer. Existing pairings do not need to be recreated.
-
-Thanks [@abworks-dev](https://github.com/abworks-dev) for [#184](https://github.com/saya-ch/dsh-mobile/pull/184) and [#185](https://github.com/saya-ch/dsh-mobile/pull/185). Official managed Caddy installation remains unavailable. See the complete [changelog](CHANGELOG.md#061---2026-10-08).
-
-## 0.6.0 update
-
-This update focuses on module management, app personalization and mobile access. See the complete [changelog](CHANGELOG.md#060---2026-10-07).
-
-- **Connections and loading**: retry transient static-resource failures, and separate long-running DSH API waits from ordinary transport timeouts. API and write requests are not replayed. [Slow-link guide](docs/SLOW_CONNECTIONS.en.md)
-- **Mobile layout**: a compact composer with reachable controls while the keyboard is open or text is enlarged; independent mobile font size, touch-browser Enter for newlines, and narrow-panel Back to conversation.
-- **Android experience**: choose the mascot or six whale-mark colors; improved scanner preview, focus and zoom. Fixed device order with Move up / Move to top and a drawer-toggle hold shortcut; startup still prefers the last-used computer.
-- **Module management**: separate computer defaults and device choices with boot/dependency checks. No plugin uninstall or automatic conversation reload; an explicit recovery action handles outdated selections. [User guide](docs/CLIENT_MODULES.en.md)
-- **Networks and compatibility**: explicit extra trusted source networks for managed LAN; selected missing WebView API fallbacks and improved extension deadlines/cancellation. [Trusted networks](docs/TRUSTED_NETWORKS.en.md) · [WebView notes](#app-or-mobile-browser)
-
-> **Managed Caddy installation is not available yet.** Source integration and isolated TLS checks are complete, but trusted pinned binaries have not been distributed. Existing external proxies and other channels are unaffected. [Status and requirements](docs/CADDY_MANAGED.en.md)
 
 ## Quick start
 
@@ -446,7 +415,7 @@ On macOS, local network, cloudflared, self-hosted FRP and the own reverse proxy 
 
 Existing apps (0.3.3 and later) do not need re-pairing. cpolar users should use app 0.3.15 or later because earlier apps may time out before a slow first load over the free route finishes; earlier apps also use a different status-bar strategy. The 0.4.0 app adds the multi-device list, startup behavior, and computer-side revocation status; older apps continue to connect to their saved single device. App 0.1.3 or earlier requires reinstalling and pairing again.
 
-App 0.6.1 (build 77) retains 0.6.0's native features and pairing/renewal protocol; existing pairings do not need to be recreated, and normally working older apps can continue connecting. Update the plugin and app together to retain 0.6.0's icon choices, scanning improvements, device ordering, switching shortcut and earlier fixes.
+The current stable Android app is 0.6.1 (build 77), retaining 0.6.0's native features and pairing/renewal protocol without requiring re-pairing. Plugin and app version numbers do not need to match; connections check protocol and minimum-version requirements. Features with additional native requirements state the app version they need.
 
 GitHub Release APKs use a stable signing certificate, so an older official APK with the same signer can be upgraded in place while retaining pairings. A locally built Debug APK with a different signer cannot be overwritten by the official APK; plan to pair again when switching between them.
 

@@ -80,6 +80,18 @@ jobs:
       - name: Verify the stock composer through the packed Mobile profile
         if: matrix.dsh == '0.2.0-rc.2'
         run: npm run smoke:dsh-composer
+      - name: Verify conversation touch scrolling on older viewport engines
+        if: matrix.dsh == '0.2.0-rc.2'
+        run: node scripts/smoke-conversation-scroll.mjs
+      - name: Reject a mobile shell without the legacy viewport fallback
+        if: matrix.dsh == '0.2.0-rc.2'
+        shell: bash
+        run: |
+          if node scripts/smoke-conversation-scroll.mjs --negative-control-viewport > "$RUNNER_TEMP/scroll-negative.log" 2>&1; then
+            cat "$RUNNER_TEMP/scroll-negative.log"
+            exit 1
+          fi
+          node -e "const fs=require('node:fs'); const text=fs.readFileSync(process.env.RUNNER_TEMP+'/scroll-negative.log','utf8'); if(!text.includes('Viewport negative control detected')) { console.error(text); process.exit(1); }"
       - name: Capture credential-masked Mobile surfaces
         if: matrix.dsh == '0.2.0-rc.2'
         run: npm run capture:screenshots -- --out "$RUNNER_TEMP/mobile-capture"

@@ -2,6 +2,13 @@
 
 Notable changes are recorded here. GitHub Releases provide the downloadable packages and generated commit notes.
 
+## 0.6.2 - 2026-10-08
+
+- Supply missing `AbortSignal.throwIfAborted()` and cancellation reasons before DSH starts on older WebViews. Preserve native implementations, cancellation and the first supplied reason, fixing the reported model/provider and other client API failures caused by the missing method. Thanks @luoyangchan for [#187](https://github.com/saya-ch/dsh-mobile/issues/187).
+- Keep the mobile shell within the viewport when the browser does not support `dvh`, so DSH's existing conversation area retains a scroll range. Portrait/landscape touch checks cover this missing-feature case; the Android 13 devices in #187 still need confirmation from their actual WebViews.
+- Release the npm plugin and Android App independently. Plugin updates retain the existing signed APK when native code is unchanged; App downloads use the published App descriptor, and plugin update notes follow the npm version. Android remains 0.6.1 (build 77) for this plugin update.
+- Keep release history in this changelog, simplify both project READMEs and clarify which component needs updating.
+
 ## 0.6.1 - 2026-10-08
 
 - Reorganize the remote HTTPS origin, external proxy and managed Caddy forms with native radio groups, responsive fields, separate actions and matching Chinese, English and Italian labels. Thanks @abworks-dev for [#184](https://github.com/saya-ch/dsh-mobile/pull/184).

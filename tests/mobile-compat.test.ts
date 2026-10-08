@@ -28,15 +28,28 @@ afterAll(async () => {
   await rm(directory, { recursive: true, force: true })
 })
 
-function legacyPage(): Context {
+function legacyPage(options: { missingReason?: boolean } = {}): Context {
   const signal = class PageAbortSignal extends AbortSignal {}
   Object.defineProperty(signal, 'any', { value: undefined, writable: true, configurable: true })
+  Object.defineProperty(signal.prototype, 'throwIfAborted', { value: undefined, writable: true, configurable: true })
   for (const name of ['aborted', 'reason']) {
     const descriptor = Object.getOwnPropertyDescriptor(AbortSignal.prototype, name)
     if (descriptor === undefined) throw new Error(`Native AbortSignal.${name} getter was not found`)
     Object.defineProperty(signal.prototype, name, descriptor)
   }
-  const page = createContext({ AbortSignal: signal, AbortController, Event, EventTarget })
+  if (options.missingReason) Object.defineProperty(signal.prototype, 'reason', { value: undefined, configurable: true })
+  const controller = class PageAbortController extends AbortController {
+    constructor() {
+      super()
+      Object.setPrototypeOf(this.signal, signal.prototype)
+    }
+  }
+  for (const name of ['signal', 'abort']) {
+    const descriptor = Object.getOwnPropertyDescriptor(AbortController.prototype, name)
+    if (descriptor === undefined) throw new Error(`Native AbortController.${name} was not found`)
+    Object.defineProperty(controller.prototype, name, descriptor)
+  }
+  const page = createContext({ AbortSignal: signal, AbortController: controller, DOMException, Event, EventTarget })
   runInContext('var intrinsicIterator = Object.getPrototypeOf(Object.getPrototypeOf([][Symbol.iterator]())); ' +
     'for (var key of Reflect.ownKeys(intrinsicIterator)) { if (key !== Symbol.iterator) delete intrinsicIterator[key]; } ' +
     'delete globalThis.Iterator; delete Promise.withResolvers;', page)
@@ -176,6 +189,145 @@ describe('early Promise capabilities', () => {
       expect(runInContext('Promise.withResolvers', page)).toBe(native)
     })
   }
+})
+
+describe('early AbortSignal cancellation checks', () => {
+  it('repairs missing throwIfAborted before the first DSH cancellation check', () => {
+    const page = legacyPage()
+    expect(() => runInContext('new AbortController().signal.throwIfAborted()', page)).toThrow('throwIfAborted is not a function')
+    load(page)
+    expect(runInContext('new AbortController().signal.throwIfAborted()', page)).toBeUndefined()
+    expect(runInContext(`
+      var source = new AbortController(), reason = {};
+      source.abort(reason);
+      try { source.signal.throwIfAborted(); } catch (error) { error === reason; }
+    `, page)).toBe(true)
+  })
+
+  it('preserves native reasons including falsy values and rejects non-signal receivers', () => {
+    const page = legacyPage()
+    load(page)
+    expect(runInContext(`
+      [null, false, 0, '', { message: 'cancelled' }].map(reason => {
+        var controller = new AbortController();
+        controller.abort(reason);
+        try { controller.signal.throwIfAborted(); return false; } catch (error) { return error === reason; }
+      });
+    `, page)).toEqual([true, true, true, true, true])
+    for (const receiver of ['undefined', 'null', '{}', '{ aborted: false }', 'Object.create(AbortSignal.prototype)']) {
+      expect(() => runInContext(`AbortSignal.prototype.throwIfAborted.call(${receiver})`, page)).toThrow()
+    }
+    expect(runInContext(`
+      var source = new AbortController();
+      source.abort();
+      try { source.signal.throwIfAborted(); } catch (error) { error === source.signal.reason && error.name === 'AbortError'; }
+    `, page)).toBe(true)
+  })
+
+  it('uses native internal state for synthetic events, shadowed properties and signals from another realm', () => {
+    const page = legacyPage()
+    const other = new AbortController()
+    page.otherSignal = other.signal
+    load(page)
+    expect(runInContext('var pending = new AbortController(); pending.signal.dispatchEvent(new Event("abort")); pending.signal.throwIfAborted()', page)).toBeUndefined()
+    expect(runInContext('AbortSignal.prototype.throwIfAborted.call(otherSignal)', page)).toBeUndefined()
+    const reason = { message: 'other realm' }
+    other.abort(reason)
+    expect(() => runInContext('AbortSignal.prototype.throwIfAborted.call(otherSignal)', page)).toThrow(reason)
+    expect(runInContext(`
+      var source = new AbortController();
+      source.abort('internal reason');
+      Object.defineProperty(source.signal, 'aborted', { value: false });
+      Object.defineProperty(source.signal, 'reason', { value: 'shadowed' });
+      try { source.signal.throwIfAborted(); } catch (error) { error; }
+    `, page)).toBe('internal reason')
+  })
+
+  it('retains cancellation reasons before native abort listeners run when the reason getter is missing', () => {
+    const page = legacyPage({ missingReason: true })
+    const nativeAbort = AbortController.prototype.abort
+    const nativeReason = Object.getOwnPropertyDescriptor(AbortSignal.prototype, 'reason')?.get
+    load(page)
+    expect(runInContext(`
+      var source = new AbortController(), reason = {}, observed;
+      var pending = source.signal.reason;
+      source.signal.addEventListener('abort', () => { observed = source.signal.reason; });
+      source.signal.dispatchEvent(new Event('abort'));
+      var synthetic = source.signal.reason;
+      var combined = AbortSignal.any([source.signal]);
+      source.abort(reason);
+      source.abort('later');
+      var exact;
+      try { source.signal.throwIfAborted(); } catch (error) { exact = error === reason; }
+      [pending, synthetic, source.signal.aborted, observed === reason, source.signal.reason === reason, combined.reason === reason, exact];
+    `, page)).toEqual([undefined, undefined, true, true, true, true, true])
+    expect(runInContext(`
+      var source = new AbortController(); source.abort();
+      var reason = source.signal.reason; source.abort('later');
+      [reason.name, reason === source.signal.reason];
+    `, page)).toEqual(['AbortError', true])
+    expect(() => runInContext('AbortController.prototype.abort.call({})', page)).toThrow()
+    expect(runInContext(`
+      var inspected = false;
+      try { AbortController.prototype.abort.call({ get signal() { inspected = true; } }); } catch (error) {}
+      inspected;
+    `, page)).toBe(false)
+    expect(() => runInContext('Object.getOwnPropertyDescriptor(AbortSignal.prototype, "reason").get.call({})', page)).toThrow()
+    expect(runInContext(`
+      [null, false, 0, ''].map(reason => {
+        var source = new AbortController(); source.abort(reason);
+        return source.signal.reason === reason && AbortSignal.any([source.signal]).reason === reason;
+      });
+    `, page)).toEqual([true, true, true, true])
+    expect(AbortController.prototype.abort).toBe(nativeAbort)
+    expect(Object.getOwnPropertyDescriptor(AbortSignal.prototype, 'reason')?.get).toBe(nativeReason)
+  })
+
+  it('provides a stable default reason for old signals aborted before installation', () => {
+    const page = legacyPage({ missingReason: true })
+    runInContext('var source = new AbortController(); source.abort();', page)
+    load(page)
+    expect(runInContext('var reason = source.signal.reason; [reason.name, reason === source.signal.reason, AbortSignal.any([source.signal]).reason === reason]', page)).toEqual(['AbortError', true, true])
+  })
+
+  it('preserves static abort factory reasons when the reason getter is missing', () => {
+    const page = legacyPage({ missingReason: true })
+    const nativeFactory = AbortSignal.abort
+    load(page)
+    expect(runInContext(`
+      var reason = {}, source = AbortSignal.abort(reason), fallback = AbortSignal.abort();
+      var getter = Object.getOwnPropertyDescriptor(AbortSignal.prototype, 'reason').get;
+      var exact;
+      try { AbortSignal.prototype.throwIfAborted.call(source); } catch (error) { exact = error === reason; }
+      [getter.call(source) === reason, AbortSignal.any([source]).reason === reason, exact, getter.call(fallback).name, getter.call(fallback) === getter.call(fallback)];
+    `, page)).toEqual([true, true, true, 'AbortError', true])
+    expect(AbortSignal.abort).toBe(nativeFactory)
+  })
+
+  it('keeps native methods and the installed missing methods unchanged on subsequent loads', () => {
+    const nativePage = createContext({ AbortSignal, AbortController })
+    load(nativePage)
+    expect(runInContext('AbortSignal.prototype.throwIfAborted', nativePage)).toBe(AbortSignal.prototype.throwIfAborted)
+    expect(runInContext('AbortController.prototype.abort', nativePage)).toBe(AbortController.prototype.abort)
+    for (const missingReason of [false, true]) {
+      const page = legacyPage({ missingReason })
+      load(page)
+      const check = runInContext('AbortSignal.prototype.throwIfAborted', page)
+      const abort = runInContext('AbortController.prototype.abort', page)
+      load(page)
+      expect(runInContext('AbortSignal.prototype.throwIfAborted', page)).toBe(check)
+      expect(runInContext('AbortController.prototype.abort', page)).toBe(abort)
+    }
+  })
+
+  it('repairs a missing cancellation check even when composition is already native', () => {
+    const page = legacyPage()
+    page.nativeAny = AbortSignal.any
+    runInContext('AbortSignal.any = nativeAny;', page)
+    load(page)
+    expect(runInContext('new AbortController().signal.throwIfAborted()', page)).toBeUndefined()
+    expect(runInContext('AbortSignal.any', page)).toBe(AbortSignal.any)
+  })
 })
 
 describe('early AbortSignal composition', () => {

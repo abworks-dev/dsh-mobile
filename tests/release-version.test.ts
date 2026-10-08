@@ -25,7 +25,8 @@ function releasedFiles(): Record<string, string> {
   return {
     'package.json': JSON.stringify({ version }),
     'package-lock.json': JSON.stringify({ version, packages: { '': { version } } }),
-    'apps/mobile/android/app/build.gradle.kts': `versionName = "${version}"\nversionCode = 76\n`,
+    'apps/mobile/android/app/build.gradle.kts': `applicationId = "io.github.sayach.dshmobile"\nversionName = "${version}"\nversionCode = 76\n`,
+    'apps/mobile/release.json': JSON.stringify({ version, versionCode: 76, releaseTag: `v${version}` }),
     'CHANGELOG.md': `# Changelog\n\n## ${version} - 2026-10-07\n`,
     'README.md': `# DSH Mobile\n\n> **当前正式版本：${version}**。\n\n[App](${apkLink})\n[更新](${releaseLink})\n`,
     'README.en.md': `# DSH Mobile\n\n> **Current stable release: ${version}**.\n\n[App](${apkLink})\n[Release](${releaseLink})\n`,
@@ -38,7 +39,7 @@ function releasedFiles(): Record<string, string> {
   }
 }
 
-async function check(overrides: Record<string, string> = {}, tagged = true, tag = `v${version}`): Promise<{ status: number | null; output: string }> {
+async function check(overrides: Record<string, string> = {}, tagged: boolean | 'android' = true, tag = `v${version}`): Promise<{ status: number | null; output: string }> {
   const root = await mkdtemp(join(tmpdir(), prefix))
   roots.push(root)
   for (const [file, source] of Object.entries({ ...releasedFiles(), ...overrides })) {
@@ -48,7 +49,7 @@ async function check(overrides: Record<string, string> = {}, tagged = true, tag 
   await mkdir(join(root, 'scripts'))
   const copiedChecker = join(root, 'scripts', 'check-release-version.mjs')
   await copyFile(checker, copiedChecker)
-  const result = spawnSync(process.execPath, [copiedChecker, ...(tagged ? ['--tag-env'] : [])], {
+  const result = spawnSync(process.execPath, [copiedChecker, ...(tagged === 'android' ? ['--android-tag-env'] : tagged ? ['--tag-env'] : [])], {
     encoding: 'utf8', windowsHide: true, timeout: 10_000, env: { ...process.env, GITHUB_REF_NAME: tag },
   })
   if (result.error) throw result.error
@@ -61,6 +62,70 @@ describe('release version and documentation gate', () => {
     const result = await check()
     expect(result.status).toBe(0)
     expect(result.output).toContain(`release tag ok: v${version}`)
+  })
+
+  it('accepts a plugin-only release while the published App keeps its own version and APK', async () => {
+    const appVersion = '0.5.5'
+    const appLink = `https://github.com/saya-ch/dsh-mobile/releases/download/v${appVersion}/dsh-mobile-android-v${appVersion}.apk`
+    const result = await check({
+      'apps/mobile/android/app/build.gradle.kts': `versionName = "${appVersion}"\nversionCode = 75\n`,
+      'apps/mobile/release.json': JSON.stringify({ version: appVersion, versionCode: 75, releaseTag: `v${appVersion}` }),
+      'README.md': `当前正式版本：${version}。\n[App](${appLink})\n[更新](${releaseLink})\n`,
+      'README.en.md': `Current stable release: ${version}.\n[App](${appLink})\n[Release](${releaseLink})\n`,
+      'apps/mobile/README.md': `The current stable app is ${appVersion}.\n`,
+      'apps/mobile/README.zh-CN.md': `当前正式 App 为 ${appVersion}。\n`,
+    })
+    expect(result.status).toBe(0)
+    expect(result.output).toContain(`package=${version}, Android=${appVersion} (75), published App=${appVersion} (75)`)
+  })
+
+  it('accepts a newer native candidate without promoting the already published App pointer', async () => {
+    const result = await check({
+      'apps/mobile/android/app/build.gradle.kts': 'versionName = "0.5.7"\nversionCode = 77\n',
+    })
+    expect(result.status).toBe(0)
+  })
+
+  it('keeps prerelease plugin package versions independent of a stable Android release', async () => {
+    const candidateVersion = '0.5.7-rc.1'
+    const result = await check({
+      'package.json': JSON.stringify({ version: candidateVersion }),
+      'package-lock.json': JSON.stringify({ version: candidateVersion, packages: { '': { version: candidateVersion } } }),
+    }, false)
+    expect(result.status).toBe(0)
+    expect(result.output).toContain(`package=${candidateVersion}, Android=${version} (76)`)
+  })
+
+  it.each([
+    { version: '0.5.6', versionCode: '76', releaseTag: 'v0.5.6' },
+    { version: '0.5.6', versionCode: 0, releaseTag: 'v0.5.6' },
+    { version: '0.5.6', versionCode: 76, releaseTag: 'v0.5.5' },
+    { version: '0.5.6', versionCode: 76, releaseTag: 'https://evil.example/app.apk' },
+    { version: '0.5.6-rc.1', versionCode: 76, releaseTag: 'v0.5.6-rc.1' },
+  ])('rejects an invalid published App descriptor: %j', async descriptor => {
+    expect((await check({ 'apps/mobile/release.json': JSON.stringify(descriptor) })).status).toBe(1)
+  })
+
+  it('accepts an independent Android tag only after both native version fields advance', async () => {
+    const result = await check({
+      'apps/mobile/android/app/build.gradle.kts': 'applicationId = "io.github.sayach.dshmobile"\nversionName = "0.5.7"\nversionCode = 77\n',
+    }, 'android', 'android-v0.5.7')
+    expect(result.status).toBe(0)
+    expect(result.output).toContain('Android release tag ok: android-v0.5.7')
+  })
+
+  it.each([
+    ['0.5.7', 77, 'v0.5.7', 'io.github.sayach.dshmobile', 'GITHUB_REF_NAME'],
+    ['0.5.6', 76, 'android-v0.5.6', 'io.github.sayach.dshmobile', 'increment both'],
+    ['0.5.6', 77, 'android-v0.5.6', 'io.github.sayach.dshmobile', 'increment both'],
+    ['0.5.7', 76, 'android-v0.5.7', 'io.github.sayach.dshmobile', 'must not precede or reuse'],
+    ['0.5.7', 77, 'android-v0.5.7', 'io.github.fork.app', 'established applicationId'],
+  ])('rejects an invalid Android release (version=%s build=%s tag=%s package=%s)', async (appVersion, versionCode, tag, applicationId, message) => {
+    const result = await check({
+      'apps/mobile/android/app/build.gradle.kts': `applicationId = "${applicationId}"\nversionName = "${appVersion}"\nversionCode = ${versionCode}\n`,
+    }, 'android', tag)
+    expect(result.status).toBe(1)
+    expect(result.output).toContain(message)
   })
 
   it('accepts the established plain-text App stable-version statements as well as bold versions', async () => {
@@ -134,7 +199,7 @@ describe('release version and documentation gate', () => {
   ])('rejects a stale formal App version in %s', async (file, source) => {
     const result = await check({ [file]: source })
     expect(result.status).toBe(1)
-    expect(result.output).toContain(`${file} stable App version "0.5.5" must equal package.version "${version}" before tagging`)
+    expect(result.output).toContain(`${file} stable App version "0.5.5" must equal published Android version "${version}" before tagging`)
   })
 
   it.each([
@@ -161,13 +226,13 @@ describe('release version and documentation gate', () => {
     expect(result.output).toContain(`GITHUB_REF_NAME "v0.5.5" must equal "v${version}"`)
   })
 
-  it('retains package-lock and native-version agreement', async () => {
+  it('retains package-lock agreement and prevents downgrading the published native App', async () => {
     const lock = await check({ 'package-lock.json': JSON.stringify({ version: '0.5.5', packages: { '': { version } } }) })
     expect(lock.status).toBe(1)
     expect(lock.output).toContain('package-lock versions')
     const native = await check({ 'apps/mobile/android/app/build.gradle.kts': 'versionName = "0.5.5"\nversionCode = 76\n' })
     expect(native.status).toBe(1)
-    expect(native.output).toContain(`Android versionName "0.5.5" must equal package.version "${version}"`)
+    expect(native.output).toContain('Android candidate must not precede or reuse a differently versioned published App build')
   })
 
   it('retains the finalized dated changelog requirement', async () => {
@@ -188,7 +253,7 @@ describe('release version and documentation gate', () => {
   it('retains root APK and release-link checks', async () => {
     const result = await check({ 'README.en.md': `[Old App](https://github.com/saya-ch/dsh-mobile/releases/download/v0.5.5/dsh-mobile-android-v0.5.5.apk)\n` })
     expect(result.status).toBe(1)
-    expect(result.output).toContain(`README.en.md must link the Android download and release notes for ${version}`)
+    expect(result.output).toContain(`README.en.md must link the published Android ${version} download and plugin ${version} release notes`)
   })
 
   it('retains non-empty release screenshot checks', async () => {

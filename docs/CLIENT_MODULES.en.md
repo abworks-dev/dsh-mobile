@@ -1,8 +1,8 @@
 # Mobile page modules
 
-[中文](CLIENT_MODULES.md) · [Back to README](../README.en.md#060-update)
+[中文](CLIENT_MODULES.md) · [Back to README](../README.en.md#optional-modules-and-advanced-configuration)
 
-> DSH Mobile 0.6.0 provides module management in General settings. Update the plugin and app together.
+> DSH Mobile plugin 0.6.0 and later provide module management in General settings. Plugin and app version numbers do not need to match.
 
 Choose which client components the dedicated mobile page loads. This does not uninstall computer plugins, stop their services, or restrict device permissions. A paired device remains a trusted DSH operator.
 

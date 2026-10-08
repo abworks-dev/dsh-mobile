@@ -49,6 +49,7 @@ jobs:
           go version -m bin/dsh-mobile-funnel-win32-x64.exe > dsh-mobile-funnel-go-modules.txt
           go version -m bin/dsh-mobile-funnel-linux-x64 >> dsh-mobile-funnel-go-modules.txt
           go version -m bin/dsh-mobile-funnel-linux-arm64 >> dsh-mobile-funnel-go-modules.txt
+          cp apps/mobile/release.json dsh-mobile-android-release.json
       - uses: actions/upload-artifact@v7
         with:
           name: plugin-package
@@ -57,86 +58,12 @@ jobs:
             dsh-mobile-plugin.sha256
             dsh-mobile-npm-sbom.cdx.json
             dsh-mobile-funnel-go-modules.txt
-          if-no-files-found: error
-
-  android:
-    name: Android package
-    needs: version
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 24.x
-      - uses: actions/setup-java@v6
-        with:
-          distribution: temurin
-          java-version: 17
-      - uses: android-actions/setup-android@v4
-        with:
-          packages: platform-tools
-      - name: Install Android API 36
-        run: sdkmanager "platforms;android-36"
-      - uses: gradle/actions/setup-gradle@v6
-      - name: Configure release signing
-        env:
-          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-          DSH_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          DSH_ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          DSH_ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        run: |
-          for name in ANDROID_KEYSTORE_BASE64 DSH_ANDROID_KEYSTORE_PASSWORD DSH_ANDROID_KEY_ALIAS DSH_ANDROID_KEY_PASSWORD; do
-            if [ -z "${!name}" ]; then
-              echo "Missing required Android signing secret: $name" >&2
-              exit 1
-            fi
-          done
-          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/dsh-mobile-release.jks"
-      - name: Test and build signed Android package
-        env:
-          DSH_ANDROID_KEYSTORE_FILE: ${{ runner.temp }}/dsh-mobile-release.jks
-          DSH_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          DSH_ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          DSH_ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        run: bash ./gradlew --no-daemon lintDebug testDebugUnitTest assembleRelease -x lintAnalyzeDebugUnitTest -x lintAnalyzeDebugAndroidTest
-        working-directory: apps/mobile/android
-      - name: Record Android runtime dependencies
-        run: bash ./gradlew --no-daemon :app:dependencies --configuration releaseRuntimeClasspath > "$GITHUB_WORKSPACE/dsh-mobile-android-${GITHUB_REF_NAME}-dependencies.txt"
-        working-directory: apps/mobile/android
-      - name: Verify Android signature
-        shell: bash
-        run: |
-          apksigner="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
-          test -x "$apksigner"
-          apk="apps/mobile/android/app/build/outputs/apk/release/app-release.apk"
-          report="$RUNNER_TEMP/dsh-mobile-apksigner.txt"
-          "$apksigner" verify --verbose --print-certs "$apk" | tee "$report"
-          node scripts/verify-android-signature.mjs < "$report"
-      - name: Enforce Android package size
-        run: |
-          apk="apps/mobile/android/app/build/outputs/apk/release/app-release.apk"
-          maximum=$((40 * 1024 * 1024))
-          actual="$(stat -c %s "$apk")"
-          if [ "$actual" -gt "$maximum" ]; then
-            echo "Android APK is $actual bytes; release limit is $maximum bytes." >&2
-            exit 1
-          fi
-      - name: Name Android package
-        run: |
-          cp apps/mobile/android/app/build/outputs/apk/release/app-release.apk "dsh-mobile-android-${GITHUB_REF_NAME}.apk"
-          sha256sum "dsh-mobile-android-${GITHUB_REF_NAME}.apk" > "dsh-mobile-android-${GITHUB_REF_NAME}.apk.sha256"
-      - uses: actions/upload-artifact@v7
-        with:
-          name: android-package
-          path: |
-            dsh-mobile-android-${{ github.ref_name }}.apk
-            dsh-mobile-android-${{ github.ref_name }}.apk.sha256
-            dsh-mobile-android-${{ github.ref_name }}-dependencies.txt
+            dsh-mobile-android-release.json
           if-no-files-found: error
 
   publish:
     name: Publish npm package
-    needs: [package, android]
+    needs: package
     permissions:
       contents: read
       id-token: write
@@ -175,6 +102,9 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24.x
       - uses: actions/download-artifact@v8
         with:
           path: release-assets
@@ -187,13 +117,19 @@ jobs:
           if [ "$GITHUB_REF_NAME" = "v0.3.2" ]; then
             contributor_note="Special thanks to @JackRushante for PR #16: the secure Android media bridge, image attachments, localization foundation, bounded extension requests, and Funnel lifecycle hardening. The contributor's four original commits are retained in the release history."
           fi
+          app_note="$(node --input-type=module -e 'import {readFileSync} from "node:fs"; const app=JSON.parse(readFileSync("release-assets/dsh-mobile-android-release.json","utf8")); const tag=encodeURIComponent(app.releaseTag); const version=encodeURIComponent(app.version); process.stdout.write(`Android App: **${app.version}** — [Download APK](https://github.com/saya-ch/dsh-mobile/releases/download/${tag}/dsh-mobile-android-v${version}.apk). Plugin and App versions are independent.`);')"
+          release_note="$app_note"
+          if [ -n "$contributor_note" ]; then
+            release_note="$release_note"$'\n\n'"$contributor_note"
+          fi
           if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release upload "$GITHUB_REF_NAME" release-assets/* --repo "$GITHUB_REPOSITORY" --clobber
+            echo "Release $GITHUB_REF_NAME already exists; refusing to replace published assets." >&2
+            exit 1
           else
             gh release create "$GITHUB_REF_NAME" release-assets/* \
               --repo "$GITHUB_REPOSITORY" \
               --verify-tag \
               --generate-notes \
-              --notes "$contributor_note" \
+              --notes "$release_note" \
               --title "$GITHUB_REF_NAME"
           fi

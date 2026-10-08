@@ -605,6 +605,22 @@ describe('mobile-control localization', () => {
     })
   })
 
+  it.each(['v0.6.1', 'android-v0.6.1'])('renders independent plugin and App versions with the exact official App tag %s', releaseTag => {
+    const androidDownloadUrl = `https://github.com/saya-ch/dsh-mobile/releases/download/${releaseTag}/dsh-mobile-android-v0.6.1.apk`
+    expect(clientReleaseInfo({ updateAvailable: true, latestVersion: '0.6.2', androidVersion: '0.6.1', androidDownloadUrl })).toEqual({
+      updateAvailable: true, latestVersion: '0.6.2', androidVersion: '0.6.1', androidDownloadUrl,
+    })
+  })
+
+  it.each([
+    'https://github.com/other-owner/dsh-mobile/releases/download/android-v0.6.1/dsh-mobile-android-v0.6.1.apk',
+    'https://github.com/saya-ch/dsh-mobile/releases/download/android-v0.6.2/dsh-mobile-android-v0.6.1.apk',
+    'https://github.com/saya-ch/dsh-mobile/releases/download/android-v0.6.1/dsh-mobile-android-android-v0.6.1.apk',
+    'https://github.com/saya-ch/dsh-mobile/releases/download/android-v0.6.1/dsh-mobile-android-v0.6.1.apk?token=bad',
+  ])('does not accept a mismatched or non-canonical App asset URL: %s', androidDownloadUrl => {
+    expect(clientReleaseInfo({ androidVersion: '0.6.1', androidDownloadUrl }).androidDownloadUrl).toBe('https://github.com/saya-ch/dsh-mobile/releases')
+  })
+
   it('follows the DSH document language before the browser fallback', () => {
     expect(selectMobileControlLocale('it-IT', ['en-US'])).toBe('it')
     expect(selectMobileControlLocale('', ['zh-Hant', 'en-US'])).toBe('zh')

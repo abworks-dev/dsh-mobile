@@ -14,11 +14,6 @@ async function read(relativePath, encoding) {
   return readFile(resolve(root, relativePath), encoding)
 }
 
-function asString(value, label) {
-  if (typeof value !== 'string') fail(`${label} must be a string`)
-  return value
-}
-
 function singleMatch(source, pattern, label) {
   const matches = [...source.matchAll(pattern)]
   if (matches.length !== 1 || matches[0][1] === undefined) {
@@ -95,11 +90,10 @@ async function checkBrandAndStoreIcon() {
 }
 
 async function checkAndroid() {
-  const [gradle, manifest, networkSecurity, packageManifest, discovery, nativeAuth, nsdDiscovery, credentialStore, pairedDeviceStore, webViewClient, scanActivity, qrDecoder, nativeBridge, nativeBridgePolicy, mainActivity, defaultStrings, chineseStrings, italianStrings, defaultColors, nightColors, clientSource, mobileLayoutSource, nativeMobileSource] = await Promise.all([
+  const [gradle, manifest, networkSecurity, discovery, nativeAuth, nsdDiscovery, credentialStore, pairedDeviceStore, webViewClient, scanActivity, qrDecoder, nativeBridge, nativeBridgePolicy, mainActivity, defaultStrings, chineseStrings, italianStrings, defaultColors, nightColors, clientSource, mobileLayoutSource, nativeMobileSource] = await Promise.all([
     read('apps/mobile/android/app/build.gradle.kts', 'utf8'),
     read('apps/mobile/android/app/src/main/AndroidManifest.xml', 'utf8'),
     read('apps/mobile/android/app/src/main/res/xml/network_security_config.xml', 'utf8'),
-    read('package.json', 'utf8'),
     read('apps/mobile/android/app/src/main/java/io/github/sayach/dshmobile/LanDiscovery.kt', 'utf8'),
     read('apps/mobile/android/app/src/main/java/io/github/sayach/dshmobile/NativeAuthClient.kt', 'utf8'),
     read('apps/mobile/android/app/src/main/java/io/github/sayach/dshmobile/NsdDiscovery.kt', 'utf8'),
@@ -120,15 +114,14 @@ async function checkAndroid() {
     read('src/mobile-layout.ts', 'utf8'),
     read('src/native-mobile.ts', 'utf8'),
   ])
-  const packageVersion = asString(JSON.parse(packageManifest).version, 'package.version')
   const compileSdk = singleMatch(gradle, /^\s*compileSdk\s*=\s*(\d+)\s*$/gm, 'Android compileSdk')
   const targetSdk = singleMatch(gradle, /^\s*targetSdk\s*=\s*(\d+)\s*$/gm, 'Android targetSdk')
   const versionName = singleMatch(gradle, /^\s*versionName\s*=\s*"([^"]+)"\s*$/gm, 'Android versionName')
   if (compileSdk !== '36' || targetSdk !== '36') {
     fail(`Android compileSdk and targetSdk must both be 36, got ${compileSdk} and ${targetSdk}`)
   }
-  if (versionName !== packageVersion) {
-    fail(`Android versionName ${JSON.stringify(versionName)} must equal package.version ${JSON.stringify(packageVersion)}`)
+  if (!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(versionName)) {
+    fail('Android versionName must be a stable numeric SemVer independent of the plugin version')
   }
   if (!/android:icon="@mipmap\/ic_launcher"/.test(manifest)
     || !/android:roundIcon="@mipmap\/ic_launcher"/.test(manifest)) {

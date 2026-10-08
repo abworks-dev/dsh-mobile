@@ -68,6 +68,7 @@ GitHub's Contributors graph counts commits on the default branch; issue reports 
 | [@jillkayat](https://github.com/jillkayat) | [#10](https://github.com/saya-ch/dsh-mobile/issues/10) |
 | [@jueruibo](https://github.com/jueruibo) | [#101](https://github.com/saya-ch/dsh-mobile/issues/101) |
 | [@KMGTPEZY](https://github.com/KMGTPEZY) | [#95](https://github.com/saya-ch/dsh-mobile/issues/95) |
+| [@luoyangchan](https://github.com/luoyangchan) | [#187](https://github.com/saya-ch/dsh-mobile/issues/187) |
 | [@LWping](https://github.com/LWping) | [#94](https://github.com/saya-ch/dsh-mobile/issues/94) |
 | [@oliverwan97](https://github.com/oliverwan97) | [#26](https://github.com/saya-ch/dsh-mobile/issues/26) |
 | [@optttt](https://github.com/optttt) | [#111](https://github.com/saya-ch/dsh-mobile/issues/111) |
