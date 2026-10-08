@@ -58,7 +58,9 @@ Review the internal [design reference](design-system/dsh-mobile/MASTER.md) for n
 
 For macOS cloudflared changes, build and run `npm run smoke:cloudflared-component`. It verifies official archives and reinitialization in temporary state, then removes its owned files; it never executes downloaded Mach-O binaries. `-- --archive-dir <directory>` reuses independently verified official archives.
 
-The optional Caddy workflow builds pinned sources and produces review artifacts only. It does not publish binaries or enable production installation. See [managed Caddy](docs/CADDY_MANAGED.en.md#maintainer-build-and-validation).
+The optional Caddy workflow builds pinned sources and produces review artifacts. An explicit fork-only manual path may publish a labelled TEST prerelease; it never publishes an official plugin release or enables production installation. See [managed Caddy](docs/CADDY_MANAGED.en.md#maintainer-build-and-validation).
+
+The Caddy publisher shell test needs Bash on POSIX and Git for Windows on Windows. Windows resolves Bash from the Git installation selected by `git --exec-path`, including custom installation directories; it does not select WSL's `bash` from PATH or load inherited Bash startup hooks. Shell startup failures, timeouts and signals fail the test instead of counting as expected publication rejections.
 
 ## Prepare and publish a release
 
