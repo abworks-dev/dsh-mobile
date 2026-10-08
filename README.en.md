@@ -31,14 +31,14 @@
 
 > DSH Mobile is a DeepSeek Harness community plugin; the native app supports Android only.
 >
-> **Current stable release: 0.6.0**. Add mobile page module management, app icon choices and device ordering; improve scanning, mobile layout, remote loading and older WebView compatibility. [Release notes](CHANGELOG.md#060---2026-10-07).
+> **Current stable release: 0.6.1**. Improve remote HTTPS settings and pinned Caddy builds with cross-platform checks. The Android app receives a matching version, retaining 0.6.0's module management, icon choices, device ordering and scanning improvements. [Release notes](CHANGELOG.md#061---2026-10-08).
 >
-> **Upgrade reminder**: update the plugin and Android app together to 0.6.0 for all features and fixes. Older official apps with the same signer can be upgraded in place while keeping pairings. [Compatibility notes](#compatibility).
+> **Upgrade reminder**: update the plugin and Android app together to 0.6.1. Older official apps with the same signer can be upgraded in place while keeping pairings. [Compatibility notes](#compatibility).
 
 <p align="center">
-  <a href="https://github.com/saya-ch/dsh-mobile/releases/download/v0.6.0/dsh-mobile-android-v0.6.0.apk"><img src="https://raw.githubusercontent.com/saya-ch/dsh-mobile/main/assets/brand/app-icon-rounded.svg" alt="DSH Mobile Android app icon" width="72" height="72"></a><br>
-  <a href="https://github.com/saya-ch/dsh-mobile/releases/download/v0.6.0/dsh-mobile-android-v0.6.0.apk"><strong>Download Android app 0.6.0</strong></a><br>
-  <sub><a href="https://github.com/saya-ch/dsh-mobile/releases/tag/v0.6.0">Release notes and checksums</a></sub>
+  <a href="https://github.com/saya-ch/dsh-mobile/releases/download/v0.6.1/dsh-mobile-android-v0.6.1.apk"><img src="https://raw.githubusercontent.com/saya-ch/dsh-mobile/main/assets/brand/app-icon-rounded.svg" alt="DSH Mobile Android app icon" width="72" height="72"></a><br>
+  <a href="https://github.com/saya-ch/dsh-mobile/releases/download/v0.6.1/dsh-mobile-android-v0.6.1.apk"><strong>Download Android app 0.6.1</strong></a><br>
+  <sub><a href="https://github.com/saya-ch/dsh-mobile/releases/tag/v0.6.1">Release notes and checksums</a></sub>
 </p>
 
 DSH Mobile is a DeepSeek Harness plugin that lets a mobile browser or the Android app connect over a protected LAN or an optional Tailscale Funnel, cpolar, cloudflared, self-hosted FRP, or own reverse-proxy remote path. Both routes reach the same sessions, Workspaces, messages, and tools. The computer manages their switches and pairing authorizations separately; the Android app lists paired computers together. The plugin does not modify DeepSeek Harness source.
@@ -70,6 +70,14 @@ At widths up to 720px, an inactive composer retains a scrollable 72px draft prev
 Model-search and pairing-page input sizes are corrected, and Android Back navigates the model menu one level at a time. Rotation and window resizing retain the page, references and unsent images; a known **Removed on computer** status survives later checks. Update both the plugin and app. Unsent attachments may still be lost after app-process termination.
 
 </details>
+
+## 0.6.1 update
+
+- **Remote settings**: clearer HTTPS origin, external-proxy and managed-Caddy form groups, fields and actions, including narrow-window layouts.
+- **Builds and checks**: pinned Caddy inputs, Windows/Linux double-build comparison and isolated TLS, pairing, API, WebSocket and cleanup tests; corrected Windows Git Bash discovery and test-failure classification. [Caddy status](docs/CADDY_MANAGED.en.md)
+- **Android app**: version-aligned 0.6.1 (build 77) with unchanged native features and pairing protocol, using the established release signer. Existing pairings do not need to be recreated.
+
+Thanks [@abworks-dev](https://github.com/abworks-dev) for [#184](https://github.com/saya-ch/dsh-mobile/pull/184) and [#185](https://github.com/saya-ch/dsh-mobile/pull/185). Official managed Caddy installation remains unavailable. See the complete [changelog](CHANGELOG.md#061---2026-10-08).
 
 ## 0.6.0 update
 
@@ -438,7 +446,7 @@ On macOS, local network, cloudflared, self-hosted FRP and the own reverse proxy 
 
 Existing apps (0.3.3 and later) do not need re-pairing. cpolar users should use app 0.3.15 or later because earlier apps may time out before a slow first load over the free route finishes; earlier apps also use a different status-bar strategy. The 0.4.0 app adds the multi-device list, startup behavior, and computer-side revocation status; older apps continue to connect to their saved single device. App 0.1.3 or earlier requires reinstalling and pairing again.
 
-Version 0.6.0 keeps the native pairing and renewal protocol compatible, so normally working older apps can continue connecting. Update to app 0.6.0 (build 76) for icon choices, scanning improvements, device ordering and the switching shortcut, while retaining earlier connection, rotation and authentication fixes.
+App 0.6.1 (build 77) retains 0.6.0's native features and pairing/renewal protocol; existing pairings do not need to be recreated, and normally working older apps can continue connecting. Update the plugin and app together to retain 0.6.0's icon choices, scanning improvements, device ordering, switching shortcut and earlier fixes.
 
 GitHub Release APKs use a stable signing certificate, so an older official APK with the same signer can be upgraded in place while retaining pairings. A locally built Debug APK with a different signer cannot be overwritten by the official APK; plan to pair again when switching between them.
 

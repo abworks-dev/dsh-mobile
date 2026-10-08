@@ -34,6 +34,8 @@ Android App / 浏览器 → 公网 HTTPS 域名（Caddy 终止 TLS）
 
 ## 维护者构建与验证
 
+以下构建和验证工具需在本仓库源码 checkout 中运行；npm 插件包不包含这些维护脚本，也不需要普通用户自行编译 Caddy。
+
 [构建脚本](<../scripts/build-caddy-component.mjs>) 固定 Go 1.26.6、xcaddy v0.4.7、Caddy v2.11.6 和腾讯云 DNS v0.4.3。[输入锁](<../scripts/caddy-component-lock.json>) 固定源码提交和编译依赖版本/校验和。每次构建使用全新的私有编译缓存及模块缓存，执行 Go 校验和、源码来源与保留模块校验；未知依赖、替换模块、编译器或原生设置漂移会在运行生成的 Caddy 前拒绝。
 
 选择精确 Go 编译器（可用 `GO_BINARY`），输出目录必须是全新绝对路径：

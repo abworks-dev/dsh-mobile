@@ -2,7 +2,7 @@
 
 [中文](CADDY_MANAGED.md)
 
-> Managed mode and its isolated tests are integrated, but no pinned component has been published. Installation and connection remain disabled. Existing external HTTPS proxy mode is unaffected.
+> Managed mode and its isolated tests are integrated, but no official pinned component is available. Installation and connection remain disabled. Existing external HTTPS proxy mode is unaffected.
 
 ## Requirements
 
@@ -33,6 +33,8 @@ Settings and DNS credentials are atomically stored in the plugin's private direc
 Stopping access or changing provider waits for Caddy and Gateway termination, retaining settings. Confirming removal deletes the managed binary, DNS credentials, certificate keys, logs, and caches without deleting other providers, LAN settings, or paired-device data. Existing manually installed proxies are not owned or uninstalled by the plugin.
 
 ## Maintainer build and validation
+
+Run these build and validation tools from a source checkout of this repository. The npm plugin package does not include these maintenance scripts; ordinary users do not need to compile Caddy.
 
 The [builder](<../scripts/build-caddy-component.mjs>) fixes Go 1.26.6, xcaddy v0.4.7, Caddy v2.11.6 and Tencent Cloud DNS v0.4.3. The [input lock](<../scripts/caddy-component-lock.json>) freezes source revisions and compiled dependency versions/checksums. Each build uses fresh private compiler AND module caches, normal Go checksum verification, source-origin checks and retained-module verification. Unknown dependencies, replacements, wrong native settings or compiler versions fail closed before executing the generated Caddy.
 
