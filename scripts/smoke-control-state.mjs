@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { readFile } from 'node:fs/promises'
+import { mkdir, readFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import { resolve } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
@@ -58,6 +58,12 @@ async function withControl(browser, name, options, run) {
     holdMode: options.holdMode === true,
     holdNextRemote: false,
   }
+  if (options.layoutFixture) {
+    Object.assign(state.remote.providers.origin, { running: true, state: 'ready' })
+    state.remote.providers.origin.configuration.backendOrigin = 'http://127.0.0.1:3444'
+    state.remote.providers.origin.component.installed = options.caddyInstalled !== false
+    state.remote.providers.origin.component.supported = options.caddySupported !== false
+  }
   let closing = false
   let context
   const json = (response, status, body) => {
@@ -76,10 +82,6 @@ async function withControl(browser, name, options, run) {
   }
   const handle = async (request, response) => {
     const pathname = new URL(request.url, 'http://fixture.invalid').pathname
-    if (pathname === '/') {
-      response.writeHead(200, { 'content-type': 'text/html' }); response.end(fixtureHtml)
-      return
-    }
     if (pathname === '/favicon.ico') { response.writeHead(204); response.end(); return }
     const chunks = []
     for await (const chunk of request) chunks.push(chunk)
@@ -140,13 +142,19 @@ async function withControl(browser, name, options, run) {
     const address = server.address()
     assert(address !== null && typeof address !== 'string', `${name}: fixture has no TCP address`)
     const origin = `http://127.0.0.1:${address.port}`
-    context = await browser.newContext({ viewport: { width: 1100, height: 900 }, locale: 'en-US', reducedMotion: 'reduce' })
+    context = await browser.newContext({ viewport: { width: options.width ?? 1100, height: 900 }, locale: options.locale ?? 'en-US', reducedMotion: 'reduce' })
     const page = await context.newPage()
     page.setDefaultTimeout(10_000)
     page.on('pageerror', error => { errors.push(error.message) })
-    page.on('dialog', dialog => { void dialog.accept() })
+    page.on('dialog', dialog => { void (options.cancelDialogs ? dialog.dismiss() : dialog.accept()) })
     await page.route('**/*', route => {
-      if (new URL(route.request().url()).origin === origin) return route.continue()
+      const url = new URL(route.request().url())
+      // Own the document as well as the controller fixture: local HTTP filters
+      // must not inject unrelated scripts into this browser regression.
+      if (url.origin === origin && url.pathname === '/' && route.request().isNavigationRequest()) {
+        return route.fulfill({ contentType: 'text/html', body: fixtureHtml.replace('lang="en"', `lang="${options.language ?? 'en'}"`) })
+      }
+      if (url.origin === origin) return route.continue()
       errors.push(`Unexpected external request: ${route.request().url()}`)
       return route.abort()
     })
@@ -219,8 +227,10 @@ async function withControl(browser, name, options, run) {
       entries => entries.length > previous, `${name}: ${method} ${pathname}`,
     ).then(entries => entries[previous])
     await waitUntil(() => page.locator('.dsh-mobile-control__provider.is-origin').getAttribute('aria-pressed'), value => value === 'true', `${name}: initial remote render`)
-    assert.equal(await page.locator('#fixture-settings .dsh-module-title').textContent(), 'Mobile page modules', `${name}: missing General settings registration`)
-    assert.equal(await page.locator('#fixture-settings .dsh-module-description').textContent(), 'Choose default modules for mobile access without uninstalling computer plugins.', `${name}: General settings did not use computer scope`)
+    if (!options.layoutFixture) {
+      assert.equal(await page.locator('#fixture-settings .dsh-module-title').textContent(), 'Mobile page modules', `${name}: missing General settings registration`)
+      assert.equal(await page.locator('#fixture-settings .dsh-module-description').textContent(), 'Choose default modules for mobile access without uninstalling computer plugins.', `${name}: General settings did not use computer scope`)
+    }
     await page.locator('.dsh-mobile-control__trigger').click()
     const ui = {
       trustedSummary: page.locator('summary').filter({ hasText: /^Additional trusted networks/ }),
@@ -273,6 +283,124 @@ async function withControl(browser, name, options, run) {
 const browser = await chromium.launch({ headless: true })
 let cases = 0
 try {
+  // Render the real client/CSS: a hidden attribute alone does not prove a
+  // display:grid form is hidden, and jsdom cannot measure radio geometry.
+  for (const language of ['en', 'zh', 'it']) for (const width of [320, 360, 1100]) {
+    const dark = language === 'zh' || width === 360
+    const installed = width !== 320
+    const supported = !(language === 'it' && width === 360)
+    await withControl(browser, `HTTPS layout ${language} ${width}px ${dark ? 'dark' : 'light'}`, {
+      layoutFixture: true, width, language, caddyInstalled: installed, caddySupported: supported,
+    }, async ({ page, ui, count, consumed, settle, openRemote }) => {
+      if (dark) await page.evaluate(() => {
+        document.documentElement.style.colorScheme = 'dark'
+        for (const [key, value] of Object.entries({
+          'bg-layer-1': '#222', 'bg-layer-2': '#292929', 'bg-layer-3': '#303030',
+          'label-primary': '#eee', 'label-secondary': '#bbb', 'border-l2': '#444', 'border-l3': '#555',
+        })) document.documentElement.style.setProperty(`--dsw-alias-${key}`, value)
+      })
+      await openRemote()
+      const setup = page.locator('.dsh-mobile-control__origin-setup')
+      const externalFields = setup.locator('.dsh-mobile-control__origin-fields').first()
+      const managedFields = setup.locator('.dsh-mobile-control__origin-fields').last()
+      const backend = setup.locator('.dsh-mobile-control__origin-backend')
+      const assertGeometry = async () => {
+        const geometry = await setup.evaluate(node => {
+          const rect = element => {
+            const { x, y, width, height } = element.getBoundingClientRect()
+            return { x, y, width, height }
+          }
+          const visible = element => element.getClientRects().length !== 0
+          return {
+            bounds: rect(node), overflow: node.scrollWidth > node.clientWidth + 1,
+            radios: [...node.querySelectorAll('input[type=radio]')].map(input => ({
+              input: rect(input), label: rect(input.parentElement), text: rect(input.nextElementSibling),
+            })),
+            fields: [...node.querySelectorAll('.dsh-mobile-control__field')].filter(visible).map(rect),
+            controls: [...node.querySelectorAll('.dsh-mobile-control__field input,.dsh-mobile-control__field select')].filter(visible).map(rect),
+            actions: [...node.querySelectorAll('.dsh-mobile-control__caddy-actions button')].filter(visible).map(rect),
+            columns: getComputedStyle([...node.querySelectorAll('.dsh-mobile-control__origin-fields')].find(visible)).gridTemplateColumns.split(' ').length,
+          }
+        })
+        assert.equal(geometry.overflow, false, 'HTTPS card has horizontal overflow')
+        for (const { input, label, text } of geometry.radios) {
+          assert(input.width >= 16 && input.width <= 22 && input.height >= 16 && input.height <= 22, 'Radio inherited text-input sizing')
+          assert(label.height >= 44, 'Mode label lost its touch target')
+          assert(text.x >= input.x + input.width, 'Mode text is not beside its radio')
+        }
+        for (const field of geometry.fields) {
+          assert(field.x >= geometry.bounds.x && field.x + field.width <= geometry.bounds.x + geometry.bounds.width + 1, 'Field escaped the card')
+        }
+        for (const control of geometry.controls) assert(control.height >= 44 && control.height <= 48, 'Input/select heights differ')
+        for (const action of geometry.actions) {
+          assert(action.height >= 44 && action.height <= 72, 'Action stretched to a note height')
+          assert(action.width >= geometry.bounds.width - 28, 'Caddy action did not span the form width')
+        }
+        const columns = geometry.bounds.width - 26 >= 292 ? 2 : 1
+        assert.equal(geometry.columns, columns, 'Fields did not adapt to the available card width')
+        const index = await ui.managed.isChecked() ? 2 : 1
+        const [left, right] = geometry.fields.slice(index, index + 2)
+        if (columns === 2) {
+          assert(Math.abs(left.y - right.y) <= 1 && right.x >= left.x + left.width, 'Wide-card field pair is not actually side by side')
+        } else {
+          assert(right.y >= left.y + left.height && Math.abs(left.x - right.x) <= 1, 'Narrow-card fields are not stacked')
+        }
+      }
+      assert.equal(await ui.managed.isChecked(), true)
+      await assertGeometry()
+      assert.equal(await externalFields.isVisible(), false, 'External fields remain visible in managed mode')
+      assert.equal(await managedFields.isVisible(), true)
+      assert.equal(await backend.isVisible(), false, 'Managed mode leaked the external backend block')
+      assert.equal(await setup.locator('fieldset').getAttribute('aria-label'), null, 'Use the visible legend as the native group name')
+      assert.equal(await setup.locator('fieldset legend').isVisible(), true)
+      const caddyActions = setup.locator('.dsh-mobile-control__caddy-actions')
+      assert.equal(await caddyActions.locator('button').first().isVisible(), !installed)
+      assert.equal(await caddyActions.locator('button').nth(1).isVisible(), installed)
+      if (!supported) assert.equal(await managedFields.locator('input,select').first().isDisabled(), true)
+      const screenshots = process.env.DSH_CONTROL_LAYOUT_SCREENSHOT_DIR
+      // Expand only for capture so the popup's scrolling viewport does not
+      // clip the first/last rows of a tall narrow-screen card.
+      const screenshotStyle = '.dsh-mobile-control__panel{max-height:none!important;overflow:visible!important}.dsh-mobile-control{position:absolute!important;top:0!important;bottom:auto!important}'
+      if (screenshots !== undefined) {
+        await mkdir(screenshots, { recursive: true })
+        await setup.screenshot({ path: resolve(screenshots, `managed-${language}-${width}.png`), style: screenshotStyle })
+      }
+      const before = await consumed(modePath)
+      const recoveryBefore = await consumed(remotePath)
+      // Click the label rather than the small circle; keep the existing mode
+      // confirmation/controller request and draft-preservation behavior.
+      await ui.external.locator('..').click()
+      await settle(modePath, before)
+      await settle(remotePath, recoveryBefore)
+      await waitUntil(() => ui.external.isDisabled(), disabled => !disabled, 'external mode enabled')
+      assert.equal(await externalFields.isVisible(), true)
+      assert.equal(await managedFields.isVisible(), false, 'Caddy fields remain visible in external mode')
+      assert.equal(await backend.isVisible(), true)
+      await assertGeometry()
+      if (screenshots !== undefined) await setup.screenshot({ path: resolve(screenshots, `external-${language}-${width}.png`), style: screenshotStyle })
+      await ui.external.focus()
+      await ui.external.press('ArrowDown')
+      assert.equal(await ui.managed.isChecked(), true, 'Native keyboard mode selection broke')
+      assert.equal(await externalFields.isVisible(), false)
+      assert.equal(await managedFields.isVisible(), true)
+      assert.equal(count('POST', modePath), 1, 'Managed preview must not write the mode before saving')
+      assert.equal(count('POST', caddyPath), 0, 'Changing layout/preview must not save credentials')
+    })
+    cases++
+  }
+
+  await withControl(browser, 'canceling HTTPS mode change keeps the active form and sends no write', { cancelDialogs: true }, async ({ page, ui, count, openRemote }) => {
+    await openRemote()
+    await ui.external.locator('..').click()
+    assert.equal(await ui.managed.isChecked(), true)
+    assert.equal(await ui.external.isChecked(), false)
+    assert.equal(await page.locator('.dsh-mobile-control__caddy-form').isVisible(), true)
+    assert.equal(await ui.originPublic.isVisible(), false)
+    assert.equal(count('POST', modePath), 0)
+    assert.equal(count('POST', caddyPath), 0)
+  })
+  cases++
+
   await withControl(browser, 'trusted networks stay disabled while pending and after failure', { holdTrusted: true }, async ({ page, state, ui, count, waitRequest, consumed, settle }) => {
     assert.equal(await ui.trustedSave.isDisabled(), true, 'Unread trusted networks allowed a save')
     assert.equal(await ui.trustedInput.isDisabled(), true, 'Unread trusted networks allowed editing')
