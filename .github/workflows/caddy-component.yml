@@ -2,9 +2,18 @@ name: Optional Caddy component build
 
 on:
   workflow_dispatch:
+    inputs:
+      publish_review_prerelease:
+        description: 'Publish fork TEST prerelease from an existing non-v component review tag after all native gates'
+        type: boolean
+        required: true
+        default: false
   pull_request:
     paths:
-      - 'scripts/build-caddy-component.mjs'
+      - 'scripts/*caddy*.mjs'
+      - 'scripts/caddy-component-lock.json'
+      - 'tests/helpers/caddy-component-fixture.ts'
+      - 'tests/helpers/caddy-release-fetch-preload.mjs'
       - '.github/workflows/caddy-component.yml'
       - 'src/caddy*.ts'
       - 'src/managed-origin.ts'
@@ -18,29 +27,47 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, ubuntu-latest]
+        include:
+          - os: windows-latest
+            target: win32-x64
+            executable: caddy.exe
+          - os: ubuntu-latest
+            target: linux-x64
+            executable: caddy
     runs-on: ${{ matrix.os }}
     timeout-minutes: 25
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: '24'
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version: '1.26.6'
           cache: false
       - name: Build pinned core and DNS module, verify metadata, collect licenses
         run: node scripts/build-caddy-component.mjs --output-dir "${{ runner.temp }}/caddy-component"
+      - name: Repeat build with independent compiler and module caches
+        run: node scripts/build-caddy-component.mjs --output-dir "${{ runner.temp }}/caddy-component-second"
+      - name: Compare native binary sizes and hashes
+        run: node scripts/compare-caddy-builds.mjs --first "${{ runner.temp }}/caddy-component" --second "${{ runner.temp }}/caddy-component-second" --target "${{ matrix.target }}"
       - name: Install test dependencies
         run: npm ci
       - name: Verify TLS, authenticated Gateway, API bytes and WebSockets through built Caddy
         env:
-          DSH_CADDY_TEST_EXECUTABLE: ${{ runner.temp }}/caddy-component/${{ runner.os == 'Windows' && 'caddy.exe' || 'caddy' }}
-        run: npx vitest run tests/caddy.test.ts tests/caddy-controller.test.ts tests/caddy-mode.test.ts tests/caddy-live.test.ts
-      - uses: actions/upload-artifact@v7
+          DSH_CADDY_TEST_EXECUTABLE: ${{ runner.temp }}/caddy-component/${{ matrix.executable }}
+          DSH_CADDY_TEST_MANIFEST: ${{ runner.temp }}/caddy-component/manifest.json
+        run: npx vitest run tests/caddy.test.ts tests/caddy-controller.test.ts tests/caddy-mode.test.ts tests/caddy-live.test.ts tests/caddy-build-inputs.test.ts tests/caddy-artifacts.test.ts tests/caddy-buffer-comparison.test.ts tests/caddy-publication.test.ts
+      - name: Install pinned pnpm for existing Windows updater smoke test
+        if: runner.os == 'Windows'
+        run: npm install --global pnpm@10.10.0
+      - name: Verify complete plugin regression suite without optional native inputs
+        run: npm test
+      - name: Verify plugin production build without publishing it
+        run: npm run build
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
-          name: managed-caddy-review-${{ runner.os }}
+          name: managed-caddy-review-${{ matrix.target }}
           path: |
             ${{ runner.temp }}/caddy-component/caddy*
             ${{ runner.temp }}/caddy-component/manifest.json
@@ -48,5 +75,68 @@ jobs:
             ${{ runner.temp }}/caddy-component/modules.txt
             ${{ runner.temp }}/caddy-component/go-build.json
             ${{ runner.temp }}/caddy-component/THIRD_PARTY_LICENSES.txt
+            ${{ runner.temp }}/caddy-component/reproducibility.json
+          if-no-files-found: error
+          retention-days: 14
+
+  publish-review-prerelease:
+    needs: caddy-review-artifact
+    # Explicit fork-only authorization; never PR events, branch dispatches, or official plugin tags.
+    if: github.event_name == 'workflow_dispatch' && inputs.publish_review_prerelease && github.repository == 'abworks-dev/dsh-mobile' && startsWith(github.ref, 'refs/tags/caddy-component-')
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: write
+    concurrency:
+      group: managed-caddy-review-${{ github.ref }}
+      cancel-in-progress: false
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      COMPONENT_TAG: ${{ github.ref_name }}
+      SOURCE_COMMIT: ${{ github.sha }}
+      RUN_ID: ${{ github.run_id }}
+      RUN_ATTEMPT: ${{ github.run_attempt }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: '24'
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          pattern: managed-caddy-review-*
+          path: ${{ runner.temp }}/native-inputs
+      - name: Prepare exact reviewed raw binaries, metadata and SHA256SUMS
+        run: node scripts/prepare-caddy-release.mjs --input-dir "$RUNNER_TEMP/native-inputs" --output-dir "$RUNNER_TEMP/component-release" --repository "$GH_REPO" --tag "$COMPONENT_TAG" --commit "$SOURCE_COMMIT" --run-id "$RUN_ID" --run-attempt "$RUN_ATTEMPT"
+      - name: Create new draft component prerelease without overwriting releases or assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(gh api "repos/$GH_REPO/commits/$COMPONENT_TAG" --jq '.sha')" = "$SOURCE_COMMIT"
+          # A successful lookup means occupied. Lookup failure is checked explicitly through the API.
+          status=$(gh api --include "repos/$GH_REPO/releases/tags/$COMPONENT_TAG" 2>&1) && { echo 'Release already exists; refusing overwrite'; exit 1; }
+          [[ "$status" =~ HTTP/[0-9.]+[[:space:]]+404[[:space:]] ]] || { echo 'Release availability lookup failed'; exit 1; }
+          printf '%s\n' 'TEST PRERELEASE — not an official dsh-mobile or Caddy release.' \
+            'Pinned Go/Caddy/Tencent DNS module. Windows and Linux x64 each built twice in private caches and passed isolated installer/TLS/API/WSS/restart/purge tests.' \
+            'TLS tests use a private internal CA without installing trust. Public DNS-01/ACME issuance and public ingress have NOT been tested.' \
+            'Production CADDY_COMPONENT_RELEASES remains disabled. SHA256SUMS and source/build/license evidence accompany the raw binaries.' \
+            'Versioned GitHub URLs are content-pinned, not a guarantee that repository owners cannot replace release assets.' \
+            "Source commit: $SOURCE_COMMIT; Actions run: $RUN_ID; attempt: $RUN_ATTEMPT." > "$RUNNER_TEMP/component-notes.md"
+          gh release create "$COMPONENT_TAG" --verify-tag --draft --prerelease --latest=false --title "Managed Caddy component TEST $COMPONENT_TAG" --notes-file "$RUNNER_TEMP/component-notes.md"
+          gh release upload "$COMPONENT_TAG" "$RUNNER_TEMP/component-release/"*
+          gh release download "$COMPONENT_TAG" --dir "$RUNNER_TEMP/draft-download"
+          diff -rq "$RUNNER_TEMP/component-release" "$RUNNER_TEMP/draft-download"
+      - name: Publish prerelease then verify actual installer HTTPS downloads and emit review-only catalog
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release edit "$COMPONENT_TAG" --draft=false --prerelease --latest=false
+          node scripts/verify-caddy-release.mjs --directory "$RUNNER_TEMP/draft-download" --repository "$GH_REPO" --tag "$COMPONENT_TAG" --commit "$SOURCE_COMMIT" --run-id "$RUN_ID" --run-attempt "$RUN_ATTEMPT" --candidate-output "$RUNNER_TEMP/caddy-review-catalog.json"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: managed-caddy-published-review-catalog
+          path: ${{ runner.temp }}/caddy-review-catalog.json
           if-no-files-found: error
           retention-days: 14
