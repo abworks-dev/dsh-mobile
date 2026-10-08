@@ -2,6 +2,14 @@
 
 Notable changes are recorded here. GitHub Releases provide the downloadable packages and generated commit notes.
 
+## 0.6.1 - 2026-10-08
+
+- Reorganize the remote HTTPS origin, external proxy and managed Caddy forms with native radio groups, responsive fields, separate actions and matching Chinese, English and Italian labels. Thanks @abworks-dev for [#184](https://github.com/saya-ch/dsh-mobile/pull/184).
+- Add pinned, reproducible Caddy review builds: Go 1.26.6, xcaddy 0.4.7, Caddy 2.11.6 and Tencent Cloud DNS 0.4.3, with locked source/dependency inputs, fresh private caches, two-build byte comparison and complete artifact checks. Isolated native Windows/Linux tests cover installation, restart, rollback, TLS, pairing, API, WebSocket and cleanup. Thanks @abworks-dev for [#185](https://github.com/saya-ch/dsh-mobile/pull/185); original author commits are retained alongside maintainer fixes.
+- Find Windows Git Bash from the active Git installation rather than a fixed path. Keep missing-shell, timeout and signal failures distinct from expected nonzero command exits, and prevent shell startup environment variables from changing test behavior.
+- Keep official managed Caddy installation disabled. Review builds and optional TEST prereleases do not enable the production component table or establish public DNS-01/ACME issuance and public-route readiness. Existing external proxies and remote providers are unchanged. See [Caddy status](docs/CADDY_MANAGED.en.md).
+- Synchronize Android release metadata to 0.6.1 (build 77). Native features and the pairing/renewal protocol are unchanged from 0.6.0; the official APK uses the established package and signer, preserving pairings on same-signer upgrades.
+
 ## 0.6.0 - 2026-10-07
 
 Add mobile page module management, Android launcher choices, fixed device ordering and improved scanning, alongside connection, layout and WebView compatibility fixes. Update the plugin and Android app together. Original community commits are preserved alongside maintainer fixes; see [Contributors](CONTRIBUTORS.md).

@@ -6,7 +6,11 @@ DeepSeek Harness is the display name of this lightweight, community-maintained A
 
 Android is the only supported native target. The iOS client remains an unpublished local experiment and is outside the build, release, and support scope.
 
-The current stable app is **0.6.0**. Install the signed GitHub Release APK and update it with the plugin. Older official APKs with the same signer retain pairing during in-place upgrades; a differently signed Debug build cannot overwrite the official app.
+The current stable app is **0.6.1** (build 77). Install the signed GitHub Release APK and update it with the plugin. Older official APKs with the same signer retain pairing during in-place upgrades; a differently signed Debug build cannot overwrite the official app.
+
+## 0.6.1 update
+
+The app is rebuilt with matching release metadata. Native functionality, package identity and pairing/renewal protocol are unchanged from 0.6.0, using the established release signer. This release improves the computer-side remote settings and Caddy build/test tooling; it does not enable official managed Caddy installation. See the [release summary](../../README.en.md#061-update).
 
 ## 0.6.0 updates
 
